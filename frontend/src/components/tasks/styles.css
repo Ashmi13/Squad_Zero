@@ -1,0 +1,305 @@
+﻿/* RESET */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* ZEN CONTAINER - FULL HEIGHT */
+.zen-container {
+  width: 100vw;
+  height: 100vh;
+  background: linear-gradient(135deg, #F5F7F0 0%, #E8EDE0 100%);
+  padding: 20px;
+  overflow: hidden;
+}
+
+/* 3-COLUMN GRID LAYOUT */
+.zen-grid {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  grid-template-columns: 260px 1fr 320px;
+  gap: 20px;
+}
+
+/* ======== LEFT SIDEBAR ======== */
+.zen-sidebar {
+  background-color: #FFFFFF !important;
+  border: 1px solid rgba(107, 123, 63, 0.15) !important;
+  border-radius: 16px !important;
+  padding: 24px 16px !important;
+  box-shadow: 0 2px 8px rgba(107, 123, 63, 0.08) !important;
+  overflow-y: auto;
+}
+
+.sidebar-title {
+  color: #5A6B47 !important;
+  font-weight: 700 !important;
+  font-size: 0.75rem !important;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 16px !important;
+  padding-left: 12px;
+}
+
+.list-selector {
+  padding: 0 !important;
+}
+
+.list-item {
+  border-radius: 10px !important;
+  margin-bottom: 6px !important;
+  transition: all 0.2s !important;
+}
+
+.list-item:hover {
+  background-color: rgba(107, 123, 63, 0.08) !important;
+}
+
+.list-item.Mui-selected {
+  background-color: rgba(107, 123, 63, 0.15) !important;
+  border-left: 3px solid #6B7B3F;
+}
+
+.list-icon {
+  color: #6B7B3F !important;
+  min-width: 40px !important;
+}
+
+.list-item .MuiListItemText-primary {
+  color: #2C3E1F !important;
+  font-weight: 600 !important;
+  font-size: 0.95rem !important;
+}
+
+.list-item .MuiListItemText-secondary {
+  color: #7A8F6B !important;
+  font-size: 0.8rem !important;
+}
+
+/* ======== CENTER - MAIN TASKS ======== */
+.zen-main {
+  background-color: #FFFFFF !important;
+  border: 1px solid rgba(107, 123, 63, 0.15) !important;
+  border-radius: 16px !important;
+  padding: 32px !important;
+  box-shadow: 0 2px 8px rgba(107, 123, 63, 0.08) !important;
+  overflow-y: auto;
+}
+
+/* ======== RIGHT PANEL ======== */
+.zen-right {
+  background-color: #FFFFFF !important;
+  border: 1px solid rgba(107, 123, 63, 0.15) !important;
+  border-radius: 16px !important;
+  padding: 24px !important;
+  box-shadow: 0 2px 8px rgba(107, 123, 63, 0.08) !important;
+  overflow-y: auto;
+}
+
+.panel-title {
+  color: #5A6B47 !important;
+  font-weight: 700 !important;
+  font-size: 0.75rem !important;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 20px !important;
+}
+
+.calendar-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 300px;
+  border-radius: 12px;
+  border: 2px dashed rgba(107, 123, 63, 0.2);
+  background-color: rgba(107, 123, 63, 0.03);
+}
+
+.placeholder-text {
+  color: #7A8F6B !important;
+  font-size: 0.875rem;
+}
+
+/* ======== TASK LIST ======== */
+.task-list {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.task-list-header {
+  margin-bottom: 24px;
+}
+
+.header-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.list-title {
+  color: #2C3E1F !important;
+  font-weight: 700 !important;
+  font-size: 1.75rem !important;
+}
+
+.task-counter {
+  background-color: rgba(107, 123, 63, 0.12) !important;
+  color: #4A5A2D !important;
+  font-weight: 700 !important;
+  font-size: 0.875rem !important;
+  border: 1px solid rgba(107, 123, 63, 0.25) !important;
+}
+
+.progress-section {
+  margin-bottom: 12px;
+}
+
+.progress-bar {
+  height: 6px !important;
+  border-radius: 6px !important;
+  background-color: rgba(107, 123, 63, 0.12) !important;
+}
+
+.progress-bar .MuiLinearProgress-bar {
+  border-radius: 6px !important;
+  background: linear-gradient(90deg, #6B7B3F, #8B9B5F) !important;
+}
+
+.progress-text {
+  color: #5A6B47 !important;
+  font-size: 0.8rem !important;
+}
+
+.list-description {
+  color: #5A6B47 !important;
+  font-size: 0.9rem !important;
+}
+
+/* ADD TASK INPUT */
+.add-task-input {
+  margin-bottom: 24px !important;
+}
+
+.add-task-input .MuiOutlinedInput-root {
+  background-color: #FAFBF8 !important;
+  border-radius: 12px !important;
+}
+
+.add-task-input .MuiOutlinedInput-root fieldset {
+  border-color: rgba(107, 123, 63, 0.2) !important;
+}
+
+.add-task-input .MuiOutlinedInput-root:hover fieldset {
+  border-color: #6B7B3F !important;
+}
+
+.add-task-input .MuiOutlinedInput-root.Mui-focused fieldset {
+  border-color: #6B7B3F !important;
+  border-width: 2px !important;
+}
+
+.add-icon {
+  margin-right: 10px;
+  color: #6B7B3F !important;
+}
+
+/* TASKS CONTAINER */
+.tasks-container {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.tasks-container::-webkit-scrollbar {
+  width: 6px;
+}
+
+.tasks-container::-webkit-scrollbar-thumb {
+  background-color: rgba(107, 123, 63, 0.3);
+  border-radius: 10px;
+}
+
+/* TASK ITEM */
+.task-item {
+  display: flex;
+  align-items: center;
+  padding: 14px 16px;
+  margin-bottom: 8px;
+  border-radius: 10px;
+  background-color: #FAFBF8;
+  border: 1.5px solid rgba(107, 123, 63, 0.15);
+  transition: all 0.2s;
+  position: relative;
+}
+
+.task-item::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: #6B7B3F;
+  transform: scaleY(0);
+  transition: transform 0.2s;
+}
+
+.task-item:hover::before {
+  transform: scaleY(1);
+}
+
+.task-item.completed {
+  background-color: rgba(107, 123, 63, 0.05);
+}
+
+.task-item.completed::before {
+  transform: scaleY(1);
+}
+
+.task-checkbox {
+  color: #6B7B3F !important;
+}
+
+.task-title {
+  flex: 1;
+  margin-left: 12px !important;
+  font-weight: 500 !important;
+  color: #2C3E1F !important;
+}
+
+.task-item.completed .task-title {
+  text-decoration: line-through;
+  color: #7A8F6B !important;
+  opacity: 0.7;
+}
+
+.delete-button {
+  color: #7A8F6B !important;
+  opacity: 0.6;
+}
+
+.delete-button:hover {
+  color: #C85A54 !important;
+  opacity: 1;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 48px 24px;
+  border-radius: 12px;
+  border: 2px dashed rgba(107, 123, 63, 0.2);
+  background-color: rgba(107, 123, 63, 0.03);
+}
+
+.empty-message {
+  color: #5A6B47 !important;
+  font-weight: 600 !important;
+}
+
+.empty-hint {
+  color: #7A8F6B !important;
+  font-size: 0.875rem !important;
+}

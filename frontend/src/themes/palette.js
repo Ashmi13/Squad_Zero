@@ -1,54 +1,65 @@
-﻿export const palette = {
-  mode: 'light',
+﻿/**
+ * NeuraNote Team Color Palette
+ * Indigo-Pink Dark Theme
+ */
+
+export const palette = {
+  mode: 'dark',  // Dark theme like team
   
+  // Primary - Indigo
   primary: {
-    main: '#6B7B3F',
-    light: '#8B9B5F',
-    dark: '#4A5A2D',
+    main: '#6366f1',
+    light: '#818cf8',
+    dark: '#4f46e5',
     contrastText: '#FFFFFF',
   },
   
+  // Secondary - Pink
   secondary: {
-    main: '#9CAF6B',
-    light: '#B8C77D',
-    dark: '#7A8F4F',
+    main: '#ec4899',
+    light: '#f472b6',
+    dark: '#db2777',
     contrastText: '#FFFFFF',
   },
   
+  // Background - Dark blue-black
   background: {
-    default: '#F5F7F0',
-    paper: '#FFFFFF',
+    default: '#0b0f19',
+    paper: '#111827',
   },
   
+  // Text colors
   text: {
-    primary: '#2C3E1F',
-    secondary: '#5A6B47',
-    disabled: '#ADB5A3',
+    primary: '#f3f4f6',
+    secondary: '#9ca3af',
+    disabled: '#6b7280',
   },
   
+  // Status colors
   success: {
-    main: '#6B7B3F',
-    light: '#8B9B5F',
-    dark: '#4A5A2D',
+    main: '#10b981',
+    light: '#34d399',
+    dark: '#059669',
   },
   
   error: {
-    main: '#C85A54',
-    light: '#D87B76',
-    dark: '#A84842',
+    main: '#ef4444',
+    light: '#f87171',
+    dark: '#dc2626',
   },
   
   warning: {
-    main: '#D4A857',
-    light: '#E4C179',
-    dark: '#B89045',
+    main: '#f59e0b',
+    light: '#fbbf24',
+    dark: '#d97706',
   },
   
   info: {
-    main: '#6B7B3F',
-    light: '#8B9B5F',
-    dark: '#4A5A2D',
+    main: '#6366f1',
+    light: '#818cf8',
+    dark: '#4f46e5',
   },
   
-  divider: 'rgba(107, 123, 63, 0.12)',
+  // Dividers
+  divider: 'rgba(255, 255, 255, 0.1)',
 };

@@ -1,4 +1,9 @@
-﻿/* RESET */
+﻿/* ========================================
+   NEURANOTE TEAM THEME - TASK MODULE
+   Indigo-Pink Dark Theme
+   ======================================== */
+
+/* RESET */
 * {
   margin: 0;
   padding: 0;
@@ -9,7 +14,11 @@
 .zen-container {
   width: 100vw;
   height: 100vh;
-  background: linear-gradient(135deg, #F5F7F0 0%, #E8EDE0 100%);
+  background-color: #0b0f19;
+  background-image:
+    radial-gradient(circle at 15% 50%, rgba(99, 102, 241, 0.08) 0%, transparent 25%),
+    radial-gradient(circle at 85% 30%, rgba(236, 72, 153, 0.08) 0%, transparent 25%);
+  background-attachment: fixed;
   padding: 20px;
   overflow: hidden;
 }
@@ -25,16 +34,17 @@
 
 /* ======== LEFT SIDEBAR ======== */
 .zen-sidebar {
-  background-color: #FFFFFF !important;
-  border: 1px solid rgba(107, 123, 63, 0.15) !important;
+  background-color: #111827 !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
   border-radius: 16px !important;
   padding: 24px 16px !important;
-  box-shadow: 0 2px 8px rgba(107, 123, 63, 0.08) !important;
+  box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.3) !important;
   overflow-y: auto;
+  backdrop-filter: blur(12px);
 }
 
 .sidebar-title {
-  color: #5A6B47 !important;
+  color: #9ca3af !important;
   font-weight: 700 !important;
   font-size: 0.75rem !important;
   text-transform: uppercase;
@@ -48,58 +58,62 @@
 }
 
 .list-item {
-  border-radius: 10px !important;
+  border-radius: 16px !important;
   margin-bottom: 6px !important;
   transition: all 0.2s !important;
+  border-left: 3px solid transparent;
 }
 
 .list-item:hover {
-  background-color: rgba(107, 123, 63, 0.08) !important;
+  background-color: #1f2937 !important;
 }
 
 .list-item.Mui-selected {
-  background-color: rgba(107, 123, 63, 0.15) !important;
-  border-left: 3px solid #6B7B3F;
+  background-color: rgba(99, 102, 241, 0.1) !important;
+  border-left-color: #6366f1;
+  color: #fff !important;
 }
 
 .list-icon {
-  color: #6B7B3F !important;
+  color: #6366f1 !important;
   min-width: 40px !important;
 }
 
 .list-item .MuiListItemText-primary {
-  color: #2C3E1F !important;
+  color: #f3f4f6 !important;
   font-weight: 600 !important;
   font-size: 0.95rem !important;
 }
 
 .list-item .MuiListItemText-secondary {
-  color: #7A8F6B !important;
+  color: #9ca3af !important;
   font-size: 0.8rem !important;
 }
 
 /* ======== CENTER - MAIN TASKS ======== */
 .zen-main {
-  background-color: #FFFFFF !important;
-  border: 1px solid rgba(107, 123, 63, 0.15) !important;
+  background-color: #111827 !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
   border-radius: 16px !important;
   padding: 32px !important;
-  box-shadow: 0 2px 8px rgba(107, 123, 63, 0.08) !important;
+  box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.3) !important;
   overflow-y: auto;
+  backdrop-filter: blur(12px);
 }
 
 /* ======== RIGHT PANEL ======== */
 .zen-right {
-  background-color: #FFFFFF !important;
-  border: 1px solid rgba(107, 123, 63, 0.15) !important;
+  background-color: #111827 !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
   border-radius: 16px !important;
   padding: 24px !important;
-  box-shadow: 0 2px 8px rgba(107, 123, 63, 0.08) !important;
+  box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.3) !important;
   overflow-y: auto;
+  backdrop-filter: blur(12px);
 }
 
 .panel-title {
-  color: #5A6B47 !important;
+  color: #9ca3af !important;
   font-weight: 700 !important;
   font-size: 0.75rem !important;
   text-transform: uppercase;
@@ -113,12 +127,12 @@
   justify-content: center;
   height: 300px;
   border-radius: 12px;
-  border: 2px dashed rgba(107, 123, 63, 0.2);
-  background-color: rgba(107, 123, 63, 0.03);
+  border: 2px dashed rgba(99, 102, 241, 0.3);
+  background-color: rgba(99, 102, 241, 0.05);
 }
 
 .placeholder-text {
-  color: #7A8F6B !important;
+  color: #9ca3af !important;
   font-size: 0.875rem;
 }
 
@@ -141,17 +155,20 @@
 }
 
 .list-title {
-  color: #2C3E1F !important;
+  color: #f3f4f6 !important;
   font-weight: 700 !important;
   font-size: 1.75rem !important;
+  background: linear-gradient(135deg, #f3f4f6, #9ca3af);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .task-counter {
-  background-color: rgba(107, 123, 63, 0.12) !important;
-  color: #4A5A2D !important;
+  background-color: rgba(99, 102, 241, 0.2) !important;
+  color: #818cf8 !important;
   font-weight: 700 !important;
   font-size: 0.875rem !important;
-  border: 1px solid rgba(107, 123, 63, 0.25) !important;
+  border: 1px solid rgba(99, 102, 241, 0.3) !important;
 }
 
 .progress-section {
@@ -160,22 +177,22 @@
 
 .progress-bar {
   height: 6px !important;
-  border-radius: 6px !important;
-  background-color: rgba(107, 123, 63, 0.12) !important;
+  border-radius: 4px !important;
+  background-color: rgba(99, 102, 241, 0.2) !important;
 }
 
 .progress-bar .MuiLinearProgress-bar {
-  border-radius: 6px !important;
-  background: linear-gradient(90deg, #6B7B3F, #8B9B5F) !important;
+  border-radius: 4px !important;
+  background: linear-gradient(90deg, #6366f1, #ec4899) !important;
 }
 
 .progress-text {
-  color: #5A6B47 !important;
+  color: #9ca3af !important;
   font-size: 0.8rem !important;
 }
 
 .list-description {
-  color: #5A6B47 !important;
+  color: #9ca3af !important;
   font-size: 0.9rem !important;
 }
 
@@ -185,26 +202,26 @@
 }
 
 .add-task-input .MuiOutlinedInput-root {
-  background-color: #FAFBF8 !important;
-  border-radius: 12px !important;
+  background-color: rgba(0, 0, 0, 0.2) !important;
+  border-radius: 16px !important;
 }
 
 .add-task-input .MuiOutlinedInput-root fieldset {
-  border-color: rgba(107, 123, 63, 0.2) !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
 }
 
 .add-task-input .MuiOutlinedInput-root:hover fieldset {
-  border-color: #6B7B3F !important;
+  border-color: #6366f1 !important;
 }
 
 .add-task-input .MuiOutlinedInput-root.Mui-focused fieldset {
-  border-color: #6B7B3F !important;
-  border-width: 2px !important;
+  border-color: #6366f1 !important;
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.4);
 }
 
 .add-icon {
   margin-right: 10px;
-  color: #6B7B3F !important;
+  color: #6366f1 !important;
 }
 
 /* TASKS CONTAINER */
@@ -218,8 +235,12 @@
 }
 
 .tasks-container::-webkit-scrollbar-thumb {
-  background-color: rgba(107, 123, 63, 0.3);
+  background-color: rgba(255, 255, 255, 0.1);
   border-radius: 10px;
+}
+
+.tasks-container::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.2);
 }
 
 /* TASK ITEM */
@@ -228,9 +249,9 @@
   align-items: center;
   padding: 14px 16px;
   margin-bottom: 8px;
-  border-radius: 10px;
-  background-color: #FAFBF8;
-  border: 1.5px solid rgba(107, 123, 63, 0.15);
+  border-radius: 12px;
+  background-color: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   transition: all 0.2s;
   position: relative;
 }
@@ -242,9 +263,14 @@
   top: 0;
   bottom: 0;
   width: 3px;
-  background: #6B7B3F;
+  background: linear-gradient(180deg, #6366f1, #ec4899);
   transform: scaleY(0);
   transition: transform 0.2s;
+}
+
+.task-item:hover {
+  background-color: #1f2937;
+  border-color: rgba(99, 102, 241, 0.3);
 }
 
 .task-item:hover::before {
@@ -252,7 +278,8 @@
 }
 
 .task-item.completed {
-  background-color: rgba(107, 123, 63, 0.05);
+  background-color: rgba(99, 102, 241, 0.05);
+  border-color: rgba(99, 102, 241, 0.2);
 }
 
 .task-item.completed::before {
@@ -260,46 +287,51 @@
 }
 
 .task-checkbox {
-  color: #6B7B3F !important;
+  color: #6366f1 !important;
+}
+
+.task-checkbox.Mui-checked {
+  color: #6366f1 !important;
 }
 
 .task-title {
   flex: 1;
   margin-left: 12px !important;
   font-weight: 500 !important;
-  color: #2C3E1F !important;
+  color: #f3f4f6 !important;
 }
 
 .task-item.completed .task-title {
   text-decoration: line-through;
-  color: #7A8F6B !important;
+  color: #9ca3af !important;
   opacity: 0.7;
 }
 
 .delete-button {
-  color: #7A8F6B !important;
+  color: #9ca3af !important;
   opacity: 0.6;
 }
 
 .delete-button:hover {
-  color: #C85A54 !important;
+  color: #ef4444 !important;
   opacity: 1;
+  background-color: rgba(239, 68, 68, 0.1) !important;
 }
 
 .empty-state {
   text-align: center;
   padding: 48px 24px;
   border-radius: 12px;
-  border: 2px dashed rgba(107, 123, 63, 0.2);
-  background-color: rgba(107, 123, 63, 0.03);
+  border: 2px dashed rgba(99, 102, 241, 0.3);
+  background-color: rgba(99, 102, 241, 0.05);
 }
 
 .empty-message {
-  color: #5A6B47 !important;
+  color: #9ca3af !important;
   font-weight: 600 !important;
 }
 
 .empty-hint {
-  color: #7A8F6B !important;
+  color: #6b7280 !important;
   font-size: 0.875rem !important;
 }

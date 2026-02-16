@@ -1,0 +1,159 @@
+.sidebar {
+    width: 250px;
+    background-color: var(--bg-sidebar);
+    height: 100vh;
+    padding: 30px 20px;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--border-color);
+    position: fixed;
+    left: 0;
+    top: 0;
+}
+
+.logo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-weight: 700;
+    font-size: 18px;
+    color: var(--text-main);
+    margin-bottom: 40px;
+}
+
+.logoIcon {
+    width: 32px;
+    height: 32px;
+    background-color: var(--primary);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+}
+
+.nav {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.navItem {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    padding: 12px 15px;
+    border-radius: 12px;
+    color: var(--secondary);
+    font-weight: 500;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+}
+
+.navItem:hover {
+    background-color: var(--bg-main);
+    color: var(--primary);
+}
+
+.navItem.active {
+    background-color: #F2efff;
+    /* Light purple tint */
+    color: var(--primary);
+}
+
+.navItem .icon {
+    opacity: 0.8;
+}
+
+.navItem.active .icon {
+    opacity: 1;
+}
+
+.activeIndicator {
+    position: absolute;
+    right: -20px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 4px;
+    height: 20px;
+    background-color: var(--primary);
+    border-radius: 4px 0 0 4px;
+    display: none;
+    /* Hidden based on image, looks like full highlight */
+}
+
+.spacer {
+    flex: 1;
+}
+
+.storageWidget {
+    background: var(--gradient-storage);
+    padding: 20px;
+    border-radius: 16px;
+    color: white;
+    margin-bottom: 30px;
+}
+
+.storageHeader {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+    font-weight: 600;
+}
+
+.storageBar {
+    height: 6px;
+    background-color: rgba(255, 255, 255, 0.3);
+    border-radius: 3px;
+    margin-bottom: 10px;
+    overflow: hidden;
+}
+
+.storageFill {
+    height: 100%;
+    background-color: white;
+    border-radius: 3px;
+}
+
+.storageText {
+    font-size: 12px;
+    opacity: 0.8;
+}
+
+.profile {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border-color);
+}
+
+.avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    object-fit: cover;
+}
+
+.profileInfo {
+    flex: 1;
+}
+
+.name {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-main);
+}
+
+.plan {
+    font-size: 11px;
+    color: var(--secondary);
+}
+
+.settingsIcon {
+    color: var(--secondary);
+    cursor: pointer;
+}

@@ -1,0 +1,121 @@
+.overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+}
+
+.modal {
+    background-color: white;
+    width: 400px;
+    border-radius: 16px;
+    padding: 25px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+}
+
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.header h3 {
+    font-size: 18px;
+    margin: 0;
+}
+
+.closeBtn {
+    font-size: 24px;
+    color: var(--secondary);
+    line-height: 1;
+}
+
+.createSection {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+.input {
+    flex: 1;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    font-family: inherit;
+}
+
+.createBtn {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    background-color: var(--bg-main);
+    color: var(--text-main);
+    padding: 0 15px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.folderList {
+    max-height: 300px;
+    overflow-y: auto;
+    margin-bottom: 20px;
+}
+
+.folderItem {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.2s;
+    border: 1px solid transparent;
+    margin-bottom: 5px;
+}
+
+.folderItem:hover {
+    background-color: var(--bg-main);
+    border-color: var(--border-color);
+}
+
+.folderItem.selected {
+    background-color: var(--primary);
+    color: white;
+}
+
+.folderIcon {
+    display: flex;
+    align-items: center;
+}
+
+.checkIcon {
+    margin-left: auto;
+}
+
+.footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+.cancelBtn {
+    padding: 10px 20px;
+    color: var(--secondary);
+    font-weight: 600;
+}
+
+.confirmBtn {
+    background-color: var(--primary);
+    color: white;
+    padding: 10px 24px;
+    border-radius: 10px;
+    font-weight: 600;
+}

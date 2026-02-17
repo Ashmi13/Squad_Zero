@@ -17,7 +17,7 @@ import { generateNote, refineText } from '../api';
 // --- CONFIGURATION ---
 // Set to TRUE for full AI features (Final)
 // Set to FALSE for manual-only mode (Interim Demo)
-const ENABLE_AI = false;
+const ENABLE_AI = true;
 
 const NoteEditor = () => {
     const { noteId } = useParams();

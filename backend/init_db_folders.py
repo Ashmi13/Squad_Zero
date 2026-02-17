@@ -15,7 +15,11 @@ def init_db():
         )
         cur = conn.cursor()
 
-        # 0. Create notes table if not exists (adding this because original backend might assume it exists)
+        # 0. Enable pgvector extension
+        print("Enabling 'vector' extension...")
+        cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+
+        # 1. Create notes table if not exists
         print("Creating 'notes' table if not exists...")
         cur.execute("""
             CREATE TABLE IF NOT EXISTS notes (
@@ -27,11 +31,12 @@ def init_db():
                 updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 note_type VARCHAR(50),
                 is_in_folder BOOLEAN DEFAULT FALSE,
-                has_embeddings BOOLEAN DEFAULT FALSE
+                has_embeddings BOOLEAN DEFAULT FALSE,
+                folder_id UUID -- Ensure column exists in create statement for fresh installs
             );
         """)
 
-        # 1. Create folders table
+        # 2. Create folders table
         print("Creating 'folders' table...")
         cur.execute("""
             CREATE TABLE IF NOT EXISTS folders (
@@ -43,7 +48,27 @@ def init_db():
             );
         """)
 
-        # 2. Add folder_id to notes table if it doesn't exist
+        # 3. Create document_chunks table for pgvector
+        print("Creating 'document_chunks' table...")
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS document_chunks (
+                id UUID PRIMARY KEY,
+                pdf_id VARCHAR(255) NOT NULL,
+                chunk_index INTEGER NOT NULL,
+                content TEXT NOT NULL,
+                embedding vector(384), -- Dimension for all-MiniLM-L6-v2
+                metadata JSONB
+            );
+        """)
+        
+        # Create an HNSW index for faster similarity search
+        print("Creating HNSW index on document_chunks...")
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS document_chunks_embedding_idx 
+            ON document_chunks USING hnsw (embedding vector_cosine_ops);
+        """)
+
+        # 4. Add folder_id to notes table if it doesn't exist (Migration step for existing DBs)
         print("Checking 'notes' table for 'folder_id' column...")
         cur.execute("""
             DO $$

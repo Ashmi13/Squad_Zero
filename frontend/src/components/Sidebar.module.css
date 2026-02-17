@@ -1,159 +1,189 @@
-.sidebar {
-    width: 250px;
-    background-color: var(--bg-sidebar);
-    height: 100vh;
-    padding: 30px 20px;
+.sidebarContainer {
     display: flex;
-    flex-direction: column;
-    border-right: 1px solid var(--border-color);
+    height: 100vh;
     position: fixed;
     left: 0;
     top: 0;
+    z-index: 100;
+    background-color: white;
+    border-right: 1px solid var(--border-color);
 }
 
-.logo {
+/* --- Icon Rail (Left) --- */
+.iconRail {
+    width: 70px;
+    height: 100%;
+    background-color: #F7F7F7;
+    /* Light grey rail background */
     display: flex;
+    flex-direction: column;
     align-items: center;
-    gap: 12px;
-    font-weight: 700;
-    font-size: 18px;
-    color: var(--text-main);
+    padding: 20px 0;
+    border-right: 1px solid #E0E0E0;
+}
+
+.railLogo {
     margin-bottom: 40px;
 }
 
-.logoIcon {
-    width: 32px;
-    height: 32px;
-    background-color: var(--primary);
-    border-radius: 8px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: white;
-}
-
-.nav {
+.railActions {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-}
-
-.navItem {
-    display: flex;
-    align-items: center;
-    gap: 15px;
-    padding: 12px 15px;
-    border-radius: 12px;
-    color: var(--secondary);
-    font-weight: 500;
-    font-size: 14px;
-    cursor: pointer;
-    transition: all 0.2s;
-    position: relative;
-}
-
-.navItem:hover {
-    background-color: var(--bg-main);
-    color: var(--primary);
-}
-
-.navItem.active {
-    background-color: #F2efff;
-    /* Light purple tint */
-    color: var(--primary);
-}
-
-.navItem .icon {
-    opacity: 0.8;
-}
-
-.navItem.active .icon {
-    opacity: 1;
-}
-
-.activeIndicator {
-    position: absolute;
-    right: -20px;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 4px;
-    height: 20px;
-    background-color: var(--primary);
-    border-radius: 4px 0 0 4px;
-    display: none;
-    /* Hidden based on image, looks like full highlight */
-}
-
-.spacer {
+    gap: 30px;
     flex: 1;
 }
 
-.storageWidget {
-    background: var(--gradient-storage);
-    padding: 20px;
-    border-radius: 16px;
-    color: white;
-    margin-bottom: 30px;
+.railItem {
+    color: #8E92BC;
+    cursor: pointer;
+    padding: 10px;
+    border-radius: 12px;
+    transition: all 0.2s;
 }
 
-.storageHeader {
+.railItem:hover,
+.activeRail {
+    color: #6C5DD3;
+    /* Primary Purple */
+    background-color: rgba(108, 93, 211, 0.1);
+}
+
+.railFooter {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    align-items: center;
+}
+
+.avatar img {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 2px solid white;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+}
+
+.railIcon {
+    color: #8E92BC;
+    cursor: pointer;
+}
+
+/* --- Nav Panel (Right) --- */
+.navPanel {
+    width: 250px;
+    height: 100%;
+    background-color: white;
+    padding: 25px;
+    display: flex;
+    flex-direction: column;
+}
+
+.panelHeader {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 15px;
-    font-weight: 600;
+    margin-bottom: 25px;
+}
+
+.panelHeader h3 {
+    font-size: 16px;
+    font-weight: 700;
+    color: #1B1D21;
+}
+
+.addBtn {
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    background-color: #F0F0F0;
+    border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: #666;
+}
+
+.fileTree {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.nodeLabel {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 0;
+    cursor: pointer;
+    color: #5A5E6D;
+    font-size: 14px;
+    font-weight: 500;
+    border-radius: 6px;
+}
+
+.nodeLabel:hover {
+    background-color: #F9F9F9;
+}
+
+.folderIcon {
+    font-size: 16px;
+}
+
+.fileNode {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 0;
+    cursor: pointer;
+    color: #5A5E6D;
+    font-size: 13px;
+}
+
+.fileNode:hover {
+    color: #6C5DD3;
+}
+
+.fileIcon {
+    font-size: 12px;
+}
+
+/* Storage Widget in Nav Panel */
+.storageWidget {
+    background: #F8F9FD;
+    padding: 15px;
+    border-radius: 12px;
+    margin-top: 20px;
+}
+
+.storageText {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 10px;
+    font-size: 13px;
+    color: #5A5E6D;
 }
 
 .storageBar {
     height: 6px;
-    background-color: rgba(255, 255, 255, 0.3);
+    background-color: #E0E0E0;
     border-radius: 3px;
     margin-bottom: 10px;
     overflow: hidden;
 }
 
 .storageFill {
+    background-color: #6C5DD3;
     height: 100%;
-    background-color: white;
     border-radius: 3px;
 }
 
-.storageText {
+.upgradeBtn {
+    text-align: center;
     font-size: 12px;
-    opacity: 0.8;
-}
-
-.profile {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding-top: 20px;
-    border-top: 1px solid var(--border-color);
-}
-
-.avatar {
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    object-fit: cover;
-}
-
-.profileInfo {
-    flex: 1;
-}
-
-.name {
-    font-size: 14px;
     font-weight: 600;
-    color: var(--text-main);
-}
-
-.plan {
-    font-size: 11px;
-    color: var(--secondary);
-}
-
-.settingsIcon {
-    color: var(--secondary);
+    color: #6C5DD3;
     cursor: pointer;
 }

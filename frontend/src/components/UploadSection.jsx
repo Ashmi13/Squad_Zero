@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { CloudUpload, FolderOpen, Plus, Loader2 } from 'lucide-react';
+import { CloudUpload, FolderOpen, Plus, Loader2, FileText } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import styles from './UploadSection.module.css';
-import { uploadPDF, generateNote } from '../api';
+import { uploadPDF, createNote } from '../api';
 
 const UploadSection = () => {
     const navigate = useNavigate();
@@ -10,42 +10,38 @@ const UploadSection = () => {
     const [uploadStatus, setUploadStatus] = useState(''); // 'uploading', 'processing', 'generating'
 
     const handleFileUpload = async (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
+        const files = e.target.files; // FileList
+        if (!files || files.length === 0) return;
 
         try {
             setIsUploading(true);
-            setUploadStatus('Uploading PDF...');
+            setUploadStatus(`Processing ${files.length} file(s)...`);
 
-            // 1. Upload
-            const uploadResult = await uploadPDF(file);
+            // 1. Upload All Files
+            const uploadResult = await uploadPDF(files);
             console.log("Upload result:", uploadResult);
 
             if (uploadResult.pdf_id) {
-                // SKIP AI GENERATION for Interim Manual Mode
-                // Use the text extracted directly by the backend
-
-                const noteId = Date.now().toString(); // Generate a temp ID for the session
-
-                // Clean up the extracted text: 
-                // PDF extraction often adds newlines at the end of every line (hard wrapping).
                 let rawText = uploadResult.extracted_text || "";
 
-                // 1. Unify line endings to \n
+                // Clean text
                 let cleanText = rawText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-
-                // 2. Join lines that are likely part of the same paragraph:
-                // Replace "word\nword" with "word word".
-                // Keep "word\n\nword" as TWO newlines (paragraph break).
                 cleanText = cleanText.replace(/([^\n])\n(?=[^\n])/g, '$1 ');
 
-                // Store note in local storage for the editor
+                const title = uploadResult.filename || "Untitled Note";
+                const userId = "test_user";
+
+                // 2. CREATE NOTE IN DB IMMEDIATELY
+                const createResult = await createNote(userId, title, cleanText, uploadResult.pdf_id);
+                console.log("Initial Note Created in DB:", createResult);
+                const noteId = createResult.note_id;
+
                 localStorage.setItem('currentNote', JSON.stringify({
                     content: cleanText,
-                    pdfId: uploadResult.pdf_id,
-                    pdfUrl: uploadResult.pdf_url, // Store the URL for the viewer
+                    pdfId: uploadResult.pdf_id, // Primary PDF for viewer
+                    pdfUrl: uploadResult.pdf_url,
                     noteId: noteId,
-                    filename: uploadResult.filename
+                    filename: title
                 }));
 
                 navigate(`/editor/${noteId}`);
@@ -53,7 +49,7 @@ const UploadSection = () => {
 
         } catch (error) {
             console.error("Error flow:", error);
-            alert("Failed to process file. Check console for details.");
+            alert("Failed to process files. Check console for details.");
             setUploadStatus('');
         } finally {
             setIsUploading(false);
@@ -61,35 +57,36 @@ const UploadSection = () => {
     };
 
     return (
-        <div className={styles.container}>
-            <div className={styles.uploadArea}>
-                <div className={styles.cloudIconContainer}>
-                    {isUploading ? <Loader2 size={32} color="white" className={styles.spinner} /> : <CloudUpload size={32} color="white" />}
+        <div className={styles.wrapper}>
+            {/* Member 3: Structured Note Generation (Sole Focus) */}
+            <div className={`${styles.uploadCard} ${styles.cardPurple}`} style={{ maxWidth: '800px', margin: '0 auto', padding: '60px 40px' }}>
+                <div className={styles.iconCirclePurple} style={{ width: '80px', height: '80px', marginBottom: '24px' }}>
+                    <FileText size={40} color="white" />
                 </div>
+                <h2 className={styles.textPurple} style={{ fontSize: '28px', marginBottom: '12px' }}>Generate Structured Note</h2>
+                <p style={{ fontSize: '16px', color: '#666', marginBottom: '40px' }}>
+                    Upload your study materials (PDF) to generate an AI-organized study guide.
+                    <br />
+                    Select multiple files to create a comprehensive note.
+                </p>
 
-                <h2>{isUploading ? uploadStatus : "Upload Your Study Materials"}</h2>
-                <p>Drag and drop your files here, or click to browse. Supports PDF, DOCX, PPT, and more.</p>
-
-                <div className={styles.buttons}>
-                    <label className={styles.chooseFilesBtn}>
+                <div className={styles.buttonRow} style={{ justifyContent: 'center' }}>
+                    <label className={styles.btnPurple} style={{ padding: '16px 32px', fontSize: '18px' }}>
+                        <Plus size={24} />
                         <input
                             type="file"
-                            accept=".pdf" // Limit to PDF for now as backend supports PDF
+                            accept=".pdf"
+                            multiple // Enable multiple file selection
                             onChange={handleFileUpload}
                             style={{ display: 'none' }}
                             disabled={isUploading}
                         />
-                        {isUploading ? <Loader2 size={16} className={styles.spinner} /> : <Plus size={16} />}
-                        {isUploading ? "Processing..." : "Choose Files"}
+                        {isUploading ? "Processing..." : "Select Study Materials"}
                     </label>
-
-                    <button className={styles.browseFoldersBtn} disabled={isUploading}>
-                        <FolderOpen size={16} />
-                        Browse Folders
-                    </button>
                 </div>
-
-                <div className={styles.maxSize}>Maximum file size: 50MB</div>
+                <div className={styles.maxSize} style={{ marginTop: '20px' }}>
+                    Supports PDF • Max 50MB per file
+                </div>
             </div>
         </div>
     );

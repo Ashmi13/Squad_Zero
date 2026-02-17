@@ -22,6 +22,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.get("/notes")
+async def get_notes(user_id: str, folder_id: str = None):
+    notes = ai_service.get_all_notes(user_id, folder_id)
+    return notes
+
 
 class NoteRequest(BaseModel):
     pdf_id: str
@@ -36,24 +41,49 @@ class RefineRequest(BaseModel):
 class NoteUpdate(BaseModel):
     content: str
 
+from typing import List
+
 @app.post("/upload")
-async def upload_pdf(file: UploadFile = File(...)):
-    print(f"Received upload request: {file.filename}")
-    content = await file.read()
-    # Generate a unique ID for this PDF
-    pdf_id = str(uuid.uuid4())
+async def upload_pdf(files: List[UploadFile] = File(...)):
+    print(f"Received upload request with {len(files)} files")
     
-    # Process: Save to disk, extract text (Skip Vector DB for now/or keep it if needed, but we focus on manual workflow)
-    # user wants "not include the generating struc note", just show uploaded material
-    
-    result = ai_service.process_pdf(content, pdf_id, file.filename)
+    # Process all files
+    results = []
+    merged_text = ""
+    primary_pdf_id = None
+    primary_pdf_url = None
+    primary_filename = None
+
+    for i, file in enumerate(files):
+        content = await file.read()
+        pdf_id = str(uuid.uuid4())
+        
+        # Save and Extract
+        result = ai_service.process_pdf(content, pdf_id, file.filename)
+        
+        # Aggregate
+        merged_text += f"\n\n--- Source: {file.filename} ---\n\n"
+        merged_text += result["extracted_text"]
+        
+        results.append({
+            "pdf_id": pdf_id,
+            "filename": file.filename,
+            "url": result["pdf_url"]
+        })
+
+        # Use the first file as the "Primary" for the PDF Viewer
+        if i == 0:
+            primary_pdf_id = pdf_id
+            primary_pdf_url = result["pdf_url"]
+            primary_filename = file.filename
     
     return {
         "status": "success", 
-        "pdf_id": pdf_id, 
-        "filename": file.filename,
-        "pdf_url": result["pdf_url"],
-        "extracted_text": result["extracted_text"]
+        "pdf_id": primary_pdf_id, 
+        "filename": primary_filename, # useful for title
+        "pdf_url": primary_pdf_url,
+        "extracted_text": merged_text,
+        "all_files": results 
     }
 
 @app.post("/generate-note")
@@ -81,6 +111,20 @@ class FolderCreate(BaseModel):
 
 class NoteFolderUpdate(BaseModel):
     folder_id: str
+
+class NoteCreate(BaseModel):
+    user_id: str
+    title: str
+    content: str
+    pdf_id: str = None
+
+@app.post("/notes")
+async def create_note(note: NoteCreate):
+    # Using existing save_note_to_db logic but exposed as API
+    note_id = ai_service.save_note_to_db(note.user_id, note.pdf_id, note.title, note.content)
+    if not note_id:
+        return {"error": "Failed to create note"}, 500
+    return {"note_id": note_id, "status": "success"}
 
 @app.get("/folders")
 async def get_folders(user_id: str):

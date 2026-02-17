@@ -1,15 +1,15 @@
 import os
+import json
 from PyPDF2 import PdfReader
 from io import BytesIO
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_groq import ChatGroq
-from langchain_community.vectorstores import Chroma
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_classic.chains import RetrievalQA
 from dotenv import load_dotenv
 from database import get_db_connection
 from psycopg2.extras import RealDictCursor
 import uuid
+import numpy as np
 
 load_dotenv()
 
@@ -31,24 +31,69 @@ class AIService:
         save_dir = "documents"
         os.makedirs(save_dir, exist_ok=True)
         
-        # Sanitize filename or just use pdf_id.pdf to be safe/simple
         safe_filename = f"{pdf_id}.pdf"
         file_path = os.path.join(save_dir, safe_filename)
         
         with open(file_path, "wb") as f:
             f.write(file_bytes)
             
-        # 2. Extract text using the manual algorithm
+        # 2. Extract text
         reader = PdfReader(BytesIO(file_bytes))
-        text = ""
+        full_text = ""
         for page in reader.pages:
-            text += page.extract_text() or ""
+            full_text += page.extract_text() or ""
+            
+        # 3. Chunk text for Vector Storage
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1000,
+            chunk_overlap=200,
+            length_function=len
+        )
+        chunks = text_splitter.split_text(full_text)
         
-        # 3. Return text and file path (relative for URL)
+        # 4. Generate Embeddings and Save to Postgres (pgvector)
+        try:
+            conn = get_db_connection()
+            if conn:
+                cur = conn.cursor()
+                
+                # Check if document_chunks table exists (lightweight check/fallback)
+                # In production, schema migration handles this.
+                
+                # Generate embeddings in batch
+                embeddings = self.embeddings.embed_documents(chunks)
+                
+                for i, (chunk_text, embedding) in enumerate(zip(chunks, embeddings)):
+                    chunk_id = str(uuid.uuid4())
+                    cur.execute("""
+                        INSERT INTO document_chunks (id, pdf_id, chunk_index, content, embedding, metadata)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                    """, (
+                        chunk_id, 
+                        pdf_id, 
+                        i, 
+                        chunk_text, 
+                        str(embedding), # pgvector expects array/list as string representation or list
+                        json.dumps({"source": original_filename})
+                    ))
+                
+                conn.commit()
+                cur.close()
+                conn.close()
+                print(f"Stored {len(chunks)} chunks in Postgres (pgvector) for {pdf_id}")
+            else:
+                print("DB Connection failed, skipping vector storage.")
+                
+        except Exception as e:
+            print(f"Error storing vectors in Postgres: {e}")
+            if conn:
+                conn.rollback()
+        
+        # 5. Return result
         return {
             "status": "success",
             "pdf_url": f"/documents/{safe_filename}",
-            "extracted_text": text
+            "extracted_text": full_text
         }
 
     def save_note_to_db(self, user_id, pdf_id, title, content):
@@ -60,10 +105,9 @@ class AIService:
             cur = conn.cursor()
             note_id = str(uuid.uuid4())
             
-            # Insert into notes table
             cur.execute("""
                 INSERT INTO notes (note_id, user_id, title, content, created_date, updated_date, note_type, is_in_folder, has_embeddings)
-                VALUES (%s, %s, %s, %s, NOW(), NOW(), 'ai_generated', FALSE, FALSE)
+                VALUES (%s, %s, %s, %s, NOW(), NOW(), 'ai_generated', FALSE, TRUE)
             """, (note_id, user_id, title, content))
             
             conn.commit()
@@ -77,27 +121,85 @@ class AIService:
 
         
     def generate_note(self, pdf_id, user_id, instruction=None):
-        # Retrieve ALL chunks for this PDF, sorted by index
-        vectorstore = Chroma(persist_directory="./chroma_db", embedding_function=self.embeddings)
+        # Retrieve relevant chunks using pgvector (Cosine Similarity)
+        context_text = ""
         
-        # Get all documents for this PDF ID
-        results = vectorstore.get(where={"pdf_id": pdf_id}, include=["metadatas", "documents"])
-        
-        if not results['documents']:
-            return "No content found for this PDF."
+        try:
+            # Create embedding for the instruction (query)
+            # If no instruction, we might just summarization, but for now assuming instruction or generic 'summarize'
+            query_text = instruction if instruction else "Summarize this document"
+            query_embedding = self.embeddings.embed_query(query_text)
+            
+            conn = get_db_connection()
+            if conn:
+                cur = conn.cursor()
+                
+                # Perform similarity search using invalid-safe syntax for pgvector
+                # The <=> operator is cosine distance (lower is better)
+                # We want the closest matches, so ORDER BY <=> LIMIT k
+                cur.execute("""
+                    SELECT content 
+                    FROM document_chunks 
+                    WHERE pdf_id = %s 
+                    ORDER BY embedding <=> %s 
+                    LIMIT 5
+                """, (pdf_id, str(query_embedding)))
+                
+                results = cur.fetchall()
+                # Sort back by chunk index if we selected widely? 
+                # Actually for RAG we usually just want relevant context. 
+                # If we want full doc flow, we might need a different retrieval strategy.
+                # For now, relevant context is standard.
+                
+                context_chunks = [row[0] for row in results]
+                context_text = "\n\n".join(context_chunks)
+                
+                cur.close()
+                conn.close()
+            else:
+                return "Database connection failed during retrieval."
 
-        # Combine metadata and documents into a list of tuples
-        combined = list(zip(results['metadatas'], results['documents']))
+        except Exception as e:
+            print(f"Error retrieving vectors: {e}")
+            return f"Error exploring document: {str(e)}"
+
+        if not context_text:
+            return "No relevant content found in the document."
+            
+        # Create prompt for Groq
+        prompt = f"""
+        Instructions: {instruction if instruction else "Create a detailed study note based on the provided text."}
         
-        # Sort by chunk_index to maintain document order
-        # We use a default of 0 if chunk_index is missing (for older uploads)
-        combined.sort(key=lambda x: x[0].get('chunk_index', 0))
+        Context (Extracted from Document):
+        {context_text}
         
-        sorted_docs = [doc for _, doc in combined]
+        Generate a comprehensive markdown note based on the context above.
+        """
         
-        # Batch processing configuration
-        BATCH_SIZE = 3  # Reduced to 3 to be extremely safe with Groq limits
+        try:
+            response = self.llm.invoke(prompt)
+            return response.content
+        except Exception as e:
+            return f"Error generating note: {str(e)}"
+
+    def refine_text(self, pdf_id, selected_text, instruction):
+        # Similar logic, maybe we don't need vector search if selection is small, 
+        # But if we want context *around* the selection, we could use it.
+        # For now, just refine the selection using LLM.
         
+        prompt = f"""
+        Original Text: "{selected_text}"
+        
+        Instruction: {instruction}
+        
+        Refine the text above according to the instruction. Return ONLY the refined text.
+        """
+        
+        try:
+            response = self.llm.invoke(prompt)
+            return {"refined_content": response.content}
+        except Exception as e:
+            return {"error": str(e)}
         # Split documents into batches
         batches = [sorted_docs[i:i + BATCH_SIZE] for i in range(0, len(sorted_docs), BATCH_SIZE)]
         
@@ -181,9 +283,15 @@ class AIService:
                 "UPDATE notes SET content = %s, updated_date = NOW() WHERE note_id = %s",
                 (new_content, note_id)
             )
+            rows_updated = cur.rowcount
             conn.commit()
             cur.close()
             conn.close()
+            
+            if rows_updated == 0:
+                print(f"Warning: Attempted to update non-existent note {note_id}")
+                return False
+                
             return True
         except Exception as e:
             print(f"Error updating note: {e}")
@@ -282,5 +390,40 @@ class AIService:
         except Exception as e:
             print(f"Error updating note folder: {e}")
             return False
+
+    def get_all_notes(self, user_id, folder_id=None):
+        conn = get_db_connection()
+        if not conn:
+            print("DB Connection failed in get_all_notes")
+            return []
+        
+        try:
+            print(f"Fetching notes for user: {user_id}, folder: {folder_id}")
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            
+            query = """
+                SELECT note_id, title, created_date, note_type, is_in_folder, folder_id 
+                FROM notes 
+                WHERE user_id = %s
+            """
+            params = [user_id]
+            
+            if folder_id:
+                query += " AND folder_id = %s"
+                params.append(folder_id)
+                
+            query += " ORDER BY updated_date DESC"
+            
+            cur.execute(query, tuple(params))
+            notes = cur.fetchall()
+            cur.close()
+            conn.close()
+            print(f"Found {len(notes)} notes")
+            return notes
+        except Exception as e:
+            print(f"Error getting notes: {e}")
+            if conn:
+                conn.close()
+            return []
 
 ai_service = AIService()

@@ -6,12 +6,13 @@ import rehypeRaw from 'rehype-raw';
 import {
     Share2, Search, ZoomIn, ZoomOut, ChevronLeft, ChevronRight,
     Bold, Italic, Underline, List, Link as LinkIcon, Mic,
-    Wand2, Settings, PenTool, Loader2, X, MousePointerClick, ArrowUpDown, Highlighter
+    Wand2, Settings, PenTool, Loader2, X, MousePointerClick, ArrowUpDown, Highlighter, Clock
 } from 'lucide-react';
 import styles from './NoteEditor.module.css';
 import SaveModal from '../components/SaveModal';
 import RefineModal from '../components/RefineModal';
-import { generateNote, refineText } from '../api';
+import Sidebar from '../components/Sidebar';
+import { generateNote, refineText, updateNote } from '../api';
 
 
 // --- CONFIGURATION ---
@@ -100,7 +101,7 @@ const NoteEditor = () => {
         }, 0);
     };
 
-    const handleToolbarAction = (action) => {
+    const handleToolbarAction = (action, value = null) => {
         const textarea = editorRef.current;
         if (!textarea) return;
 
@@ -141,10 +142,21 @@ const NoteEditor = () => {
                 insertFormat('[', '](url)');
                 if (selectedText.length === 0) newCursorPos -= 1; // Move cursor before ) but after url
                 break;
+            case 'highlight-color':
+                if (value) {
+                    insertFormat(`<mark style="background-color: ${value}">`, '</mark>');
+                }
+                break;
             default: break;
         }
 
         setContent(newText);
+
+        localStorage.setItem('currentNote', JSON.stringify({
+            content: newText,
+            pdfId,
+            noteId: currentNoteId
+        }));
 
         // Restore focus and update cursor
         setTimeout(() => {
@@ -153,34 +165,30 @@ const NoteEditor = () => {
         }, 0);
     };
 
+    // --- Export Functionality ---
+    // --- Export Functionality ---
 
-    // --- Selection Handlers ---
+
+    // ... existing handlers ...
+
+    // --- Interaction Handlers ---
     const handleEditorSelect = (e) => {
-        // Only enable selection for refinement if AI is enabled
-        if (!ENABLE_AI) return;
-
-        // We use onSelect or onMouseUp to capture selection info from Textarea
-        const start = e.target.selectionStart;
-        const end = e.target.selectionEnd;
-
+        const textarea = e.target;
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
         if (start !== end) {
             const selectedText = content.substring(start, end);
-            setTempSelection({
-                text: selectedText,
-                start,
-                end
-            });
+            setTempSelection({ text: selectedText, start, end });
         } else {
-            // Maybe clear? keeping simple for now
+            setTempSelection(null);
         }
     };
 
     const handleContextMenu = (e) => {
-        if (!ENABLE_AI) return; // Native context menu in manual mode
-
+        if (!ENABLE_AI) return; // Disable context menu if AI is off
         e.preventDefault();
         if (tempSelection) {
-            setContextMenu({ x: e.pageX, y: e.pageY });
+            setContextMenu({ x: e.clientX, y: e.clientY });
         }
     };
 
@@ -189,131 +197,81 @@ const NoteEditor = () => {
     };
 
     const lockSelection = () => {
-        if (!tempSelection) return;
-
-        const textToMark = tempSelection.text;
-        const before = content.substring(0, tempSelection.start);
-        const after = content.substring(tempSelection.end);
-
-        const markedContent = `${before} <mark>${textToMark}</mark>${after} `;
-
-        setContent(markedContent);
-        setSelection({ ...tempSelection, text: textToMark }); // Locked
+        setSelection(tempSelection);
         setContextMenu(null);
-        setTempSelection(null);
-
-        if (chatInputRef.current) {
-            chatInputRef.current.focus();
-        }
     };
 
     const clearSelection = () => {
-        if (selection) {
-            const cleanContent = content.replace(/<mark>(.*?)<\/mark>/g, '$1');
-            setContent(cleanContent);
-        }
         setSelection(null);
         setTempSelection(null);
     };
 
     const handleChatSubmit = async () => {
-        if (!chatInput.trim() || !pdfId) return;
-
+        if (!chatInput.trim()) return;
         setIsProcessing(true);
+        console.log("Chat submitted:", chatInput);
+
+        // Mock processing for now or call API
         try {
             if (selection) {
-                // Refine tagged text
-                const result = await refineText(pdfId, selection.text, chatInput);
+                // Refinement flow
+                const result = await refineText(selection.text, chatInput);
                 setRefinementResult({
                     original: selection.text,
-                    refined: result.refined_content
+                    refined: result,
+                    isFullNote: false
                 });
             } else {
-                // Regenerate
-                const result = await generateNote(pdfId, userId, chatInput);
-                setRefinementResult({
-                    original: content.substring(0, 200) + "...",
-                    refined: result.content,
-                    isFullNote: true
-                });
+                // General Instruction flow (could generate new content)
+                console.log("General instruction not fully implemented yet");
             }
-            setChatInput('');
         } catch (error) {
-            console.error("Error:", error);
+            console.error("Error in chat submit:", error);
+            alert("Failed to process request.");
         } finally {
             setIsProcessing(false);
+            setChatInput('');
         }
     };
 
-    const applyRefinement = () => {
-        if (!refinementResult) return;
+    const applyRefinement = (refinedText) => {
+        if (!selection || !editorRef.current) return;
 
-        let newContent = content;
-        if (refinementResult.isFullNote) {
-            newContent = refinementResult.refined;
-        } else {
-            // Replace markup
-            const target = `< mark > ${refinementResult.original}</mark > `;
-            newContent = content.replace(target, refinementResult.refined);
-            if (newContent === content) {
-                newContent = content.replace(refinementResult.original, refinementResult.refined);
-            }
-        }
+        const before = content.substring(0, selection.start);
+        const after = content.substring(selection.end);
+        const newContent = before + refinedText + after;
 
         setContent(newContent);
+        setRefinementResult(null);
+        clearSelection();
+
+        // Update DB/Storage
         localStorage.setItem('currentNote', JSON.stringify({
             content: newContent,
             pdfId,
             noteId: currentNoteId
         }));
-        setRefinementResult(null);
-        setSelection(null);
     };
 
     // View State for Left Panel
     const [leftView, setLeftView] = useState('preview'); // 'pdf' | 'preview'
 
-    useEffect(() => {
-        const savedNote = localStorage.getItem('currentNote');
-        if (savedNote) {
-            const parsed = JSON.parse(savedNote);
-            setContent(parsed.content);
-            setPdfId(parsed.pdfId);
-            setPdfUrl(parsed.pdfUrl || ''); // Load URL
-            if (!currentNoteId) setCurrentNoteId(parsed.noteId);
-        } else {
-            // For Interim Mode: Initialize empty if no note found
-            if (!ENABLE_AI) {
-                setContent('');
-            }
-        }
-    }, [noteId]);
-
-    // ... existing handlers ...
-
     return (
-        <div className={styles.container} onClick={closeContextMenu}>
-            {/* HEADER */}
-            <header className={styles.header}>
-                <div className={styles.brand}>
-                    <div className={styles.logoBox}>N</div>
-                    <span>Neura Note</span>
-                </div>
-                <div className={styles.headerActions}>
-                    <div className={styles.headerSetting}>
-                        <Settings size={16} />
-                        <span>Settings</span>
-                    </div>
-                    <img src="https://via.placeholder.com/32" className={styles.avatar} alt="User" />
-                </div>
-            </header>
+        <div className={styles.editorContainer}>
 
-            <div className={styles.mainArea}>
-                {/* LEFT PANEL: PREVIEW (FINAL VIEW) */}
-                <div className={styles.leftPanel}>
-                    <div className={styles.pdfToolbar}>
-                        <div className={styles.pdfControls}>
-                            {/* View Toggles */}
+
+            <Sidebar onSelectFolder={null} selectedFolderId={null} />
+
+            <div className={styles.mainContent} style={{ marginLeft: '320px', width: 'calc(100% - 320px)' }}>
+                <div className={styles.container} onClick={closeContextMenu}>
+                    {/* HEADER */}
+                    <div className={styles.header}>
+                        <div className={styles.brand}>
+                            <div className={styles.logoBox}>N</div>
+                            <span>NeuraNote</span>
+                        </div>
+                        {/* View Toggles - Moved to Left */}
+                        <div className={styles.viewToggleGroup}>
                             <button
                                 className={`${styles.viewToggleBtn} ${leftView === 'pdf' ? styles.active : ''}`}
                                 onClick={() => setLeftView('pdf')}
@@ -327,13 +285,31 @@ const NoteEditor = () => {
                                 Live Preview
                             </button>
                         </div>
+                    </div>
+
+                    <div className={styles.headerActions}>
+                        <div className={styles.actionGroup}>
+                            <div className={styles.saveStatus}>
+                                {isProcessing ? (
+                                    <><Loader2 size={14} className={styles.spin} /> Processing...</>
+                                ) : (
+                                    <><Clock size={14} /> Saved</>
+                                )}
+                            </div>
+                            <div className={styles.actionGroup}>
+                                <button className={styles.primaryBtn} onClick={() => setShowSaveModal(true)}>Save</button>
+                            </div>
+                        </div>
                         <div className={styles.zoomControls}>
                             <button className={styles.iconBtn} onClick={() => setZoomLevel(z => Math.max(z - 10, 25))}><ZoomOut size={16} /></button>
                             <span className={styles.zoomLevel}>{zoomLevel}%</span>
                             <button className={styles.iconBtn} onClick={() => setZoomLevel(z => Math.min(z + 10, 200))}><ZoomIn size={16} /></button>
                         </div>
                     </div>
+                </div>
 
+                <div className={styles.mainArea}>
+                    {/* ... PDF/Preview Area ... */}
                     <div className={styles.pdfContent}>
                         {leftView === 'pdf' ? (
                             <div className={styles.markdownWrapper} style={{ height: '100%' }}>
@@ -363,7 +339,7 @@ const NoteEditor = () => {
                             </div>
                         )}
 
-                        {/* Selection Indicator on Left too? Maybe not needed since highlight is in editor */}
+                        {/* Selection Indicator */}
                         {ENABLE_AI && selection && (
                             <div className={styles.selectionIndicator}>
                                 <span className={styles.selectionLabel}>Targeting:</span>
@@ -372,7 +348,7 @@ const NoteEditor = () => {
                             </div>
                         )}
 
-                        {/* Bottom Bar attached to Left Panel (Context) */}
+                        {/* Bottom Bar */}
                         {ENABLE_AI && (
                             <div className={styles.bottomBarContainer}>
                                 <div className={styles.bottomBar}>
@@ -395,86 +371,54 @@ const NoteEditor = () => {
                             </div>
                         )}
                     </div>
-                </div>
 
-                {/* RIGHT PANEL: EDITOR (WORKING AREA) */}
-                <div className={styles.rightPanel}>
-                    <div className={styles.editorToolbar}>
-                        <div className={styles.formatGroup}>
-                            <button className={styles.formatBtn} onMouseDown={(e) => { e.preventDefault(); handleToolbarAction('bold'); }} title="Bold"><Bold size={18} /></button>
-                            <button className={styles.formatBtn} onMouseDown={(e) => { e.preventDefault(); handleToolbarAction('italic'); }} title="Italic"><Italic size={18} /></button>
-                            <button className={styles.formatBtn} onMouseDown={(e) => { e.preventDefault(); handleToolbarAction('underline'); }} title="Underline"><Underline size={18} /></button>
+                    {/* RIGHT PANEL: EDITOR */}
+                    <div className={styles.rightPanel}>
+                        <div className={styles.editorToolbar}>
+                            <div className={styles.formatGroup}>
+                                <button className={styles.formatBtn} onMouseDown={(e) => { e.preventDefault(); handleToolbarAction('bold'); }} title="Bold"><Bold size={18} /></button>
+                                <button className={styles.formatBtn} onMouseDown={(e) => { e.preventDefault(); handleToolbarAction('italic'); }} title="Italic"><Italic size={18} /></button>
+                                <button className={styles.formatBtn} onMouseDown={(e) => { e.preventDefault(); handleToolbarAction('underline'); }} title="Underline"><Underline size={18} /></button>
 
-                            {/* Color Picker Container */}
-                            <div style={{ position: 'relative' }}>
-                                <button
-                                    className={`${styles.formatBtn} ${showColorPicker ? styles.active : ''}`}
-                                    onMouseDown={(e) => { e.preventDefault(); setShowColorPicker(!showColorPicker); }}
-                                    title="Highlight Color"
-                                >
-                                    <Highlighter size={18} style={{ color: showColorPicker ? '#2F6CF6' : '#5F6368' }} />
-                                </button>
+                                <div className={styles.divider}></div>
+                                <button className={styles.formatBtn} onMouseDown={(e) => { e.preventDefault(); handleToolbarAction('list'); }} title="List"><List size={18} /></button>
+                                <button className={styles.formatBtn} onMouseDown={(e) => { e.preventDefault(); handleToolbarAction('link'); }} title="Link"><LinkIcon size={18} /></button>
 
-                                {showColorPicker && (
-                                    <div className={styles.colorPickerDropdown}>
-                                        {highlightColors.map((c) => (
-                                            <div
-                                                key={c.color}
-                                                className={styles.colorOption}
-                                                style={{ backgroundColor: c.color }}
-                                                title={c.label}
-                                                onMouseDown={(e) => {
-                                                    e.preventDefault();
-                                                    handleToolbarAction('highlight-color', c.className);
-                                                }}
-                                            />
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-
-                            <div className={styles.divider}></div>
-                            <button className={styles.formatBtn} onMouseDown={(e) => { e.preventDefault(); handleToolbarAction('list'); }} title="List"><List size={18} /></button>
-                            <button className={styles.formatBtn} onMouseDown={(e) => { e.preventDefault(); handleToolbarAction('link'); }} title="Link"><LinkIcon size={18} /></button>
-
-                            <div className={styles.divider}></div>
-                            <div className={styles.spacingWrapper} title="Line Spacing">
-                                <ArrowUpDown size={16} className={styles.spacingIcon} />
-                                <select
-                                    className={styles.spacingSelect}
-                                    value={lineHeight}
-                                    onChange={(e) => setLineHeight(e.target.value)}
-                                >
-                                    <option value="1.0">1.0</option>
-                                    <option value="1.15">1.15</option>
-                                    <option value="1.5">1.5</option>
-                                    <option value="2.0">2.0</option>
-                                    <option value="2.5">2.5</option>
-                                </select>
+                                <div className={styles.divider}></div>
+                                <div className={styles.spacingWrapper} title="Line Spacing">
+                                    <ArrowUpDown size={16} className={styles.spacingIcon} />
+                                    <select
+                                        className={styles.spacingSelect}
+                                        value={lineHeight}
+                                        onChange={(e) => setLineHeight(e.target.value)}
+                                    >
+                                        <option value="1.0">1.0</option>
+                                        <option value="1.15">1.15</option>
+                                        <option value="1.5">1.5</option>
+                                        <option value="2.0">2.0</option>
+                                        <option value="2.5">2.5</option>
+                                    </select>
+                                </div>
                             </div>
                         </div>
-                        <div className={styles.actionGroup}>
-                            <button className={styles.textBtn}>Export</button>
-                            <button className={styles.primaryBtn} onClick={() => setShowSaveModal(true)}>Save</button>
-                        </div>
-                    </div>
 
-                    <div className={styles.editorContainer}>
-                        <textarea
-                            ref={editorRef}
-                            className={styles.editorInput}
-                            style={{ lineHeight: lineHeight }}
-                            value={content}
-                            onChange={(e) => setContent(e.target.value)}
-                            onSelect={handleEditorSelect} // Capture selection
-                            onContextMenu={handleContextMenu}
-                            placeholder="Start typing your note here..."
-                        />
+                        <div className={styles.editorContainer}>
+                            <textarea
+                                ref={editorRef}
+                                className={styles.editorInput}
+                                style={{ lineHeight: lineHeight }}
+                                value={content}
+                                onChange={(e) => setContent(e.target.value)}
+                                onSelect={handleEditorSelect} // Capture selection
+                                onContextMenu={handleContextMenu}
+                                placeholder="Start typing your note here..."
+                            />
+                        </div>
                     </div>
                 </div>
             </div>
 
-            {/* Custom Context Menu */}
+            {/* Modals */}
             {ENABLE_AI && contextMenu && (
                 <div
                     className={styles.contextMenu}
@@ -493,7 +437,30 @@ const NoteEditor = () => {
                 <SaveModal
                     noteId={currentNoteId}
                     onClose={() => setShowSaveModal(false)}
-                    onSave={() => {
+                    onSave={async () => {
+                        // Save content when folder is selected/closed
+                        try {
+                            if (currentNoteId) {
+                                let result = await updateNote(currentNoteId, content);
+
+                                // If update failed (likely because note doesn't exist in DB), try Creating it
+                                if (result && result.status === 'error' || result === false) {
+                                    console.log("Note not found in DB, creating new...");
+                                    try {
+                                        await createNote("test_user", "Untitled Note", content, pdfId);
+                                        result = { status: 'success' };
+                                    } catch (createError) {
+                                        console.error("Failed to recover/create note:", createError);
+                                    }
+                                }
+
+                                alert("Note saved successfully! ✅");
+                                console.log("Note content saved successfully to DB");
+                            }
+                        } catch (err) {
+                            console.error("Failed to save note content", err);
+                            alert("Error saving note. Please try again.");
+                        }
                         setShowSaveModal(false);
                     }}
                 />

@@ -90,8 +90,28 @@
 .pdfControls {
     display: flex;
     align-items: center;
-    gap: 15px;
+    gap: 10px;
+    background: #F1F3F4;
+    padding: 3px;
+    border-radius: 8px;
+}
+
+.viewToggleBtn {
+    border: none;
+    background: transparent;
+    padding: 5px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
     color: #5F6368;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.viewToggleBtn.active {
+    background-color: white;
+    color: #1B1D21;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 .zoomControls {
@@ -117,8 +137,10 @@
 
 .pdfContent {
     flex: 1;
-    overflow-y: auto;
-    padding: 40px 60px;
+    overflow: hidden;
+    /* Changed from overflow-y: auto to hidden to let iframe scroll */
+    padding: 0;
+    /* Remove padding for full-frame PDF */
     position: relative;
     /* max-width: 800px; Remove max constraint to use space */
     margin: 0 auto;
@@ -164,6 +186,39 @@
 
 .markdownWrapper li {
     margin-bottom: 0.5em;
+}
+
+.markdownWrapper strong,
+.markdownWrapper b {
+    font-weight: 700;
+    color: #111;
+    /* Ensure bold text is dark and visible */
+}
+
+/* Highlight Colors */
+.hl-yellow {
+    background-color: #fff59d;
+    color: black;
+}
+
+.hl-green {
+    background-color: #a5d6a7;
+    color: black;
+}
+
+.hl-blue {
+    background-color: #90caf9;
+    color: black;
+}
+
+.hl-pink {
+    background-color: #f48fb1;
+    color: black;
+}
+
+.hl-orange {
+    background-color: #ffcc80;
+    color: black;
 }
 
 /* SELECTION INDICATOR */
@@ -307,8 +362,84 @@
     flex: 1;
     display: flex;
     flex-direction: column;
+    background-color: #F8F9FA;
+    /* Light gray background for the "desk" */
+    border-left: 1px solid #E0E0E0;
+    position: relative;
+    overflow: hidden;
+}
+
+/* ... Toolbar ... */
+
+/* Editor Layout */
+.editorContainer {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    /* Remove padding from container, let textarea handle margins */
+    overflow-y: auto;
+    /* Allow scrolling the "desk" */
+    align-items: center;
+    /* Center the page */
+}
+
+.editorInput {
+    flex: none;
+    /* Don't stretch to fill, let it be a fixed page size */
+    width: 816px;
+    /* Approx A4 width (8.5in * 96px) */
+    max-width: 90%;
+    min-height: 1056px;
+    /* Approx A4 height */
+
     background-color: white;
-    border-left: 1px solid transparent;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.24);
+
+    border: none;
+    outline: none;
+    resize: none;
+
+    font-family: 'Inter', sans-serif;
+    font-size: 11pt;
+    /* Standard doc size */
+    line-height: 1.6;
+    color: #333;
+
+    padding: 96px;
+    /* 1 inch margins */
+    margin: 30px 0;
+    /* Vertical breathing room */
+
+    /* Ensure text wrapping */
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+.spin {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* RIGHT PANEL (Editor) */
+.rightPanel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background-color: #F8F9FA;
+    /* Light gray background for the "desk" */
+    border-left: 1px solid #E0E0E0;
+    position: relative;
+    overflow: hidden;
 }
 
 .editorToolbar {
@@ -317,7 +448,9 @@
     align-items: center;
     justify-content: space-between;
     padding: 0 40px;
-    border-bottom: 1px solid #F0F0F0;
+    border-bottom: 1px solid #E0E0E0;
+    background-color: white;
+    z-index: 10;
 }
 
 .formatGroup {
@@ -327,15 +460,50 @@
 }
 
 .formatBtn {
-    color: #9AA0A6;
+    color: #5F6368;
     cursor: pointer;
-    transition: color 0.2s;
     background: none;
     border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Color Picker Dropdown */
+.colorPickerDropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    margin-top: 8px;
+    background: white;
+    border: 1px solid #E0E0E0;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    border-radius: 8px;
+    padding: 8px;
+    display: flex;
+    gap: 6px;
+    z-index: 100;
+    width: max-content;
+}
+
+.colorOption {
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+    cursor: pointer;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    transition: transform 0.1s;
+}
+
+.colorOption:hover {
+    transform: scale(1.1);
+    border-color: rgba(0, 0, 0, 0.2);
 }
 
 .formatBtn:hover {
     color: #1B1D21;
+    background-color: #F1F3F4;
+    border-radius: 4px;
 }
 
 .divider {
@@ -348,14 +516,10 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    background-color: #F5F5F5;
+    background-color: #F1F3F4;
     padding: 4px 8px;
-    border-radius: 6px;
+    border-radius: 4px;
     cursor: pointer;
-}
-
-.spacingIcon {
-    color: #5F6368;
 }
 
 .spacingSelect {
@@ -394,39 +558,40 @@
     cursor: pointer;
 }
 
-/* Editor Layout */
+/* Editor Layout (Page View) */
 .editorContainer {
     flex: 1;
     display: flex;
     flex-direction: column;
-    padding: 30px 40px;
+    padding: 0;
+    overflow-y: auto;
+    align-items: center;
 }
 
 .editorInput {
-    flex: 1;
-    width: 100%;
-    height: 100%;
+    flex: none;
+    width: 816px;
+    /* A4 width */
+    max-width: 90%;
+    min-height: 1056px;
+    /* A4 height */
+
+    background-color: white;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.24);
+
     border: none;
     outline: none;
     resize: none;
+
     font-family: 'Inter', sans-serif;
-    /* Or monospace if prefer code feeling */
-    font-size: 15px;
+    font-size: 11pt;
     line-height: 1.6;
     color: #333;
-    padding: 0;
-}
 
-.spin {
-    animation: spin 1s linear infinite;
-}
+    padding: 96px;
+    /* 1 inch margins */
+    margin: 30px 0;
 
-@keyframes spin {
-    from {
-        transform: rotate(0deg);
-    }
-
-    to {
-        transform: rotate(360deg);
-    }
+    white-space: pre-wrap;
+    word-wrap: break-word;
 }

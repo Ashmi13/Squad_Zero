@@ -6,7 +6,7 @@ import rehypeRaw from 'rehype-raw';
 import {
     Share2, Search, ZoomIn, ZoomOut, ChevronLeft, ChevronRight,
     Bold, Italic, Underline, List, Link as LinkIcon, Mic,
-    Wand2, Settings, PenTool, Loader2, X, MousePointerClick, ArrowUpDown
+    Wand2, Settings, PenTool, Loader2, X, MousePointerClick, ArrowUpDown, Highlighter
 } from 'lucide-react';
 import styles from './NoteEditor.module.css';
 import SaveModal from '../components/SaveModal';
@@ -17,7 +17,7 @@ import { generateNote, refineText } from '../api';
 // --- CONFIGURATION ---
 // Set to TRUE for full AI features (Final)
 // Set to FALSE for manual-only mode (Interim Demo)
-const ENABLE_AI = true;
+const ENABLE_AI = false;
 
 const NoteEditor = () => {
     const { noteId } = useParams();
@@ -26,6 +26,7 @@ const NoteEditor = () => {
     const [content, setContent] = useState('');
     const [lineHeight, setLineHeight] = useState('1.5'); // Default spacing
     const [pdfId, setPdfId] = useState('');
+    const [pdfUrl, setPdfUrl] = useState(''); // New state for PDF URL
     const [currentNoteId, setCurrentNoteId] = useState(noteId);
     const [userId, setUserId] = useState('test_user');
 
@@ -42,6 +43,16 @@ const NoteEditor = () => {
     const [contextMenu, setContextMenu] = useState(null);
     const [tempSelection, setTempSelection] = useState(null);
 
+    // Color Picker State
+    const [showColorPicker, setShowColorPicker] = useState(false);
+    const highlightColors = [
+        { color: '#fff59d', label: 'Yellow', className: 'hl-yellow' },
+        { color: '#a5d6a7', label: 'Green', className: 'hl-green' },
+        { color: '#90caf9', label: 'Blue', className: 'hl-blue' },
+        { color: '#f48fb1', label: 'Pink', className: 'hl-pink' },
+        { color: '#ffcc80', label: 'Orange', className: 'hl-orange' }
+    ];
+
     const chatInputRef = useRef(null);
     const editorRef = useRef(null); // Ref for the textarea
 
@@ -51,6 +62,7 @@ const NoteEditor = () => {
             const parsed = JSON.parse(savedNote);
             setContent(parsed.content);
             setPdfId(parsed.pdfId);
+            setPdfUrl(parsed.pdfUrl || ''); // Load URL
             if (!currentNoteId) setCurrentNoteId(parsed.noteId);
         } else {
             // For Interim Mode: Initialize empty if no note found
@@ -89,15 +101,56 @@ const NoteEditor = () => {
     };
 
     const handleToolbarAction = (action) => {
+        const textarea = editorRef.current;
+        if (!textarea) return;
+
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+        const selectedText = content.substring(start, end);
+        let newText = content;
+        let newCursorPos = end;
+
+        const insertFormat = (prefix, suffix) => {
+            newText = content.substring(0, start) + prefix + selectedText + suffix + content.substring(end);
+            newCursorPos = start + prefix.length + selectedText.length + suffix.length;
+            if (selectedText.length === 0) {
+                newCursorPos = start + prefix.length; // Place cursor inside if no selection
+            }
+        };
+
         switch (action) {
-            case 'bold': insertFormat('**'); break;
-            case 'italic': insertFormat('*'); break;
-            // Underline not standard markdown, using HTML or ignoring. Let's use HTML <u> for now or ignore.
-            case 'underline': insertFormat('<u>', '</u>'); break;
-            case 'list': insertFormat('\n- '); break;
-            case 'link': insertFormat('[', '](url)'); break;
+            case 'bold': insertFormat('<strong>', '</strong>'); break;
+            case 'italic': insertFormat('<em>', '</em>'); break;
+            case 'underline':
+                // Markdown doesn't support underline natively, usually HTML is used or ignored.
+                // We'll use HTML for underline as regular markdown renderers might support it or user just wants visual marker.
+                insertFormat('<u>', '</u>');
+                break;
+            case 'list':
+                // If there's a selection, prepend "- " to each line
+                if (selectedText.length > 0) {
+                    const lines = selectedText.split('\n');
+                    const listed = lines.map(line => `- ${line}`).join('\n');
+                    newText = content.substring(0, start) + listed + content.substring(end);
+                    newCursorPos = start + listed.length;
+                } else {
+                    insertFormat('\n- ', '');
+                }
+                break;
+            case 'link':
+                insertFormat('[', '](url)');
+                if (selectedText.length === 0) newCursorPos -= 1; // Move cursor before ) but after url
+                break;
             default: break;
         }
+
+        setContent(newText);
+
+        // Restore focus and update cursor
+        setTimeout(() => {
+            textarea.focus();
+            textarea.setSelectionRange(newCursorPos, newCursorPos);
+        }, 0);
     };
 
 
@@ -217,6 +270,27 @@ const NoteEditor = () => {
         setSelection(null);
     };
 
+    // View State for Left Panel
+    const [leftView, setLeftView] = useState('preview'); // 'pdf' | 'preview'
+
+    useEffect(() => {
+        const savedNote = localStorage.getItem('currentNote');
+        if (savedNote) {
+            const parsed = JSON.parse(savedNote);
+            setContent(parsed.content);
+            setPdfId(parsed.pdfId);
+            setPdfUrl(parsed.pdfUrl || ''); // Load URL
+            if (!currentNoteId) setCurrentNoteId(parsed.noteId);
+        } else {
+            // For Interim Mode: Initialize empty if no note found
+            if (!ENABLE_AI) {
+                setContent('');
+            }
+        }
+    }, [noteId]);
+
+    // ... existing handlers ...
+
     return (
         <div className={styles.container} onClick={closeContextMenu}>
             {/* HEADER */}
@@ -239,9 +313,19 @@ const NoteEditor = () => {
                 <div className={styles.leftPanel}>
                     <div className={styles.pdfToolbar}>
                         <div className={styles.pdfControls}>
-                            <span style={{ fontWeight: 600, color: '#333' }}>
-                                {ENABLE_AI ? "Final Preview" : "PDF Viewer"}
-                            </span>
+                            {/* View Toggles */}
+                            <button
+                                className={`${styles.viewToggleBtn} ${leftView === 'pdf' ? styles.active : ''}`}
+                                onClick={() => setLeftView('pdf')}
+                            >
+                                PDF Source
+                            </button>
+                            <button
+                                className={`${styles.viewToggleBtn} ${leftView === 'preview' ? styles.active : ''}`}
+                                onClick={() => setLeftView('preview')}
+                            >
+                                Live Preview
+                            </button>
                         </div>
                         <div className={styles.zoomControls}>
                             <button className={styles.iconBtn} onClick={() => setZoomLevel(z => Math.max(z - 10, 25))}><ZoomOut size={16} /></button>
@@ -251,31 +335,33 @@ const NoteEditor = () => {
                     </div>
 
                     <div className={styles.pdfContent}>
-                        <div className={styles.markdownWrapper} style={{ fontSize: `${zoomLevel / 100 * 15} px` }}>
-                            {content ? (
-                                <ReactMarkdown rehypePlugins={[rehypeRaw]}>{content}</ReactMarkdown>
-                            ) : (
-                                <div style={{
-                                    display: 'flex',
-                                    flexDirection: 'column',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    height: '100%',
-                                    color: '#999'
-                                }}>
-                                    {ENABLE_AI ? (
-                                        <p>Preview will appear here...</p>
-                                    ) : (
-                                        <>
-                                            <p style={{ marginBottom: '1rem' }}>PDF Document would be displayed here.</p>
-                                            <div style={{ width: '200px', height: '280px', border: '1px dashed #ccc', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f5f5f5' }}>
-                                                PDF Placeholder
-                                            </div>
-                                        </>
-                                    )}
-                                </div>
-                            )}
-                        </div>
+                        {leftView === 'pdf' ? (
+                            <div className={styles.markdownWrapper} style={{ height: '100%' }}>
+                                {pdfUrl ? (
+                                    <iframe
+                                        src={`http://localhost:8000${pdfUrl}`}
+                                        className={styles.pdfFrame}
+                                        title="PDF Viewer"
+                                        style={{ width: '100%', height: '100%', border: 'none' }}
+                                    />
+                                ) : (
+                                    <div className={styles.emptyState}>No PDF loaded.</div>
+                                )}
+                            </div>
+                        ) : (
+                            <div className={styles.markdownWrapper} style={{
+                                height: '100%',
+                                overflowY: 'auto',
+                                padding: '40px 50px',
+                                backgroundColor: 'white',
+                                fontSize: `${zoomLevel / 100 * 15}px`
+                            }}>
+                                {/* Live Preview: Renders the markdown content */}
+                                <ReactMarkdown rehypePlugins={[rehypeRaw]}>
+                                    {content || "Start typing in the editor to see the preview..."}
+                                </ReactMarkdown>
+                            </div>
+                        )}
 
                         {/* Selection Indicator on Left too? Maybe not needed since highlight is in editor */}
                         {ENABLE_AI && selection && (
@@ -318,6 +404,35 @@ const NoteEditor = () => {
                             <button className={styles.formatBtn} onMouseDown={(e) => { e.preventDefault(); handleToolbarAction('bold'); }} title="Bold"><Bold size={18} /></button>
                             <button className={styles.formatBtn} onMouseDown={(e) => { e.preventDefault(); handleToolbarAction('italic'); }} title="Italic"><Italic size={18} /></button>
                             <button className={styles.formatBtn} onMouseDown={(e) => { e.preventDefault(); handleToolbarAction('underline'); }} title="Underline"><Underline size={18} /></button>
+
+                            {/* Color Picker Container */}
+                            <div style={{ position: 'relative' }}>
+                                <button
+                                    className={`${styles.formatBtn} ${showColorPicker ? styles.active : ''}`}
+                                    onMouseDown={(e) => { e.preventDefault(); setShowColorPicker(!showColorPicker); }}
+                                    title="Highlight Color"
+                                >
+                                    <Highlighter size={18} style={{ color: showColorPicker ? '#2F6CF6' : '#5F6368' }} />
+                                </button>
+
+                                {showColorPicker && (
+                                    <div className={styles.colorPickerDropdown}>
+                                        {highlightColors.map((c) => (
+                                            <div
+                                                key={c.color}
+                                                className={styles.colorOption}
+                                                style={{ backgroundColor: c.color }}
+                                                title={c.label}
+                                                onMouseDown={(e) => {
+                                                    e.preventDefault();
+                                                    handleToolbarAction('highlight-color', c.className);
+                                                }}
+                                            />
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+
                             <div className={styles.divider}></div>
                             <button className={styles.formatBtn} onMouseDown={(e) => { e.preventDefault(); handleToolbarAction('list'); }} title="List"><List size={18} /></button>
                             <button className={styles.formatBtn} onMouseDown={(e) => { e.preventDefault(); handleToolbarAction('link'); }} title="Link"><LinkIcon size={18} /></button>

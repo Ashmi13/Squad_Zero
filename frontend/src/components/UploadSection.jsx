@@ -22,22 +22,33 @@ const UploadSection = () => {
             console.log("Upload result:", uploadResult);
 
             if (uploadResult.pdf_id) {
-                setUploadStatus('Generating Note... (This may take a minute)');
+                // SKIP AI GENERATION for Interim Manual Mode
+                // Use the text extracted directly by the backend
 
-                // 2. Generate Note
-                const USER_ID = "test_user"; // Replace with real auth
-                const noteResult = await generateNote(uploadResult.pdf_id, USER_ID, "Summarize this document.");
-                console.log("Note result:", noteResult);
+                const noteId = Date.now().toString(); // Generate a temp ID for the session
 
-                // 3. Navigate to Editor
-                // Store note in local storage for the editor to pick up (since we don't have getNote endpoint yet)
+                // Clean up the extracted text: 
+                // PDF extraction often adds newlines at the end of every line (hard wrapping).
+                let rawText = uploadResult.extracted_text || "";
+
+                // 1. Unify line endings to \n
+                let cleanText = rawText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+                // 2. Join lines that are likely part of the same paragraph:
+                // Replace "word\nword" with "word word".
+                // Keep "word\n\nword" as TWO newlines (paragraph break).
+                cleanText = cleanText.replace(/([^\n])\n(?=[^\n])/g, '$1 ');
+
+                // Store note in local storage for the editor
                 localStorage.setItem('currentNote', JSON.stringify({
-                    content: noteResult.content,
+                    content: cleanText,
                     pdfId: uploadResult.pdf_id,
-                    noteId: noteResult.note_id
+                    pdfUrl: uploadResult.pdf_url, // Store the URL for the viewer
+                    noteId: noteId,
+                    filename: uploadResult.filename
                 }));
 
-                navigate(`/editor/${noteResult.note_id}`);
+                navigate(`/editor/${noteId}`);
             }
 
         } catch (error) {

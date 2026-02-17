@@ -5,7 +5,13 @@ import os
 import uuid
 from pydantic import BaseModel
 
+from fastapi.staticfiles import StaticFiles
+
 app = FastAPI()
+
+# Mount the documents folder to serve PDFs
+os.makedirs("documents", exist_ok=True)
+app.mount("/documents", StaticFiles(directory="documents"), name="documents")
 
 # Enable CORS so your React app can talk to this backend
 app.add_middleware(
@@ -32,11 +38,23 @@ class NoteUpdate(BaseModel):
 
 @app.post("/upload")
 async def upload_pdf(file: UploadFile = File(...)):
+    print(f"Received upload request: {file.filename}")
     content = await file.read()
     # Generate a unique ID for this PDF
     pdf_id = str(uuid.uuid4())
-    status = ai_service.process_pdf(content, pdf_id)
-    return {"status": status, "pdf_id": pdf_id, "filename": file.filename}
+    
+    # Process: Save to disk, extract text (Skip Vector DB for now/or keep it if needed, but we focus on manual workflow)
+    # user wants "not include the generating struc note", just show uploaded material
+    
+    result = ai_service.process_pdf(content, pdf_id, file.filename)
+    
+    return {
+        "status": "success", 
+        "pdf_id": pdf_id, 
+        "filename": file.filename,
+        "pdf_url": result["pdf_url"],
+        "extracted_text": result["extracted_text"]
+    }
 
 @app.post("/generate-note")
 async def generate_note(request: NoteRequest):

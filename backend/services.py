@@ -26,33 +26,30 @@ class AIService:
             temperature=0
         )
 
-    def process_pdf(self, file_bytes, pdf_id):
-        # Extract text using the guide's manual algorithm
+    def process_pdf(self, file_bytes, pdf_id, original_filename):
+        # 1. Save PDF to disk for viewing
+        save_dir = "documents"
+        os.makedirs(save_dir, exist_ok=True)
+        
+        # Sanitize filename or just use pdf_id.pdf to be safe/simple
+        safe_filename = f"{pdf_id}.pdf"
+        file_path = os.path.join(save_dir, safe_filename)
+        
+        with open(file_path, "wb") as f:
+            f.write(file_bytes)
+            
+        # 2. Extract text using the manual algorithm
         reader = PdfReader(BytesIO(file_bytes))
         text = ""
         for page in reader.pages:
             text += page.extract_text() or ""
         
-        # Split text into chunks for the Vector DB (Use Recursive for safer splits)
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
-        split_docs = text_splitter.split_text(text)
-        
-        docs = []
-        for i, doc_text in enumerate(split_docs):
-            docs.append(
-                text_splitter.create_documents(
-                    texts=[doc_text], 
-                    metadatas=[{"pdf_id": pdf_id, "chunk_index": i}]
-                )[0]
-            )
-        
-        # Store in local Vector DB (ChromaDB)
-        vectorstore = Chroma.from_documents(
-            documents=docs, 
-            embedding=self.embeddings,
-            persist_directory="./chroma_db"
-        )
-        return "PDF Processed Successfully"
+        # 3. Return text and file path (relative for URL)
+        return {
+            "status": "success",
+            "pdf_url": f"/documents/{safe_filename}",
+            "extracted_text": text
+        }
 
     def save_note_to_db(self, user_id, pdf_id, title, content):
         conn = get_db_connection()

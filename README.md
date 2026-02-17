@@ -1,16 +1,37 @@
-# React + Vite
+# NeuraNote
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+NeuraNote is an AI-powered note-taking application that transforms PDFs into structured notes using LLMs.
 
-Currently, two official plugins are available:
+## Project Structure
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+```
+neuranote_m3_frontend/
+├── backend/       # Python FastAPI Server (AI Logic, Database)
+├── frontend/      # React + Vite Frontend (UI, Components)
+└── .gitignore     # Global gitignore
+```
 
-## React Compiler
+## How to Run
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### 1. Backend (Python)
+Navigate to the backend folder and run the server:
+```bash
+cd backend
+# Activate venv if needed
+python -m uvicorn main:app --reload
+```
+*Server runs on: http://localhost:8000*
 
-## Expanding the ESLint configuration
+### 2. Frontend (React)
+Open a new terminal, navigate to the frontend folder, and start the dev server:
+```bash
+cd frontend
+npm run dev
+```
+*App runs on: http://localhost:5173 (or 5174)*
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+## Features
+- **PDF Upload & Processing**: extracting text from documents.
+- **AI Note Generation**: Creating structured notes from PDFs.
+- **Refinement**: "Tag & Refine" workflow to edit specific text using AI.
+- **Manual Mode**: A distraction-free manual editor (Interim Demo Feature).

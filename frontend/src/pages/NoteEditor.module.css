@@ -344,6 +344,30 @@
     background-color: #E0E0E0;
 }
 
+.spacingWrapper {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background-color: #F5F5F5;
+    padding: 4px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.spacingIcon {
+    color: #5F6368;
+}
+
+.spacingSelect {
+    border: none;
+    background: transparent;
+    font-size: 13px;
+    font-weight: 500;
+    color: #1B1D21;
+    cursor: pointer;
+    outline: none;
+}
+
 .actionGroup {
     display: flex;
     align-items: center;

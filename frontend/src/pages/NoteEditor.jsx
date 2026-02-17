@@ -6,18 +6,25 @@ import rehypeRaw from 'rehype-raw';
 import {
     Share2, Search, ZoomIn, ZoomOut, ChevronLeft, ChevronRight,
     Bold, Italic, Underline, List, Link as LinkIcon, Mic,
-    Wand2, Settings, PenTool, Loader2, X, MousePointerClick
+    Wand2, Settings, PenTool, Loader2, X, MousePointerClick, ArrowUpDown
 } from 'lucide-react';
 import styles from './NoteEditor.module.css';
 import SaveModal from '../components/SaveModal';
 import RefineModal from '../components/RefineModal';
 import { generateNote, refineText } from '../api';
 
+
+// --- CONFIGURATION ---
+// Set to TRUE for full AI features (Final)
+// Set to FALSE for manual-only mode (Interim Demo)
+const ENABLE_AI = false;
+
 const NoteEditor = () => {
     const { noteId } = useParams();
     const navigate = useNavigate();
 
     const [content, setContent] = useState('');
+    const [lineHeight, setLineHeight] = useState('1.5'); // Default spacing
     const [pdfId, setPdfId] = useState('');
     const [currentNoteId, setCurrentNoteId] = useState(noteId);
     const [userId, setUserId] = useState('test_user');
@@ -45,6 +52,11 @@ const NoteEditor = () => {
             setContent(parsed.content);
             setPdfId(parsed.pdfId);
             if (!currentNoteId) setCurrentNoteId(parsed.noteId);
+        } else {
+            // For Interim Mode: Initialize empty if no note found
+            if (!ENABLE_AI) {
+                setContent('');
+            }
         }
     }, [noteId]);
 
@@ -91,6 +103,9 @@ const NoteEditor = () => {
 
     // --- Selection Handlers ---
     const handleEditorSelect = (e) => {
+        // Only enable selection for refinement if AI is enabled
+        if (!ENABLE_AI) return;
+
         // We use onSelect or onMouseUp to capture selection info from Textarea
         const start = e.target.selectionStart;
         const end = e.target.selectionEnd;
@@ -108,6 +123,8 @@ const NoteEditor = () => {
     };
 
     const handleContextMenu = (e) => {
+        if (!ENABLE_AI) return; // Native context menu in manual mode
+
         e.preventDefault();
         if (tempSelection) {
             setContextMenu({ x: e.pageX, y: e.pageY });
@@ -222,7 +239,9 @@ const NoteEditor = () => {
                 <div className={styles.leftPanel}>
                     <div className={styles.pdfToolbar}>
                         <div className={styles.pdfControls}>
-                            <span style={{ fontWeight: 600, color: '#333' }}>Final Preview</span>
+                            <span style={{ fontWeight: 600, color: '#333' }}>
+                                {ENABLE_AI ? "Final Preview" : "PDF Viewer"}
+                            </span>
                         </div>
                         <div className={styles.zoomControls}>
                             <button className={styles.iconBtn} onClick={() => setZoomLevel(z => Math.max(z - 10, 25))}><ZoomOut size={16} /></button>
@@ -236,12 +255,30 @@ const NoteEditor = () => {
                             {content ? (
                                 <ReactMarkdown rehypePlugins={[rehypeRaw]}>{content}</ReactMarkdown>
                             ) : (
-                                <p style={{ color: '#999' }}>Preview will appear here...</p>
+                                <div style={{
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    height: '100%',
+                                    color: '#999'
+                                }}>
+                                    {ENABLE_AI ? (
+                                        <p>Preview will appear here...</p>
+                                    ) : (
+                                        <>
+                                            <p style={{ marginBottom: '1rem' }}>PDF Document would be displayed here.</p>
+                                            <div style={{ width: '200px', height: '280px', border: '1px dashed #ccc', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f5f5f5' }}>
+                                                PDF Placeholder
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
                             )}
                         </div>
 
                         {/* Selection Indicator on Left too? Maybe not needed since highlight is in editor */}
-                        {selection && (
+                        {ENABLE_AI && selection && (
                             <div className={styles.selectionIndicator}>
                                 <span className={styles.selectionLabel}>Targeting:</span>
                                 <span className={styles.selectionText}>"{selection.text.substring(0, 30)}..."</span>
@@ -250,25 +287,27 @@ const NoteEditor = () => {
                         )}
 
                         {/* Bottom Bar attached to Left Panel (Context) */}
-                        <div className={styles.bottomBarContainer}>
-                            <div className={styles.bottomBar}>
-                                <div className={styles.inputWrapper}>
-                                    <input
-                                        ref={chatInputRef}
-                                        type="text"
-                                        placeholder={selection ? "Refine tagged text..." : "Instructions to regenerate..."}
-                                        value={chatInput}
-                                        onChange={(e) => setChatInput(e.target.value)}
-                                        onKeyDown={(e) => e.key === 'Enter' && handleChatSubmit()}
-                                        disabled={isProcessing}
-                                    />
-                                    <button className={styles.iconBtn}><Mic size={18} /></button>
+                        {ENABLE_AI && (
+                            <div className={styles.bottomBarContainer}>
+                                <div className={styles.bottomBar}>
+                                    <div className={styles.inputWrapper}>
+                                        <input
+                                            ref={chatInputRef}
+                                            type="text"
+                                            placeholder={selection ? "Refine tagged text..." : "Instructions to regenerate..."}
+                                            value={chatInput}
+                                            onChange={(e) => setChatInput(e.target.value)}
+                                            onKeyDown={(e) => e.key === 'Enter' && handleChatSubmit()}
+                                            disabled={isProcessing}
+                                        />
+                                        <button className={styles.iconBtn}><Mic size={18} /></button>
+                                    </div>
+                                    <button className={styles.sendBtn} onClick={handleChatSubmit} disabled={isProcessing}>
+                                        {isProcessing ? <Loader2 size={18} className={styles.spin} /> : 'Send'}
+                                    </button>
                                 </div>
-                                <button className={styles.sendBtn} onClick={handleChatSubmit} disabled={isProcessing}>
-                                    {isProcessing ? <Loader2 size={18} className={styles.spin} /> : 'Send'}
-                                </button>
                             </div>
-                        </div>
+                        )}
                     </div>
                 </div>
 
@@ -282,6 +321,22 @@ const NoteEditor = () => {
                             <div className={styles.divider}></div>
                             <button className={styles.formatBtn} onMouseDown={(e) => { e.preventDefault(); handleToolbarAction('list'); }} title="List"><List size={18} /></button>
                             <button className={styles.formatBtn} onMouseDown={(e) => { e.preventDefault(); handleToolbarAction('link'); }} title="Link"><LinkIcon size={18} /></button>
+
+                            <div className={styles.divider}></div>
+                            <div className={styles.spacingWrapper} title="Line Spacing">
+                                <ArrowUpDown size={16} className={styles.spacingIcon} />
+                                <select
+                                    className={styles.spacingSelect}
+                                    value={lineHeight}
+                                    onChange={(e) => setLineHeight(e.target.value)}
+                                >
+                                    <option value="1.0">1.0</option>
+                                    <option value="1.15">1.15</option>
+                                    <option value="1.5">1.5</option>
+                                    <option value="2.0">2.0</option>
+                                    <option value="2.5">2.5</option>
+                                </select>
+                            </div>
                         </div>
                         <div className={styles.actionGroup}>
                             <button className={styles.textBtn}>Export</button>
@@ -293,6 +348,7 @@ const NoteEditor = () => {
                         <textarea
                             ref={editorRef}
                             className={styles.editorInput}
+                            style={{ lineHeight: lineHeight }}
                             value={content}
                             onChange={(e) => setContent(e.target.value)}
                             onSelect={handleEditorSelect} // Capture selection
@@ -304,7 +360,7 @@ const NoteEditor = () => {
             </div>
 
             {/* Custom Context Menu */}
-            {contextMenu && (
+            {ENABLE_AI && contextMenu && (
                 <div
                     className={styles.contextMenu}
                     style={{ top: contextMenu.y, left: contextMenu.x }}
@@ -328,7 +384,7 @@ const NoteEditor = () => {
                 />
             )}
 
-            {refinementResult && (
+            {ENABLE_AI && refinementResult && (
                 <RefineModal
                     originalText={refinementResult.isFullNote ? "Full Note" : refinementResult.original}
                     refinedText={refinementResult.refined}

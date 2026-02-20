@@ -1,6 +1,6 @@
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from services import ai_service
+from m3_structurednotes.services import ai_service
 import os
 import uuid
 from pydantic import BaseModel

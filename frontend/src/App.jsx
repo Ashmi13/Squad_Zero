@@ -1,7 +1,7 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import Dashboard from './pages/Dashboard';
-import NoteEditor from './pages/NoteEditor';
+import Dashboard from './m3_structurednotes/pages/Dashboard';
+import NoteEditor from './m3_structurednotes/pages/NoteEditor';
 import './index.css';
 
 function App() {

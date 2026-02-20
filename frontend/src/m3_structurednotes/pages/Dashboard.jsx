@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import Sidebar from '../components/Sidebar';
-import Header from '../components/Header';
+import Sidebar from '../../components/Sidebar';
+import Header from '../../components/Header';
 import UploadSection from '../components/UploadSection';
 import FolderGrid from '../components/FolderGrid';
 import RecentFiles from '../components/RecentFiles';
-import styles from '../App.module.css'; // Reusing App styles for now
+import styles from '../../App.module.css'; // Reusing App styles for now
 
 const Dashboard = () => {
     // Member 3: Multi-Select State

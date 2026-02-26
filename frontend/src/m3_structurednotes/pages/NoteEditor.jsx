@@ -47,6 +47,9 @@ const NoteEditor = () => {
     const chatInputRef = useRef(null);
     const editorRef = useRef(null); // Ref for the textarea
 
+    const [leftView, setLeftView] = useState('preview'); // 'pdf' | 'preview'
+    const [isPptx, setIsPptx] = useState(false);
+
     useEffect(() => {
         const savedNote = localStorage.getItem('currentNote');
         if (savedNote) {
@@ -54,6 +57,7 @@ const NoteEditor = () => {
             setContent(parsed.content);
             setPdfId(parsed.pdfId);
             setPdfUrl(parsed.pdfUrl || ''); // Load URL
+            setIsPptx(parsed.isPptx || (parsed.pdfUrl && parsed.pdfUrl.toLowerCase().endsWith('.pptx')));
             if (!currentNoteId) setCurrentNoteId(parsed.noteId);
         } else {
             // For Interim Mode: Initialize empty if no note found
@@ -218,8 +222,6 @@ const NoteEditor = () => {
         }));
     };
 
-    const [leftView, setLeftView] = useState('preview'); // 'pdf' | 'preview'
-
     return (
         <div className={styles.editorContainer}>
             <div
@@ -258,7 +260,7 @@ const NoteEditor = () => {
                                     className={`${styles.viewToggleBtn} ${leftView === 'pdf' ? styles.active : ''}`}
                                     onClick={() => setLeftView('pdf')}
                                 >
-                                    PDF Source
+                                    {isPptx ? 'PowerPoint Source' : 'PDF Source'}
                                 </button>
                                 <button
                                     className={`${styles.viewToggleBtn} ${leftView === 'preview' ? styles.active : ''}`}
@@ -298,14 +300,28 @@ const NoteEditor = () => {
                             {leftView === 'pdf' ? (
                                 <div className={styles.markdownWrapper} style={{ height: '100%' }}>
                                     {pdfUrl ? (
-                                        <iframe
-                                            src={`http://localhost:8000${pdfUrl}`}
-                                            className={styles.pdfFrame}
-                                            title="PDF Viewer"
-                                            style={{ width: '100%', height: '100%', border: 'none' }}
-                                        />
+                                        isPptx ? (
+                                            <div className={styles.emptyState} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                                                <div>PowerPoint files cannot be previewed directly.</div>
+                                                <a
+                                                    href={`http://localhost:8000${pdfUrl}`}
+                                                    download
+                                                    className={styles.primaryBtn}
+                                                    style={{ textDecoration: 'none', textAlign: 'center' }}
+                                                >
+                                                    Download Slides
+                                                </a>
+                                            </div>
+                                        ) : (
+                                            <iframe
+                                                src={`http://localhost:8000${pdfUrl}`}
+                                                className={styles.pdfFrame}
+                                                title="PDF Viewer"
+                                                style={{ width: '100%', height: '100%', border: 'none' }}
+                                            />
+                                        )
                                     ) : (
-                                        <div className={styles.emptyState}>No PDF loaded.</div>
+                                        <div className={styles.emptyState}>No source file loaded.</div>
                                     )}
                                 </div>
                             ) : (

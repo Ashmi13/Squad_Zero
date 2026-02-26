@@ -1,9 +1,10 @@
 import os
 import json
 from PyPDF2 import PdfReader
+from pptx import Presentation
 from io import BytesIO
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_groq import ChatGroq
+# from langchain_huggingface import HuggingFaceEmbeddings
+# from langchain_groq import ChatGroq
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from dotenv import load_dotenv
 from .database import get_db_connection
@@ -17,31 +18,58 @@ class AIService:
 
     def __init__(self):
         # Use HuggingFace local embeddings (free)
-        self.embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+        self._embeddings = None
         # Use Groq for LLM (free tier)
-        api_key = os.getenv("GROQ_API_KEY")
-        self.llm = ChatGroq(
-            groq_api_key=api_key, 
-            model_name="llama-3.1-8b-instant",
-            temperature=0
-        )
+        self._llm = None
+
+    @property
+    def embeddings(self):
+        if self._embeddings is None:
+            from langchain_huggingface import HuggingFaceEmbeddings
+            print("Loading HuggingFace Embeddings... (First run may take a few minutes)")
+            self._embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+        return self._embeddings
+
+    @property
+    def llm(self):
+        if self._llm is None:
+            from langchain_groq import ChatGroq
+            api_key = os.getenv("GROQ_API_KEY")
+            self._llm = ChatGroq(
+                groq_api_key=api_key, 
+                model_name="llama-3.1-8b-instant",
+                temperature=0
+            )
+        return self._llm
 
     def process_pdf(self, file_bytes, pdf_id, original_filename):
-        # 1. Save PDF to disk for viewing
+        # Determine file type
+        is_pptx = original_filename.lower().endswith('.pptx')
+        extension = ".pptx" if is_pptx else ".pdf"
+
+        # 1. Save File to disk for viewing
         save_dir = "documents"
         os.makedirs(save_dir, exist_ok=True)
         
-        safe_filename = f"{pdf_id}.pdf"
+        safe_filename = f"{pdf_id}{extension}"
         file_path = os.path.join(save_dir, safe_filename)
         
         with open(file_path, "wb") as f:
             f.write(file_bytes)
             
         # 2. Extract text
-        reader = PdfReader(BytesIO(file_bytes))
         full_text = ""
-        for page in reader.pages:
-            full_text += page.extract_text() or ""
+        if is_pptx:
+            prs = Presentation(BytesIO(file_bytes))
+            for slide in prs.slides:
+                for shape in slide.shapes:
+                    if hasattr(shape, "text"):
+                        full_text += shape.text + " "
+                full_text += "\n"
+        else:
+            reader = PdfReader(BytesIO(file_bytes))
+            for page in reader.pages:
+                full_text += page.extract_text() or ""
             
         # 3. Chunk text for Vector Storage
         text_splitter = RecursiveCharacterTextSplitter(

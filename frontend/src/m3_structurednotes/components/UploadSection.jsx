@@ -38,10 +38,11 @@ const UploadSection = () => {
 
                 localStorage.setItem('currentNote', JSON.stringify({
                     content: cleanText,
-                    pdfId: uploadResult.pdf_id, // Primary PDF for viewer
+                    pdfId: uploadResult.pdf_id, // Primary source for viewer
                     pdfUrl: uploadResult.pdf_url,
                     noteId: noteId,
-                    filename: title
+                    filename: title,
+                    isPptx: uploadResult.pdf_url.toLowerCase().endsWith('.pptx')
                 }));
 
                 navigate(`/editor/${noteId}`);
@@ -65,7 +66,7 @@ const UploadSection = () => {
                 </div>
                 <h2 className={styles.textPurple} style={{ fontSize: '28px', marginBottom: '12px' }}>Generate Structured Note</h2>
                 <p style={{ fontSize: '16px', color: '#666', marginBottom: '40px' }}>
-                    Upload your study materials (PDF) to generate an AI-organized study guide.
+                    Upload your study materials (PDF or PowerPoint) to generate an AI-organized study guide.
                     <br />
                     Select multiple files to create a comprehensive note.
                 </p>
@@ -75,7 +76,7 @@ const UploadSection = () => {
                         <Plus size={24} />
                         <input
                             type="file"
-                            accept=".pdf"
+                            accept=".pdf,.pptx"
                             multiple // Enable multiple file selection
                             onChange={handleFileUpload}
                             style={{ display: 'none' }}
@@ -85,7 +86,7 @@ const UploadSection = () => {
                     </label>
                 </div>
                 <div className={styles.maxSize} style={{ marginTop: '20px' }}>
-                    Supports PDF • Max 50MB per file
+                    Supports PDF & PowerPoint • Max 50MB per file
                 </div>
             </div>
         </div>

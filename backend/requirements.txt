@@ -13,3 +13,4 @@ sentence-transformers
 langchain-huggingface
 psycopg2-binary
 pgvector
+python-pptx

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Upload, X, Sparkles, Clock, ChevronLeft, ChevronRight, BarChart3, FileText, Download } from 'lucide-react';
+import { Upload, X, Sparkles, Clock, ChevronLeft, ChevronRight, FileText } from 'lucide-react';
 import './QuizPage.css';
 
 const QuizPage = ({ noteId, userId }) => {
@@ -12,9 +12,9 @@ const QuizPage = ({ noteId, userId }) => {
   const [answers, setAnswers] = useState({});
   const [timeRemaining, setTimeRemaining] = useState(null);
   const [quizStartTime, setQuizStartTime] = useState(null);
-  const [attemptId, setAttemptId] = useState(null);
   const [results, setResults] = useState(null);
   const [showReview, setShowReview] = useState(false);
+  const [error, setError] = useState(null);
 
   // Configuration
   const [config, setConfig] = useState({
@@ -50,6 +50,7 @@ const QuizPage = ({ noteId, userId }) => {
       file: file
     }));
     setUploadedFiles([...uploadedFiles, ...newFiles]);
+    setError(null);
   };
 
   const removeFile = (id) => {
@@ -59,11 +60,12 @@ const QuizPage = ({ noteId, userId }) => {
   // Generate quiz from uploaded materials
   const handleGenerateQuiz = async () => {
     if (uploadedFiles.length === 0) {
-      alert('Please upload at least one file');
+      setError('Please upload at least one file');
       return;
     }
 
     setIsGenerating(true);
+    setError(null);
 
     try {
       const formData = new FormData();
@@ -73,37 +75,42 @@ const QuizPage = ({ noteId, userId }) => {
       formData.append('num_questions', config.numQuestions);
       formData.append('difficulty', config.difficulty);
       formData.append('time_limit', config.timeLimit);
-      formData.append('user_id', userId);
+      formData.append('user_id', userId || 1);
       if (noteId) formData.append('note_id', noteId);
 
-      const response = await fetch('/api/quizzes/generate', {
+      console.log('Sending request to generate quiz...');
+      
+      const response = await fetch('http://localhost:8000/api/quizzes/generate', {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
         body: formData
       });
 
-      if (!response.ok) throw new Error('Quiz generation failed');
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Quiz generation failed');
+      }
 
       const data = await response.json();
+      console.log('Quiz generated:', data);
+      
       setQuiz(data);
-      setTimeRemaining(data.time_limit); // in seconds
+      setTimeRemaining(data.time_limit);
       setQuizStartTime(Date.now());
       setStep('taking');
+      
     } catch (error) {
       console.error('Error generating quiz:', error);
-      alert('Failed to generate quiz. Please try again.');
+      setError(error.message || 'Failed to generate quiz. Please try again.');
     } finally {
       setIsGenerating(false);
     }
   };
 
   // Answer selection
-  const handleAnswerSelect = (optionId) => {
+  const handleAnswerSelect = (optionLetter) => {
     setAnswers({
       ...answers,
-      [currentQuestion]: optionId
+      [currentQuestion]: optionLetter
     });
   };
 
@@ -126,8 +133,10 @@ const QuizPage = ({ noteId, userId }) => {
 
   // Submit quiz
   const handleSubmitQuiz = async () => {
-    if (Object.keys(answers).length < quiz.questions.length) {
-      if (!window.confirm('You have unanswered questions. Submit anyway?')) {
+    const unanswered = quiz.questions.length - Object.keys(answers).length;
+    
+    if (unanswered > 0) {
+      if (!window.confirm(`You have ${unanswered} unanswered question(s). Submit anyway?`)) {
         return;
       }
     }
@@ -135,25 +144,24 @@ const QuizPage = ({ noteId, userId }) => {
     try {
       const timeTaken = Math.floor((Date.now() - quizStartTime) / 1000);
 
-      const response = await fetch(`/api/quizzes/${quiz.quiz_id}/submit`, {
+      const formData = new FormData();
+      formData.append('user_id', userId || 1);
+      formData.append('answers', JSON.stringify(answers));
+      formData.append('time_taken', timeTaken);
+
+      const response = await fetch(`http://localhost:8000/api/quizzes/${quiz.quiz_id}/submit`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({
-          user_id: userId,
-          answers: answers,
-          time_taken: timeTaken
-        })
+        body: formData
       });
 
-      if (!response.ok) throw new Error('Submission failed');
+      if (!response.ok) {
+        throw new Error('Submission failed');
+      }
 
       const data = await response.json();
       setResults(data);
-      setAttemptId(data.attempt_id);
       setStep('results');
+      
     } catch (error) {
       console.error('Error submitting quiz:', error);
       alert('Failed to submit quiz. Please try again.');
@@ -165,32 +173,6 @@ const QuizPage = ({ noteId, userId }) => {
     await handleSubmitQuiz();
   };
 
-  // Download PDF
-  const handleDownloadPDF = async () => {
-    try {
-      const response = await fetch(`/api/quizzes/${quiz.quiz_id}/download-pdf?attempt_id=${attemptId}`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-
-      if (!response.ok) throw new Error('Download failed');
-
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `quiz-results-${quiz.quiz_id}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-    } catch (error) {
-      console.error('Error downloading PDF:', error);
-      alert('Failed to download PDF');
-    }
-  };
-
   // Restart quiz
   const handleRestart = () => {
     setStep('upload');
@@ -199,7 +181,7 @@ const QuizPage = ({ noteId, userId }) => {
     setAnswers({});
     setCurrentQuestion(0);
     setResults(null);
-    setAttemptId(null);
+    setError(null);
   };
 
   // Utility functions
@@ -210,10 +192,9 @@ const QuizPage = ({ noteId, userId }) => {
   };
 
   const getFileIcon = (type) => {
-    if (type.includes('pdf')) return '📄';
-    if (type.includes('image')) return '🖼️';
-    if (type.includes('powerpoint') || type.includes('presentation')) return '📊';
-    if (type.includes('word') || type.includes('document')) return '📝';
+    if (type && type.includes('pdf')) return '📄';
+    if (type && type.includes('image')) return '🖼️';
+    if (type && type.includes('word')) return '📝';
     return '📎';
   };
 
@@ -230,6 +211,13 @@ const QuizPage = ({ noteId, userId }) => {
         </div>
       </div>
 
+      {error && (
+        <div className="error-message">
+          <span>⚠️</span>
+          <span>{error}</span>
+        </div>
+      )}
+
       {/* Configuration */}
       <div className="config-card">
         <h3>Quiz Settings</h3>
@@ -239,7 +227,7 @@ const QuizPage = ({ noteId, userId }) => {
             <input
               type="number"
               min="5"
-              max="50"
+              max="20"
               value={config.numQuestions}
               onChange={(e) => setConfig({ ...config, numQuestions: parseInt(e.target.value) })}
             />
@@ -274,14 +262,14 @@ const QuizPage = ({ noteId, userId }) => {
           type="file"
           id="file-upload"
           multiple
-          accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,.png,.jpg,.jpeg"
+          accept=".pdf,.doc,.docx,.txt"
           onChange={handleFileUpload}
           style={{ display: 'none' }}
         />
         <label htmlFor="file-upload" className="upload-area">
           <Upload size={48} />
           <h3>Drop files here or click to upload</h3>
-          <p>Supports: PDF, DOC, PPT, Images (Max 10MB each)</p>
+          <p>Supports: PDF, DOC, TXT (Max 10MB each)</p>
         </label>
 
         {uploadedFiles.length > 0 && (
@@ -331,6 +319,7 @@ const QuizPage = ({ noteId, userId }) => {
 
     const question = quiz.questions[currentQuestion];
     const progress = ((currentQuestion + 1) / quiz.questions.length) * 100;
+    const answeredCount = Object.keys(answers).length;
 
     return (
       <div className="quiz-layout">
@@ -459,11 +448,11 @@ const QuizPage = ({ noteId, userId }) => {
             </div>
             <div className="info-item">
               <span>Answered:</span>
-              <strong>{Object.keys(answers).length}</strong>
+              <strong>{answeredCount}</strong>
             </div>
             <div className="info-item">
               <span>Remaining:</span>
-              <strong>{quiz.questions.length - Object.keys(answers).length}</strong>
+              <strong>{quiz.questions.length - answeredCount}</strong>
             </div>
           </div>
         </div>
@@ -535,10 +524,6 @@ const QuizPage = ({ noteId, userId }) => {
           <button className="action-btn primary" onClick={() => setShowReview(!showReview)}>
             <FileText size={20} />
             {showReview ? 'Hide Review' : 'Review Answers'}
-          </button>
-          <button className="action-btn secondary" onClick={handleDownloadPDF}>
-            <Download size={20} />
-            Download PDF
           </button>
           <button className="action-btn secondary" onClick={handleRestart}>
             <Sparkles size={20} />

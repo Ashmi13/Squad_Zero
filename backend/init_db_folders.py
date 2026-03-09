@@ -83,6 +83,21 @@ def init_db():
             END $$;
         """)
 
+        # 5. Insert default folders for demo if they don't exist
+        print("Inserting default folders...")
+        default_folders = [
+            ('44b24a92-5d5e-424b-8e3c-a21f32e104c4', 'test_user', 'AI'),
+            ('dcb09c95-30ab-458c-8209-4d84c32c124c', 'test_user', 'Physics'),
+            ('f07b6768-05ab-41fd-a72a-e932820c580d', 'test_user', 'Chemistry'),
+            ('e93301ce-6997-48a9-ab3c-f37734b28924', 'test_user', 'Biology')
+        ]
+        for f_id, u_id, name in default_folders:
+            cur.execute("""
+                INSERT INTO folders (id, user_id, name)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (user_id, name) DO NOTHING;
+            """, (f_id, u_id, name))
+
         conn.commit()
         cur.close()
         conn.close()

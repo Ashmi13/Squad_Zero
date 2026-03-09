@@ -127,12 +127,14 @@ class AIService:
     def save_note_to_db(self, user_id, pdf_id, title, content):
         conn = get_db_connection()
         if not conn:
-            return "Database connection failed"
+            print("Database connection failed")
+            return None
         
         try:
             cur = conn.cursor()
             note_id = str(uuid.uuid4())
             
+            # Use pdf_id if provided (ensure column exists or handle gracefully)
             cur.execute("""
                 INSERT INTO notes (note_id, user_id, title, content, created_date, updated_date, note_type, is_in_folder, has_embeddings)
                 VALUES (%s, %s, %s, %s, NOW(), NOW(), 'ai_generated', FALSE, TRUE)
@@ -145,6 +147,8 @@ class AIService:
             return note_id
         except Exception as e:
             print(f"Error saving to DB: {e}")
+            if conn:
+                conn.rollback()
             return None
 
         
@@ -210,92 +214,6 @@ class AIService:
         except Exception as e:
             return f"Error generating note: {str(e)}"
 
-    def refine_text(self, pdf_id, selected_text, instruction):
-        # Similar logic, maybe we don't need vector search if selection is small, 
-        # But if we want context *around* the selection, we could use it.
-        # For now, just refine the selection using LLM.
-        
-        prompt = f"""
-        Original Text: "{selected_text}"
-        
-        Instruction: {instruction}
-        
-        Refine the text above according to the instruction. Return ONLY the refined text.
-        """
-        
-        try:
-            response = self.llm.invoke(prompt)
-            return {"refined_content": response.content}
-        except Exception as e:
-            return {"error": str(e)}
-        # Split documents into batches
-        batches = [sorted_docs[i:i + BATCH_SIZE] for i in range(0, len(sorted_docs), BATCH_SIZE)]
-        
-        final_notes = []
-        
-        from langchain_core.prompts import PromptTemplate
-        from langchain_core.messages import HumanMessage, SystemMessage
-
-        instruction_text = f"USER INSTRUCTION: {instruction}\n" if instruction else ""
-
-        prompt_template = """You are an expert document summarizer. 
-        Read the text below (Part {current_part} of {total_parts}) and generate a structured note.
-        
-        """ + instruction_text + """
-        
-        CRITICAL INSTRUCTIONS:
-        1. Maintain the EXACT sequence of topics as they appear in the text.
-        2. Do NOT merge distinct subtopics. Keep them separate.
-        3. Use the following Markdown format:
-        
-        # [Main Document Title] (Only if this is Part 1)
-        
-        ## [Topic 1 from text]
-        - **[Concept]**: [Detailed explanation]
-        - **[Concept]**: [Detailed explanation]
-        
-        ## [Topic 2 from text]
-        (and so on...)
-        
-        Text content:
-        {text}
-        
-        Structured Note:"""
-
-        print(f"Processing {len(batches)} batches...")
-
-        for i, batch in enumerate(batches):
-            print(f"Processing batch {i+1}/{len(batches)}")
-            batch_text = "\n\n".join(batch)
-            
-            formatted_prompt = prompt_template.format(
-                current_part=i+1, 
-                total_parts=len(batches), 
-                text=batch_text
-            )
-            
-            messages = [
-                SystemMessage(content="You are a helpful AI assistant that generates structured notes from documents."),
-                HumanMessage(content=formatted_prompt)
-            ]
-            
-            try:
-                response = self.llm.invoke(messages)
-                final_notes.append(response.content)
-            except Exception as e:
-                final_notes.append(f"\n\n[Error processing batch {i+1}: {str(e)}]\n\n")
-
-        full_note = "\n\n".join(final_notes)
-        
-        # Save to PostgreSQL
-        # Extract a simple title (first line or default)
-        title = full_note.split('\n')[0].replace('#', '').strip()
-        if not title:
-            title = "Generated Note"
-            
-        note_id = self.save_note_to_db(user_id, pdf_id, title, full_note)
-            
-        return {"note_id": note_id, "content": full_note}
 
     def update_note(self, note_id: str, new_content: str):
         """
@@ -330,17 +248,30 @@ class AIService:
         Refines or explains a specific piece of text using the original PDF context.
         """
         # 1. Retrieve relevant context from the PDF
-        search_query = f"{selected_text} {instruction}"
-        vectorstore = Chroma(persist_directory="./chroma_db", embedding_function=self.embeddings)
+        query_text = f"{selected_text} {instruction}"
+        query_embedding = self.embeddings.embed_query(query_text)
         
-        # Filter by PDF ID to only search within the correct document
-        retriever = vectorstore.as_retriever(
-            search_type="similarity",
-            search_kwargs={"k": 3, "filter": {"pdf_id": pdf_id}}
-        )
-        
-        context_docs = retriever.invoke(search_query)
-        context_text = "\n\n".join([doc.page_content for doc in context_docs])
+        context_text = ""
+        try:
+            conn = get_db_connection()
+            if conn:
+                cur = conn.cursor()
+                cur.execute("""
+                    SELECT content 
+                    FROM document_chunks 
+                    WHERE pdf_id = %s 
+                    ORDER BY embedding <=> %s 
+                    LIMIT 3
+                """, (pdf_id, str(query_embedding)))
+                
+                results = cur.fetchall()
+                context_chunks = [row[0] for row in results]
+                context_text = "\n\n".join(context_chunks)
+                cur.close()
+                conn.close()
+        except Exception as e:
+            print(f"Error retrieving context for refinement: {e}")
+            context_text = "" # Fallback to no context
         
         # 2. Prompt the LLM
         prompt = f"""
@@ -357,11 +288,15 @@ class AIService:
         Do not make up information not present in the context.
         If the instruction is to "rewrite", rewrite the selected text using the context.
         If the instruction is to "give an example", provide a concrete example derived from the context.
+        Return ONLY the refined text or explanation.
         """
         
         # 3. Generate Response
-        response = self.llm.invoke(prompt)
-        return response.content
+        try:
+            response = self.llm.invoke(prompt)
+            return {"refined_content": response.content}
+        except Exception as e:
+            return {"error": str(e)}
 
     # --- Folder Management ---
     def create_folder(self, user_id, name):

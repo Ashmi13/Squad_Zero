@@ -8,14 +8,15 @@ const SaveModal = ({ noteId, onClose, onSave }) => {
     const [loading, setLoading] = useState(true);
     const [newFolderName, setNewFolderName] = useState('');
     const [selectedFolderId, setSelectedFolderId] = useState(null);
+    const [noteTitle, setNoteTitle] = useState('Untitled Note');
     const USER_ID = "test_user"; // Replace with real user context
 
     // Initial folders - mock until backend is connected or if fails
     const initialFolders = [
-        { id: '1', name: 'AI', color: '#448AFF' },
-        { id: '2', name: 'Physics', color: '#B39DDB' },
-        { id: '3', name: 'Chemistry', color: '#00E676' },
-        { id: '4', name: 'Biology', color: '#FFAB40' }
+        { id: '44b24a92-5d5e-424b-8e3c-a21f32e104c4', name: 'AI', color: '#448AFF' },
+        { id: 'dcb09c95-30ab-458c-8209-4d84c32c124c', name: 'Physics', color: '#B39DDB' },
+        { id: 'f07b6768-05ab-41fd-a72a-e932820c580d', name: 'Chemistry', color: '#00E676' },
+        { id: 'e93301ce-6997-48a9-ab3c-f37734b28924', name: 'Biology', color: '#FFAB40' }
     ];
 
     useEffect(() => {
@@ -58,11 +59,11 @@ const SaveModal = ({ noteId, onClose, onSave }) => {
                 if (noteId) {
                     await saveNoteToFolder(noteId, selectedFolderId);
                 }
-                onSave();
+                onSave(noteTitle); // Pass title back
             } catch (error) {
                 console.error("Failed to save to folder", error);
                 alert("Failed to save. Note might stay in 'Recent'.");
-                onSave(); // Close anyway
+                onSave(noteTitle); // Close and save with title anyway
             }
         } else {
             alert("Please select a folder.");
@@ -78,6 +79,20 @@ const SaveModal = ({ noteId, onClose, onSave }) => {
                 </div>
 
                 <div className={styles.body}>
+                    <div className={styles.inputGroup}>
+                        <label className={styles.label}>Note Title</label>
+                        <input
+                            type="text"
+                            placeholder="Enter note title..."
+                            value={noteTitle}
+                            onChange={(e) => setNoteTitle(e.target.value)}
+                            className={styles.input}
+                        />
+                    </div>
+
+                    <div className={styles.divider}></div>
+
+                    <label className={styles.label}>Select Folder</label>
                     <div className={styles.createSection}>
                         <input
                             type="text"

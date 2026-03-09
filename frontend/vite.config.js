@@ -6,11 +6,11 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      '/upload': 'http://localhost:8000',
-      '/generate-note': 'http://localhost:8000',
-      '/refine-text': 'http://localhost:8000',
-      '/folders': 'http://localhost:8000',
-      '/notes': 'http://localhost:8000'
+      '/upload': 'http://127.0.0.1:8000',
+      '/generate-note': 'http://127.0.0.1:8000',
+      '/refine-text': 'http://127.0.0.1:8000',
+      '/folders': 'http://127.0.0.1:8000',
+      '/notes': 'http://127.0.0.1:8000'
     }
   }
 })

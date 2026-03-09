@@ -44,8 +44,13 @@ const NoteEditor = () => {
     const [contextMenu, setContextMenu] = useState(null);
     const [tempSelection, setTempSelection] = useState(null);
 
+    // Resizable split screen
+    const [leftPanelWidth, setLeftPanelWidth] = useState(50); // percentage
+    const [isResizing, setIsResizing] = useState(false);
+
     const chatInputRef = useRef(null);
     const editorRef = useRef(null); // Ref for the textarea
+    const highlighterRef = useRef(null); // Ref for highlighter background
 
     const [leftView, setLeftView] = useState('preview'); // 'pdf' | 'preview'
     const [isPptx, setIsPptx] = useState(false);
@@ -66,6 +71,59 @@ const NoteEditor = () => {
             }
         }
     }, [noteId]);
+
+    // Auto-resize textarea to fit content (ensures page-like feel and correct highlighting)
+    useEffect(() => {
+        const textarea = editorRef.current;
+        if (textarea) {
+            textarea.style.height = '0'; // Reset
+            const newHeight = Math.max(textarea.scrollHeight, 1056); // Min A4 height
+            textarea.style.height = `${newHeight}px`;
+
+            // Sync the page wrapper height if needed (CSS usually handles it)
+            const page = textarea.parentElement;
+            if (page) {
+                page.style.height = `${newHeight}px`;
+            }
+        }
+    }, [content]);
+
+    // Resizing Logic
+    const startResizing = (e) => {
+        setIsResizing(true);
+        document.body.style.cursor = 'col-resize';
+    };
+
+    useEffect(() => {
+        const handleMouseMove = (e) => {
+            if (!isResizing) return;
+
+            // Calculate width as percentage of the window (adjust for Sidebar)
+            const sidebarWidth = 320;
+            const availableWidth = window.innerWidth - sidebarWidth;
+            const newLeftWidth = ((e.clientX - sidebarWidth) / availableWidth) * 100;
+
+            // Constrain width
+            if (newLeftWidth > 20 && newLeftWidth < 80) {
+                setLeftPanelWidth(newLeftWidth);
+            }
+        };
+
+        const stopResizing = () => {
+            setIsResizing(false);
+            document.body.style.cursor = 'default';
+        };
+
+        if (isResizing) {
+            window.addEventListener('mousemove', handleMouseMove);
+            window.addEventListener('mouseup', stopResizing);
+        }
+
+        return () => {
+            window.removeEventListener('mousemove', handleMouseMove);
+            window.removeEventListener('mouseup', stopResizing);
+        };
+    }, [isResizing]);
 
     // --- Toolbar Functions ---
     const handleToolbarAction = (action, value = null) => {
@@ -161,7 +219,9 @@ const NoteEditor = () => {
     };
 
     const handleContextMenu = (e) => {
-        if (!ENABLE_AI) return;
+        // Allow context menu if AI is enabled OR if there is a selection to refine
+        if (!ENABLE_AI && !tempSelection) return;
+
         e.preventDefault();
         if (tempSelection) {
             setContextMenu({ x: e.clientX, y: e.clientY });
@@ -173,6 +233,7 @@ const NoteEditor = () => {
     };
 
     const lockSelection = () => {
+        console.log("Locking Selection:", tempSelection);
         setSelection(tempSelection);
         setContextMenu(null);
     };
@@ -188,10 +249,10 @@ const NoteEditor = () => {
 
         try {
             if (selection) {
-                const result = await refineText(selection.text, chatInput);
+                const result = await refineText(pdfId, selection.text, chatInput);
                 setRefinementResult({
                     original: selection.text,
-                    refined: result,
+                    refined: result.refined_content, // Extract string from object
                     isFullNote: false
                 });
             }
@@ -203,6 +264,8 @@ const NoteEditor = () => {
             setChatInput('');
         }
     };
+
+    /* handleScroll removed as we're switching to a unified page wrapper structure */
 
     const applyRefinement = (refinedText) => {
         if (!selection || !editorRef.current) return;
@@ -295,82 +358,90 @@ const NoteEditor = () => {
                         </div>
                     </div>
 
-                    <div className={styles.mainArea}>
-                        <div className={styles.pdfContent}>
-                            {leftView === 'pdf' ? (
-                                <div className={styles.markdownWrapper} style={{ height: '100%' }}>
-                                    {pdfUrl ? (
-                                        isPptx ? (
-                                            <div className={styles.emptyState} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                                                <div>PowerPoint files cannot be previewed directly.</div>
-                                                <a
-                                                    href={`http://localhost:8000${pdfUrl}`}
-                                                    download
-                                                    className={styles.primaryBtn}
-                                                    style={{ textDecoration: 'none', textAlign: 'center' }}
-                                                >
-                                                    Download Slides
-                                                </a>
-                                            </div>
+                    <div className={`${styles.mainArea} ${isResizing ? styles.isResizing : ''}`}>
+                        <div className={styles.leftPanel} style={{ flex: `0 0 ${leftPanelWidth}%` }}>
+                            <div className={styles.pdfContent}>
+                                {leftView === 'pdf' ? (
+                                    <div className={styles.markdownWrapper} style={{ height: '100%' }}>
+                                        {pdfUrl ? (
+                                            isPptx ? (
+                                                <div className={styles.emptyState} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                                                    <div>PowerPoint files cannot be previewed directly.</div>
+                                                    <a
+                                                        href={`http://127.0.0.1:8000${pdfUrl}`}
+                                                        download
+                                                        className={styles.primaryBtn}
+                                                        style={{ textDecoration: 'none', textAlign: 'center' }}
+                                                    >
+                                                        Download Slides
+                                                    </a>
+                                                </div>
+                                            ) : (
+                                                <iframe
+                                                    src={`http://127.0.0.1:8000${pdfUrl}`}
+                                                    className={styles.pdfFrame}
+                                                    title="PDF Viewer"
+                                                    style={{ width: '100%', height: '100%', border: 'none' }}
+                                                />
+                                            )
                                         ) : (
-                                            <iframe
-                                                src={`http://localhost:8000${pdfUrl}`}
-                                                className={styles.pdfFrame}
-                                                title="PDF Viewer"
-                                                style={{ width: '100%', height: '100%', border: 'none' }}
-                                            />
-                                        )
-                                    ) : (
-                                        <div className={styles.emptyState}>No source file loaded.</div>
-                                    )}
-                                </div>
-                            ) : (
-                                <div className={styles.markdownWrapper} style={{
-                                    height: '100%',
-                                    overflowY: 'auto',
-                                    padding: '40px 50px',
-                                    backgroundColor: 'white',
-                                    fontSize: `${zoomLevel / 100 * 15}px`,
-                                    borderRight: '1px solid #EAEAEA'
-                                }}>
-                                    <ReactMarkdown rehypePlugins={[rehypeRaw]}>
-                                        {content || "Start typing in the editor to see the preview..."}
-                                    </ReactMarkdown>
-                                </div>
-                            )}
-
-                            {ENABLE_AI && selection && (
-                                <div className={styles.selectionIndicator}>
-                                    <span className={styles.selectionLabel}>Targeting:</span>
-                                    <span className={styles.selectionText}>"{selection.text.substring(0, 30)}..."</span>
-                                    <button className={styles.clearSelectionBtn} onClick={clearSelection}><X size={12} /></button>
-                                </div>
-                            )}
-
-                            {ENABLE_AI && (
-                                <div className={styles.bottomBarContainer}>
-                                    <div className={styles.bottomBar}>
-                                        <div className={styles.inputWrapper}>
-                                            <input
-                                                ref={chatInputRef}
-                                                type="text"
-                                                placeholder={selection ? "Refine tagged text..." : "Instructions to regenerate..."}
-                                                value={chatInput}
-                                                onChange={(e) => setChatInput(e.target.value)}
-                                                onKeyDown={(e) => e.key === 'Enter' && handleChatSubmit()}
-                                                disabled={isProcessing}
-                                            />
-                                            <button className={styles.iconBtn}><Mic size={18} /></button>
-                                        </div>
-                                        <button className={styles.sendBtn} onClick={handleChatSubmit} disabled={isProcessing}>
-                                            {isProcessing ? <Loader2 size={18} className={styles.spin} /> : 'Send'}
-                                        </button>
+                                            <div className={styles.emptyState}>No source file loaded.</div>
+                                        )}
                                     </div>
-                                </div>
-                            )}
+                                ) : (
+                                    <div className={styles.markdownWrapper} style={{
+                                        height: '100%',
+                                        overflowY: 'auto',
+                                        padding: '40px 50px',
+                                        backgroundColor: 'white',
+                                        fontSize: `${zoomLevel / 100 * 15}px`,
+                                        borderRight: '1px solid #EAEAEA'
+                                    }}>
+                                        <ReactMarkdown rehypePlugins={[rehypeRaw]}>
+                                            {content || "Start typing in the editor to see the preview..."}
+                                        </ReactMarkdown>
+                                    </div>
+                                )}
+
+                                {selection && (
+                                    <div className={styles.selectionIndicator}>
+                                        <span className={styles.selectionLabel}>Tagged Part:</span>
+                                        <span className={styles.selectionText}>"{selection.text.substring(0, 50)}..."</span>
+                                        <button className={styles.clearSelectionBtn} onClick={clearSelection}><X size={12} /></button>
+                                    </div>
+                                )}
+
+                                {(ENABLE_AI || selection) && (
+                                    <div className={styles.bottomBarContainer}>
+                                        <div className={styles.bottomBar}>
+                                            <div className={styles.inputWrapper}>
+                                                <input
+                                                    ref={chatInputRef}
+                                                    type="text"
+                                                    placeholder={selection ? "Refine tagged text..." : "Instructions to regenerate..."}
+                                                    value={chatInput}
+                                                    onChange={(e) => setChatInput(e.target.value)}
+                                                    onKeyDown={(e) => e.key === 'Enter' && handleChatSubmit()}
+                                                    disabled={isProcessing}
+                                                />
+                                                <button className={styles.iconBtn}><Mic size={18} /></button>
+                                            </div>
+                                            <button className={styles.sendBtn} onClick={handleChatSubmit} disabled={isProcessing}>
+                                                {isProcessing ? <Loader2 size={18} className={styles.spin} /> : 'Send'}
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
                         </div>
 
-                        <div className={styles.rightPanel}>
+                        {/* Divider Line */}
+                        <div
+                            className={`${styles.resizer} ${isResizing ? styles.isResizing : ''}`}
+                            onMouseDown={startResizing}
+                        />
+
+                        <div className={styles.rightPanel} style={{ flex: `0 0 ${100 - leftPanelWidth}%` }}>
                             <div className={styles.editorToolbar}>
                                 <div className={styles.formatGroup}>
                                     <button className={styles.formatBtn} onMouseDown={(e) => { e.preventDefault(); handleToolbarAction('bold'); }} title="Bold"><Bold size={18} /></button>
@@ -400,28 +471,49 @@ const NoteEditor = () => {
                             </div>
 
                             <div className={styles.editorContainer}>
-                                <textarea
-                                    ref={editorRef}
-                                    className={styles.editorInput}
-                                    style={{ lineHeight: lineHeight }}
-                                    value={content}
-                                    onChange={(e) => setContent(e.target.value)}
-                                    onSelect={handleEditorSelect}
-                                    onContextMenu={handleContextMenu}
-                                    placeholder="Start typing your note here..."
-                                />
+                                <div className={styles.editorPage} style={{ lineHeight: lineHeight }}>
+                                    {/* Background Highlighter Layer - Now perfectly synced by being in the same flow */}
+                                    <div
+                                        ref={highlighterRef}
+                                        className={styles.editorHighlighter}
+                                        style={{ lineHeight: lineHeight }}
+                                    >
+                                        {selection ? (
+                                            <>
+                                                {content.substring(0, selection.start)}
+                                                <span className={styles.taggedHighlight}>
+                                                    {content.substring(selection.start, selection.end)}
+                                                </span>
+                                                {content.substring(selection.end)}
+                                            </>
+                                        ) : (
+                                            null
+                                        )}
+                                    </div>
+
+                                    <textarea
+                                        ref={editorRef}
+                                        className={styles.editorInput}
+                                        style={{ lineHeight: lineHeight }}
+                                        value={content}
+                                        onChange={(e) => setContent(e.target.value)}
+                                        onSelect={handleEditorSelect}
+                                        onContextMenu={handleContextMenu}
+                                        placeholder="Start typing your note here..."
+                                    />
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                {ENABLE_AI && contextMenu && (
+                {contextMenu && (
                     <div
                         className={styles.contextMenu}
                         style={{ top: contextMenu.y, left: contextMenu.x }}
                     >
                         <button onClick={lockSelection}>
-                            <Wand2 size={14} /> Refine with AI
+                            <Wand2 size={14} /> Tag & Refine Selection
                         </button>
                         <button onClick={closeContextMenu}>
                             <X size={14} /> Cancel
@@ -433,25 +525,36 @@ const NoteEditor = () => {
                     <SaveModal
                         noteId={currentNoteId}
                         onClose={() => setShowSaveModal(false)}
-                        onSave={async () => {
+                        onSave={async (title) => {
                             try {
+                                const noteTitle = title || "Untitled Note";
                                 if (currentNoteId) {
-                                    let result = await updateNote(currentNoteId, content);
-                                    if (result && result.status === 'error' || result === false) {
-                                        await createNote("test_user", "Untitled Note", content, pdfId);
+                                    // Update existing note
+                                    await updateNote(currentNoteId, content);
+                                    alert(`Note "${noteTitle}" updated in PostgreSQL! ✅`);
+                                } else {
+                                    // Handle creating a brand new note for the demo
+                                    const result = await createNote("test_user", noteTitle, content, pdfId);
+                                    if (result && result.note_id) {
+                                        setCurrentNoteId(result.note_id);
+                                        // Also update localStorage so it persists on refresh
+                                        const currentNote = JSON.parse(localStorage.getItem('currentNote') || '{}');
+                                        currentNote.noteId = result.note_id;
+                                        localStorage.setItem('currentNote', JSON.stringify(currentNote));
+
+                                        alert(`Note "${noteTitle}" created and saved to PostgreSQL! ✅`);
                                     }
-                                    alert("Note saved successfully! ✅");
                                 }
                             } catch (err) {
-                                console.error("Failed to save note content", err);
-                                alert("Error saving note.");
+                                console.error("Failed to save to DB", err);
+                                alert("Error saving to PostgreSQL.");
                             }
                             setShowSaveModal(false);
                         }}
                     />
                 )}
 
-                {ENABLE_AI && refinementResult && (
+                {refinementResult && (
                     <RefineModal
                         originalText={refinementResult.isFullNote ? "Full Note" : refinementResult.original}
                         refinedText={refinementResult.refined}

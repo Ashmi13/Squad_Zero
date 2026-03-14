@@ -9,13 +9,21 @@ psycopg2-binary==2.9.9
 python-dotenv==1.0.0
 pydantic==2.5.3
 
-# LangChain - Let pip resolve versions automatically
-langchain-openai
-openai
+# LangChain (AI)
 langchain
+langchain-openai
 langchain-core
 langchain-community
+langchain-text-splitters
+openai
 
 # Document Processing
 PyPDF2==3.0.1
 python-docx==1.1.0
+openpyxl==3.1.2
+
+# PDF Generation
+reportlab==4.0.9
+
+# Cloudinary (Optional)
+cloudinary

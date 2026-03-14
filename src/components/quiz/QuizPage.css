@@ -13,7 +13,7 @@
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
 
-/* ==================== UPLOAD STEP ==================== */
+/* UPLOAD STEP */
 
 .quiz-upload-container {
   max-width: 900px;
@@ -253,7 +253,7 @@
   to { transform: rotate(360deg); }
 }
 
-/* ==================== QUIZ TAKING STEP ==================== */
+/* QUIZ TAKING STEP */
 
 .quiz-layout {
   max-width: 1400px;
@@ -673,7 +673,7 @@
   font-size: 1.125rem;
 }
 
-/* ==================== RESULTS STEP ==================== */
+/* RESULTS STEP */
 
 .results-container {
   max-width: 900px;
@@ -951,4 +951,111 @@
   .nav-grid {
     grid-template-columns: repeat(5, 1fr);
   }
+}
+
+/* Drag and Drop */
+.upload-area.drag-active {
+  border-color: #9333ea;
+  background: #f3e8ff;
+  transform: scale(1.02);
+}
+
+/* Short Answer Input */
+.short-answer-container {
+  margin: 1.5rem 0;
+}
+
+.short-answer-input {
+  width: 100%;
+  padding: 1rem;
+  border: 2px solid #e5e7eb;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-family: inherit;
+  resize: vertical;
+  min-height: 120px;
+  transition: border-color 0.2s;
+}
+
+.short-answer-input:focus {
+  outline: none;
+  border-color: #9333ea;
+}
+
+.char-count {
+  display: block;
+  text-align: right;
+  color: #6b7280;
+  margin-top: 0.5rem;
+  font-size: 0.875rem;
+}
+
+/* Type Badge */
+.type-badge {
+  padding: 0.25rem 0.75rem;
+  background: #dbeafe;
+  color: #1e40af;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+/* Short Answer Indicator */
+.sa-indicator {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  font-size: 0.75rem;
+}
+
+/* Timer Warning */
+.timer-warning {
+  color: #ef4444 !important;
+  animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* Checkbox Item */
+.checkbox-item {
+  grid-column: 1 / -1;
+}
+
+.checkbox-item label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
+.checkbox-item input[type="checkbox"] {
+  width: 1.25rem;
+  height: 1.25rem;
+  cursor: pointer;
+}
+
+/* Needs Review Badge */
+.review-badge.needs-review {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.review-item.needs-review {
+  border-left-color: #f59e0b;
+}
+
+.review-text {
+  color: #f59e0b;
+  font-style: italic;
+}
+
+/* Config Small Text */
+.config-item small {
+  display: block;
+  color: #6b7280;
+  font-size: 0.75rem;
+  margin-top: 0.25rem;
 }

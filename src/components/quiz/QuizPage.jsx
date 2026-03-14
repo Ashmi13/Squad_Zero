@@ -1,10 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { Upload, X, Sparkles, Clock, ChevronLeft, ChevronRight, FileText } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Upload, X, Sparkles, Clock, ChevronLeft, ChevronRight, FileText, Download } from 'lucide-react';
 import './QuizPage.css';
 
 const QuizPage = ({ noteId, userId }) => {
-  // State management
-  const [step, setStep] = useState('upload'); // upload, taking, results
+  const [step, setStep] = useState('upload');
   const [uploadedFiles, setUploadedFiles] = useState([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [quiz, setQuiz] = useState(null);
@@ -15,13 +14,17 @@ const QuizPage = ({ noteId, userId }) => {
   const [results, setResults] = useState(null);
   const [showReview, setShowReview] = useState(false);
   const [error, setError] = useState(null);
+  const [dragActive, setDragActive] = useState(false);
 
-  // Configuration
+  // FIXED: Updated configuration with new limits
   const [config, setConfig] = useState({
     numQuestions: 10,
     difficulty: 'medium',
-    timeLimit: 30 // minutes
+    timeLimit: 30,
+    questionType: 'mixed'  // FIXED: Changed from includeShortAnswer to questionType dropdown
   });
+
+  const fileInputRef = useRef(null);
 
   // Timer countdown
   useEffect(() => {
@@ -39,28 +42,98 @@ const QuizPage = ({ noteId, userId }) => {
     }
   }, [step, timeRemaining]);
 
-  // File upload handler
-  const handleFileUpload = (e) => {
-    const files = Array.from(e.target.files);
-    const newFiles = files.map(file => ({
+  // Drag and drop handlers
+  const handleDrag = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setDragActive(true);
+    } else if (e.type === "dragleave") {
+      setDragActive(false);
+    }
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      handleFiles(e.dataTransfer.files);
+    }
+  };
+
+  const handleFiles = (fileList) => {
+    const files = Array.from(fileList);
+    const MAX_FILE_SIZE = 25 * 1024 * 1024; // FIXED: 25MB limit
+    
+    const validFiles = files.filter(file => {
+      // Check file type
+      const validTypes = ['.pdf', '.doc', '.docx', '.txt', '.xlsx', '.xls'];
+      const extension = '.' + file.name.split('.').pop().toLowerCase();
+      const isValidType = validTypes.includes(extension);
+      
+      // FIXED: Check file size (25MB)
+      const isValidSize = file.size <= MAX_FILE_SIZE;
+      
+      if (!isValidType) {
+        setError(`File ${file.name} has invalid type. Accepted: PDF, DOC, DOCX, TXT, XLSX, XLS`);
+        return false;
+      }
+      
+      if (!isValidSize) {
+        setError(`File ${file.name} exceeds 25MB limit`);
+        return false;
+      }
+      
+      return true;
+    });
+
+    const newFiles = validFiles.map(file => ({
       id: Date.now() + Math.random(),
       name: file.name,
-      size: (file.size / 1024).toFixed(2) + ' KB',
+      size: (file.size / (1024 * 1024)).toFixed(2) + ' MB',
       type: file.type,
       file: file
     }));
+    
     setUploadedFiles([...uploadedFiles, ...newFiles]);
-    setError(null);
+    if (validFiles.length > 0) {
+      setError(null);
+    }
+  };
+
+  const handleFileUpload = (e) => {
+    if (e.target.files) {
+      handleFiles(e.target.files);
+    }
   };
 
   const removeFile = (id) => {
     setUploadedFiles(uploadedFiles.filter(f => f.id !== id));
   };
 
-  // Generate quiz from uploaded materials
+  // Generate quiz
   const handleGenerateQuiz = async () => {
     if (uploadedFiles.length === 0) {
       setError('Please upload at least one file');
+      return;
+    }
+
+    // FIXED: Validate question limit (max 25)
+    if (config.numQuestions > 25) {
+      setError('Number of questions must not exceed 25');
+      return;
+    }
+
+    // FIXED: Validate time limit (min 1, max 180)
+    if (config.timeLimit < 1) {
+      setError('Time limit must be at least 1 minute');
+      return;
+    }
+    
+    if (config.timeLimit > 180) {
+      setError('Time limit must not exceed 180 minutes');
       return;
     }
 
@@ -75,11 +148,10 @@ const QuizPage = ({ noteId, userId }) => {
       formData.append('num_questions', config.numQuestions);
       formData.append('difficulty', config.difficulty);
       formData.append('time_limit', config.timeLimit);
+      formData.append('question_type', config.questionType);  // FIXED: Send question_type instead of include_short_answer
       formData.append('user_id', userId || 1);
       if (noteId) formData.append('note_id', noteId);
 
-      console.log('Sending request to generate quiz...');
-      
       const response = await fetch('http://localhost:8000/api/quizzes/generate', {
         method: 'POST',
         body: formData
@@ -91,8 +163,6 @@ const QuizPage = ({ noteId, userId }) => {
       }
 
       const data = await response.json();
-      console.log('Quiz generated:', data);
-      
       setQuiz(data);
       setTimeRemaining(data.time_limit);
       setQuizStartTime(Date.now());
@@ -106,11 +176,18 @@ const QuizPage = ({ noteId, userId }) => {
     }
   };
 
-  // Answer selection
-  const handleAnswerSelect = (optionLetter) => {
+  // Answer handlers
+  const handleAnswerSelect = (value) => {
     setAnswers({
       ...answers,
-      [currentQuestion]: optionLetter
+      [currentQuestion]: value
+    });
+  };
+
+  const handleShortAnswerChange = (e) => {
+    setAnswers({
+      ...answers,
+      [currentQuestion]: e.target.value
     });
   };
 
@@ -173,6 +250,30 @@ const QuizPage = ({ noteId, userId }) => {
     await handleSubmitQuiz();
   };
 
+  // FIXED: Download PDF with proper parameters
+  const handleDownloadPDF = async () => {
+    try {
+      const response = await fetch(
+        `http://localhost:8000/api/quizzes/${quiz.quiz_id}/results/${results.attempt_id}/pdf?user_id=${userId || 1}`
+      );
+      
+      if (!response.ok) throw new Error('PDF generation failed');
+      
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `quiz_results_${quiz.quiz_id}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Error downloading PDF:', error);
+      alert('Failed to download PDF. Please try again.');
+    }
+  };
+
   // Restart quiz
   const handleRestart = () => {
     setStep('upload');
@@ -191,10 +292,11 @@ const QuizPage = ({ noteId, userId }) => {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const getFileIcon = (type) => {
-    if (type && type.includes('pdf')) return '📄';
-    if (type && type.includes('image')) return '🖼️';
-    if (type && type.includes('word')) return '📝';
+  const getFileIcon = (name) => {
+    const ext = name.split('.').pop().toLowerCase();
+    if (ext === 'pdf') return '📄';
+    if (ext === 'xlsx' || ext === 'xls') return '📊';
+    if (['doc', 'docx'].includes(ext)) return '📝';
     return '📎';
   };
 
@@ -218,7 +320,7 @@ const QuizPage = ({ noteId, userId }) => {
         </div>
       )}
 
-      {/* Configuration */}
+      {/* FIXED: Configuration with updated limits */}
       <div className="config-card">
         <h3>Quiz Settings</h3>
         <div className="config-grid">
@@ -226,11 +328,12 @@ const QuizPage = ({ noteId, userId }) => {
             <label>Number of Questions</label>
             <input
               type="number"
-              min="5"
-              max="20"
+              min="1"
+              max="25"
               value={config.numQuestions}
-              onChange={(e) => setConfig({ ...config, numQuestions: parseInt(e.target.value) })}
+              onChange={(e) => setConfig({ ...config, numQuestions: Math.min(25, Math.max(1, parseInt(e.target.value) || 1)) })}
             />
+            <small>Must be between 1 and 25</small>
           </div>
           <div className="config-item">
             <label>Difficulty</label>
@@ -247,30 +350,52 @@ const QuizPage = ({ noteId, userId }) => {
             <label>Time Limit (minutes)</label>
             <input
               type="number"
-              min="10"
-              max="120"
+              min="1"
+              max="180"
               value={config.timeLimit}
-              onChange={(e) => setConfig({ ...config, timeLimit: parseInt(e.target.value) })}
+              onChange={(e) => setConfig({ ...config, timeLimit: Math.min(180, Math.max(1, parseInt(e.target.value) || 1)) })}
             />
+            <small>Between 1 and 180 minutes</small>
+          </div>
+          {/* FIXED: Dropdown for question type selection */}
+          <div className="config-item">
+            <label>Question Type</label>
+            <select
+              value={config.questionType}
+              onChange={(e) => setConfig({ ...config, questionType: e.target.value })}
+            >
+              <option value="mcq">Multiple Choice Only</option>
+              <option value="short_answer">Short Answer Only</option>
+              <option value="mixed">Mixed (Both Types)</option>
+            </select>
+            <small>Choose question format</small>
           </div>
         </div>
       </div>
 
-      {/* File Upload */}
+      {/* File Upload with Drag & Drop */}
       <div className="upload-card">
         <input
+          ref={fileInputRef}
           type="file"
           id="file-upload"
           multiple
-          accept=".pdf,.doc,.docx,.txt"
+          accept=".pdf,.doc,.docx,.txt,.xlsx,.xls"
           onChange={handleFileUpload}
           style={{ display: 'none' }}
         />
-        <label htmlFor="file-upload" className="upload-area">
+        <div
+          className={`upload-area ${dragActive ? 'drag-active' : ''}`}
+          onDragEnter={handleDrag}
+          onDragLeave={handleDrag}
+          onDragOver={handleDrag}
+          onDrop={handleDrop}
+          onClick={() => fileInputRef.current?.click()}
+        >
           <Upload size={48} />
-          <h3>Drop files here or click to upload</h3>
-          <p>Supports: PDF, DOC, TXT (Max 10MB each)</p>
-        </label>
+          <h3>Drag & Drop files here or click to upload</h3>
+          <p>Supports: PDF, DOC, DOCX, TXT, XLSX, XLS (Max <strong>25MB</strong> each)</p>
+        </div>
 
         {uploadedFiles.length > 0 && (
           <div className="uploaded-files">
@@ -278,12 +403,15 @@ const QuizPage = ({ noteId, userId }) => {
             <div className="files-list">
               {uploadedFiles.map(file => (
                 <div key={file.id} className="file-item">
-                  <span className="file-icon">{getFileIcon(file.type)}</span>
+                  <span className="file-icon">{getFileIcon(file.name)}</span>
                   <div className="file-info">
                     <span className="file-name">{file.name}</span>
                     <span className="file-size">{file.size}</span>
                   </div>
-                  <button className="remove-btn" onClick={() => removeFile(file.id)}>
+                  <button className="remove-btn" onClick={(e) => {
+                    e.stopPropagation();
+                    removeFile(file.id);
+                  }}>
                     <X size={16} />
                   </button>
                 </div>
@@ -313,7 +441,7 @@ const QuizPage = ({ noteId, userId }) => {
     </div>
   );
 
-  // Render quiz taking step
+  // Render quiz taking step (same as before but with proper handling)
   const renderTakingStep = () => {
     if (!quiz) return null;
 
@@ -324,7 +452,6 @@ const QuizPage = ({ noteId, userId }) => {
     return (
       <div className="quiz-layout">
         <div className="quiz-main">
-          {/* Header */}
           <div className="quiz-header">
             <div>
               <h1>{quiz.title}</h1>
@@ -332,11 +459,12 @@ const QuizPage = ({ noteId, userId }) => {
             </div>
             <div className="quiz-timer">
               <Clock size={20} />
-              <span>{formatTime(timeRemaining)}</span>
+              <span className={timeRemaining < 60 ? 'timer-warning' : ''}>
+                {formatTime(timeRemaining)}
+              </span>
             </div>
           </div>
 
-          {/* Progress */}
           <div className="progress-section">
             <div className="progress-header">
               <span>Progress</span>
@@ -348,11 +476,11 @@ const QuizPage = ({ noteId, userId }) => {
             <span className="progress-percentage">{Math.round(progress)}%</span>
           </div>
 
-          {/* Question Card */}
           <div className="question-card">
             <div className="question-header">
               <span className="question-badge">Question {question.question_number}</span>
               <span className="difficulty-badge">{question.difficulty}</span>
+              <span className="type-badge">{question.question_type === 'short_answer' ? 'Short Answer' : 'Multiple Choice'}</span>
             </div>
 
             <h2 className="question-text">{question.question_text}</h2>
@@ -364,24 +492,39 @@ const QuizPage = ({ noteId, userId }) => {
               </div>
             )}
 
-            <div className="options-list">
-              {question.options.map(option => (
-                <label
-                  key={option.option_id}
-                  className={`option-item ${answers[currentQuestion] === option.option_letter ? 'selected' : ''}`}
-                >
-                  <input
-                    type="radio"
-                    name={`question-${question.question_id}`}
-                    value={option.option_letter}
-                    checked={answers[currentQuestion] === option.option_letter}
-                    onChange={() => handleAnswerSelect(option.option_letter)}
-                  />
-                  <span className="option-label">{option.option_letter}.</span>
-                  <span className="option-text">{option.option_text}</span>
-                </label>
-              ))}
-            </div>
+            {question.question_type === 'multiple_choice' ? (
+              <div className="options-list">
+                {question.options.map(option => (
+                  <label
+                    key={option.option_id}
+                    className={`option-item ${answers[currentQuestion] === option.option_letter ? 'selected' : ''}`}
+                  >
+                    <input
+                      type="radio"
+                      name={`question-${question.question_id}`}
+                      value={option.option_letter}
+                      checked={answers[currentQuestion] === option.option_letter}
+                      onChange={() => handleAnswerSelect(option.option_letter)}
+                    />
+                    <span className="option-label">{option.option_letter}.</span>
+                    <span className="option-text">{option.option_text}</span>
+                  </label>
+                ))}
+              </div>
+            ) : (
+              <div className="short-answer-container">
+                <textarea
+                  className="short-answer-input"
+                  placeholder="Type your answer here... (1-3 sentences recommended)"
+                  value={answers[currentQuestion] || ''}
+                  onChange={handleShortAnswerChange}
+                  rows={5}
+                />
+                <small className="char-count">
+                  {(answers[currentQuestion] || '').length} characters
+                </small>
+              </div>
+            )}
 
             <div className="question-navigation">
               <button
@@ -407,7 +550,6 @@ const QuizPage = ({ noteId, userId }) => {
             </div>
           </div>
 
-          {/* Question Navigation Grid */}
           <div className="question-nav-grid">
             <h3>Question Navigation</h3>
             <div className="nav-grid">
@@ -416,8 +558,10 @@ const QuizPage = ({ noteId, userId }) => {
                   key={q.question_id}
                   className={`nav-number ${index === currentQuestion ? 'current' : ''} ${answers[index] ? 'answered' : ''}`}
                   onClick={() => handleQuestionNavigate(index)}
+                  title={q.question_type === 'short_answer' ? 'Short Answer' : 'Multiple Choice'}
                 >
                   {index + 1}
+                  {q.question_type === 'short_answer' && <span className="sa-indicator">✎</span>}
                 </button>
               ))}
             </div>
@@ -434,11 +578,14 @@ const QuizPage = ({ noteId, userId }) => {
                 <span className="legend-box"></span>
                 <span>Not Answered</span>
               </div>
+              <div className="legend-item">
+                <span className="legend-box">✎</span>
+                <span>Short Answer</span>
+              </div>
             </div>
           </div>
         </div>
 
-        {/* Sidebar */}
         <div className="quiz-sidebar">
           <div className="info-card">
             <h3>Quiz Information</h3>
@@ -460,7 +607,7 @@ const QuizPage = ({ noteId, userId }) => {
     );
   };
 
-  // Render results step
+  // Render results step (same as before)
   const renderResultsStep = () => {
     if (!results) return null;
 
@@ -525,37 +672,56 @@ const QuizPage = ({ noteId, userId }) => {
             <FileText size={20} />
             {showReview ? 'Hide Review' : 'Review Answers'}
           </button>
+          <button className="action-btn secondary" onClick={handleDownloadPDF}>
+            <Download size={20} />
+            Download as PDF
+          </button>
           <button className="action-btn secondary" onClick={handleRestart}>
             <Sparkles size={20} />
             New Quiz
           </button>
         </div>
 
-        {showReview && (
+        {showReview && results.detailed_results && (
           <div className="review-section">
             <h3>Answer Review</h3>
             {results.detailed_results.map((item, index) => (
-              <div key={index} className={`review-item ${item.is_correct ? 'correct' : 'incorrect'}`}>
+              <div key={index} className={`review-item ${item.is_correct === true ? 'correct' : item.is_correct === false ? 'incorrect' : 'needs-review'}`}>
                 <div className="review-header">
                   <span className="review-number">Question {index + 1}</span>
-                  <span className={`review-badge ${item.is_correct ? 'correct' : 'incorrect'}`}>
-                    {item.is_correct ? 'Correct' : 'Incorrect'}
+                  <span className={`review-badge ${item.is_correct === true ? 'correct' : item.is_correct === false ? 'incorrect' : 'needs-review'}`}>
+                    {item.is_correct === true ? 'Correct' : item.is_correct === false ? 'Incorrect' : 'Needs Review'}
                   </span>
+                  {item.question_type === 'short_answer' && (
+                    <span className="type-badge">Short Answer</span>
+                  )}
                 </div>
                 <p className="review-question">{item.question_text}</p>
                 <div className="review-answers">
                   <div className="answer-row">
                     <span className="answer-label">Your Answer:</span>
-                    <span className={item.is_correct ? 'correct-text' : 'incorrect-text'}>
-                      {item.user_answer}. {item.user_answer_text}
+                    <span className={item.is_correct === true ? 'correct-text' : item.is_correct === false ? 'incorrect-text' : 'review-text'}>
+                      {item.question_type === 'multiple_choice' 
+                        ? `${item.user_answer}. ${item.user_answer_text}`
+                        : item.user_answer_text
+                      }
                     </span>
                   </div>
-                  {!item.is_correct && (
+                  {item.is_correct === false && (
                     <div className="answer-row">
                       <span className="answer-label">Correct Answer:</span>
                       <span className="correct-text">
-                        {item.correct_answer}. {item.correct_answer_text}
+                        {item.question_type === 'multiple_choice'
+                          ? `${item.correct_answer}. ${item.correct_answer_text}`
+                          : item.correct_answer_text
+                        }
                       </span>
+                    </div>
+                  )}
+                  {item.is_correct === null && (
+                    <div className="answer-row">
+                      <span className="answer-label">Expected Answer:</span>
+                      <span className="review-text">{item.correct_answer_text}</span>
                     </div>
                   )}
                 </div>
@@ -567,7 +733,6 @@ const QuizPage = ({ noteId, userId }) => {
     );
   };
 
-  // Main render
   return (
     <div className="quiz-page">
       {step === 'upload' && renderUploadStep()}

@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Upload, X, Sparkles, Clock, ChevronLeft, ChevronRight, FileText, Download } from 'lucide-react';
+import { Upload, X, Sparkles, Clock, ChevronLeft, ChevronRight, FileText, Download, TrendingUp, Award, XCircle, BarChart3 } from 'lucide-react';
+import Toast from './Toast';
+import QuizHistory from './QuizHistory';
 import './QuizPage.css';
 
 const QuizPage = ({ noteId, userId }) => {
@@ -13,18 +15,59 @@ const QuizPage = ({ noteId, userId }) => {
   const [quizStartTime, setQuizStartTime] = useState(null);
   const [results, setResults] = useState(null);
   const [showReview, setShowReview] = useState(false);
-  const [error, setError] = useState(null);
   const [dragActive, setDragActive] = useState(false);
+  
+  // Toast notifications
+  const [toasts, setToasts] = useState([]);
+  
+  // Quiz Levels State
+  const [sourceContent, setSourceContent] = useState(null);
+  const [completedLevels, setCompletedLevels] = useState([]);
 
-  // FIXED: Updated configuration with new limits
+  // Quiz History State
+  const [showHistory, setShowHistory] = useState(false);
+
   const [config, setConfig] = useState({
     numQuestions: 10,
-    difficulty: 'medium',
+    difficulty: 'easy',
     timeLimit: 30,
-    questionType: 'mixed'  // FIXED: Changed from includeShortAnswer to questionType dropdown
+    questionType: 'mixed'
   });
 
   const fileInputRef = useRef(null);
+  const isGeneratingRef = useRef(false);
+  const generationPromiseRef = useRef(null);
+
+  const MAX_FILES = 20;
+  const MAX_FILE_SIZE = 25 * 1024 * 1024;
+
+  // Toast notification functions
+  const showToast = (message, type = 'error', duration = 5000) => {
+    const id = Date.now();
+    setToasts(prev => [...prev, { id, message, type, duration }]);
+  };
+
+  const removeToast = (id) => {
+    setToasts(prev => prev.filter(toast => toast.id !== id));
+  };
+
+  // Cancel Quiz functionality
+  const handleCancelQuiz = () => {
+    const confirmed = window.confirm(
+      'Are you sure you want to cancel this quiz? All progress will be lost.'
+    );
+    
+    if (confirmed) {
+      setStep('upload');
+      setQuiz(null);
+      setAnswers({});
+      setCurrentQuestion(0);
+      setTimeRemaining(null);
+      setQuizStartTime(null);
+      
+      showToast('Quiz cancelled', 'info', 3000);
+    }
+  };
 
   // Timer countdown
   useEffect(() => {
@@ -63,26 +106,35 @@ const QuizPage = ({ noteId, userId }) => {
     }
   };
 
+  // FIXED: Updated file validation with new file types
   const handleFiles = (fileList) => {
     const files = Array.from(fileList);
-    const MAX_FILE_SIZE = 25 * 1024 * 1024; // FIXED: 25MB limit
+    
+    const totalFilesAfterAdd = uploadedFiles.length + files.length;
+    if (totalFilesAfterAdd > MAX_FILES) {
+      showToast(`Cannot upload more than ${MAX_FILES} files. You currently have ${uploadedFiles.length} file(s). You can add ${MAX_FILES - uploadedFiles.length} more.`, 'error');
+      return;
+    }
     
     const validFiles = files.filter(file => {
-      // Check file type
-      const validTypes = ['.pdf', '.doc', '.docx', '.txt', '.xlsx', '.xls'];
+      // FIXED: Added PowerPoint, Image, and eBook formats
+      const validTypes = [
+        '.pdf', '.doc', '.docx', '.txt', '.xlsx', '.xls',  // Documents
+        '.ppt', '.pptx',  // PowerPoint
+        '.jpg', '.jpeg', '.png', '.gif', '.webp',  // Images
+        '.epub'  // eBooks
+      ];
       const extension = '.' + file.name.split('.').pop().toLowerCase();
       const isValidType = validTypes.includes(extension);
-      
-      // FIXED: Check file size (25MB)
       const isValidSize = file.size <= MAX_FILE_SIZE;
       
       if (!isValidType) {
-        setError(`File ${file.name} has invalid type. Accepted: PDF, DOC, DOCX, TXT, XLSX, XLS`);
+        showToast(`File "${file.name}" has invalid type. Accepted: PDF, DOC, DOCX, TXT, XLSX, XLS, PPT, PPTX, JPG, PNG, GIF, WEBP, EPUB`, 'error');
         return false;
       }
       
       if (!isValidSize) {
-        setError(`File ${file.name} exceeds 25MB limit`);
+        showToast(`File "${file.name}" exceeds 25MB limit`, 'error');
         return false;
       }
       
@@ -99,7 +151,7 @@ const QuizPage = ({ noteId, userId }) => {
     
     setUploadedFiles([...uploadedFiles, ...newFiles]);
     if (validFiles.length > 0) {
-      setError(null);
+      showToast(`Successfully uploaded ${validFiles.length} file(s)`, 'success', 3000);
     }
   };
 
@@ -111,69 +163,141 @@ const QuizPage = ({ noteId, userId }) => {
 
   const removeFile = (id) => {
     setUploadedFiles(uploadedFiles.filter(f => f.id !== id));
+    showToast('File removed', 'info', 2000);
   };
 
-  // Generate quiz
-  const handleGenerateQuiz = async () => {
-    if (uploadedFiles.length === 0) {
-      setError('Please upload at least one file');
+  const handleGenerateQuiz = async (levelSourceContent = null, forceDifficulty = null) => {
+    // Prevent duplicate calls
+    if (isGeneratingRef.current || generationPromiseRef.current) {
+      console.log('⏸️ Already generating, ignoring duplicate call');
+      return generationPromiseRef.current;
+    }
+
+    if (!levelSourceContent && uploadedFiles.length === 0) {
+      showToast('Please upload at least one file', 'error');
       return;
     }
 
-    // FIXED: Validate question limit (max 25)
+    if (!levelSourceContent && uploadedFiles.length > MAX_FILES) {
+      showToast(`Cannot generate quiz with more than ${MAX_FILES} files`, 'error');
+      return;
+    }
+
     if (config.numQuestions > 25) {
-      setError('Number of questions must not exceed 25');
+      showToast('Number of questions must not exceed 25', 'error');
       return;
     }
 
-    // FIXED: Validate time limit (min 1, max 180)
-    if (config.timeLimit < 1) {
-      setError('Time limit must be at least 1 minute');
-      return;
-    }
-    
-    if (config.timeLimit > 180) {
-      setError('Time limit must not exceed 180 minutes');
+    if (config.timeLimit < 1 || config.timeLimit > 180) {
+      showToast('Time limit must be between 1 and 180 minutes', 'error');
       return;
     }
 
+    isGeneratingRef.current = true;
     setIsGenerating(true);
-    setError(null);
 
-    try {
-      const formData = new FormData();
-      uploadedFiles.forEach(fileObj => {
-        formData.append('files', fileObj.file);
-      });
-      formData.append('num_questions', config.numQuestions);
-      formData.append('difficulty', config.difficulty);
-      formData.append('time_limit', config.timeLimit);
-      formData.append('question_type', config.questionType);  // FIXED: Send question_type instead of include_short_answer
-      formData.append('user_id', userId || 1);
-      if (noteId) formData.append('note_id', noteId);
+    const generationPromise = (async () => {
+      try {
+        const formData = new FormData();
+        
+        // Use the forced difficulty if provided (for level progression)
+        const difficultyToUse = forceDifficulty || config.difficulty;
+        
+        if (levelSourceContent) {
+          console.log('📦 Using source content for', difficultyToUse, 'level');
+          formData.append('source_content', levelSourceContent);
+          formData.append('files', new Blob(['placeholder']), 'placeholder.txt');
+        } else {
+          console.log('📁 Using uploaded files');
+          uploadedFiles.forEach(fileObj => {
+            formData.append('files', fileObj.file);
+          });
+        }
+        
+        formData.append('num_questions', config.numQuestions);
+        formData.append('difficulty', difficultyToUse);  // Use forced difficulty if provided
+        formData.append('time_limit', config.timeLimit);
+        formData.append('question_type', config.questionType);
+        formData.append('user_id', userId || 1);
+        if (noteId) formData.append('note_id', noteId);
 
-      const response = await fetch('http://localhost:8000/api/quizzes/generate', {
-        method: 'POST',
-        body: formData
-      });
+        const response = await fetch('http://localhost:8000/api/quizzes/generate', {
+          method: 'POST',
+          body: formData
+        });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Quiz generation failed');
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.detail || 'Quiz generation failed');
+        }
+
+        const data = await response.json();
+        console.log('✅ Quiz generated:', data.quiz_id, 'Difficulty:', data.difficulty);
+        
+        setQuiz(data);
+        setTimeRemaining(data.time_limit);
+        setQuizStartTime(Date.now());
+        setSourceContent(data.source_content);
+        
+        // Update config difficulty to match what was actually generated
+        if (forceDifficulty) {
+          setConfig(prev => ({ ...prev, difficulty: difficultyToUse }));
+        }
+        
+        setStep('taking');
+        showToast(`${difficultyToUse.charAt(0).toUpperCase() + difficultyToUse.slice(1)} quiz generated successfully!`, 'success', 3000);
+        
+        return data;
+        
+      } catch (error) {
+        console.error('❌ Error generating quiz:', error);
+        showToast(error.message || 'Failed to generate quiz. Please try again.', 'error');
+        throw error;
+      } finally {
+        setIsGenerating(false);
+        isGeneratingRef.current = false;
+        generationPromiseRef.current = null;
       }
+    })();
 
-      const data = await response.json();
-      setQuiz(data);
-      setTimeRemaining(data.time_limit);
-      setQuizStartTime(Date.now());
-      setStep('taking');
-      
-    } catch (error) {
-      console.error('Error generating quiz:', error);
-      setError(error.message || 'Failed to generate quiz. Please try again.');
-    } finally {
-      setIsGenerating(false);
+    generationPromiseRef.current = generationPromise;
+    return generationPromise;
+  };
+
+  const handleNextLevel = async () => {
+    if (!results?.can_progress) {
+      showToast('You have completed all difficulty levels!', 'info');
+      return;
     }
+
+    if (!results?.source_content) {
+      showToast('Cannot progress: source content missing', 'error');
+      return;
+    }
+
+    if (!results?.next_difficulty) {
+      showToast('Cannot progress: next difficulty not defined', 'error');
+      return;
+    }
+
+    // Add current level to completed levels
+    const currentDiff = results.current_difficulty;
+    if (currentDiff && !completedLevels.includes(currentDiff)) {
+      setCompletedLevels([...completedLevels, currentDiff]);
+    }
+
+    const nextDiff = results.next_difficulty;
+    
+    // Reset quiz state
+    setAnswers({});
+    setCurrentQuestion(0);
+    setResults(null);
+    setShowReview(false);
+    
+    // Generate quiz with the next difficulty level
+    // Pass the difficulty as the third parameter
+    console.log('🎯 Progressing to', nextDiff, 'level');
+    await handleGenerateQuiz(results.source_content, nextDiff);
   };
 
   // Answer handlers
@@ -208,7 +332,6 @@ const QuizPage = ({ noteId, userId }) => {
     setCurrentQuestion(index);
   };
 
-  // Submit quiz
   const handleSubmitQuiz = async () => {
     const unanswered = quiz.questions.length - Object.keys(answers).length;
     
@@ -236,25 +359,30 @@ const QuizPage = ({ noteId, userId }) => {
       }
 
       const data = await response.json();
+      
+      if (quiz.difficulty && !completedLevels.includes(quiz.difficulty)) {
+        setCompletedLevels([...completedLevels, quiz.difficulty]);
+      }
+      
       setResults(data);
       setStep('results');
+      showToast('Quiz submitted successfully!', 'success', 3000);
       
     } catch (error) {
       console.error('Error submitting quiz:', error);
-      alert('Failed to submit quiz. Please try again.');
+      showToast('Failed to submit quiz. Please try again.', 'error');
     }
   };
 
   const handleAutoSubmit = async () => {
-    alert('Time is up! Submitting your answers...');
+    showToast('Time is up! Submitting your answers...', 'info', 3000);
     await handleSubmitQuiz();
   };
 
-  // FIXED: Download PDF with proper parameters
   const handleDownloadPDF = async () => {
     try {
       const response = await fetch(
-        `http://localhost:8000/api/quizzes/${quiz.quiz_id}/results/${results.attempt_id}/pdf?user_id=${userId || 1}`
+        `http://localhost:8000/api/quizzes/${quiz.quiz_id}/results/${results.attempt_id}/pdf`
       );
       
       if (!response.ok) throw new Error('PDF generation failed');
@@ -268,13 +396,14 @@ const QuizPage = ({ noteId, userId }) => {
       a.click();
       document.body.removeChild(a);
       window.URL.revokeObjectURL(url);
+      
+      showToast('PDF downloaded successfully!', 'success', 3000);
     } catch (error) {
       console.error('Error downloading PDF:', error);
-      alert('Failed to download PDF. Please try again.');
+      showToast('Failed to download PDF. Please try again.', 'error');
     }
   };
 
-  // Restart quiz
   const handleRestart = () => {
     setStep('upload');
     setUploadedFiles([]);
@@ -282,7 +411,10 @@ const QuizPage = ({ noteId, userId }) => {
     setAnswers({});
     setCurrentQuestion(0);
     setResults(null);
-    setError(null);
+    setSourceContent(null);
+    setCompletedLevels([]);
+    setConfig(prev => ({ ...prev, difficulty: 'easy' }));
+    showToast('Starting new quiz', 'info', 2000);
   };
 
   // Utility functions
@@ -292,13 +424,92 @@ const QuizPage = ({ noteId, userId }) => {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  // FIXED: Updated file icons for new types
   const getFileIcon = (name) => {
     const ext = name.split('.').pop().toLowerCase();
     if (ext === 'pdf') return '📄';
     if (ext === 'xlsx' || ext === 'xls') return '📊';
     if (['doc', 'docx'].includes(ext)) return '📝';
+    if (['ppt', 'pptx'].includes(ext)) return '📊';  // PowerPoint
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) return '🖼️';  // Images
+    if (ext === 'epub') return '📚';  // eBooks
     return '📎';
   };
+
+  const getDifficultyColor = (difficulty) => {
+    const colors = {
+      'easy': '#10b981',
+      'medium': '#f59e0b',
+      'hard': '#ef4444'
+    };
+    return colors[difficulty?.toLowerCase()] || '#6b7280';
+  };
+
+  const getDifficultyIcon = (difficulty) => {
+    const icons = {
+      'easy': '⭐',
+      'medium': '⭐⭐',
+      'hard': '⭐⭐⭐'
+    };
+    return icons[difficulty?.toLowerCase()] || '⭐';
+  };
+
+  const getLevelStepClass = (level) => {
+    if (!results) return '';
+    
+    const currentDiff = results.current_difficulty?.toLowerCase();
+    const nextDiff = results.next_difficulty?.toLowerCase();
+    const levelLower = level.toLowerCase();
+    
+    if (completedLevels.includes(levelLower)) {
+      return 'completed';
+    }
+    
+    if (currentDiff === levelLower) {
+      return 'completed';
+    }
+    
+    if (nextDiff === levelLower) {
+      return 'current';
+    }
+    
+    return '';
+  };
+
+  // Loading state
+  if (isGenerating && step !== 'upload') {
+    return (
+      <div className="quiz-page">
+        <div className="toast-container">
+          {toasts.map(toast => (
+            <Toast
+              key={toast.id}
+              message={toast.message}
+              type={toast.type}
+              duration={toast.duration}
+              onClose={() => removeToast(toast.id)}
+            />
+          ))}
+        </div>
+        
+        <div className="quiz-upload-container">
+          <div className="upload-header">
+            <div className="header-icon">
+              <Sparkles size={32} />
+            </div>
+            <div>
+              <h1>Generating {config.difficulty.charAt(0).toUpperCase() + config.difficulty.slice(1)} Level Quiz</h1>
+              <p className="subtitle">Please wait while we create your quiz...</p>
+            </div>
+          </div>
+          <div className="generating-spinner">
+            <div className="spinner"></div>
+            <p>Creating questions based on your materials...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // Render upload step
   const renderUploadStep = () => (
@@ -313,14 +524,6 @@ const QuizPage = ({ noteId, userId }) => {
         </div>
       </div>
 
-      {error && (
-        <div className="error-message">
-          <span>⚠️</span>
-          <span>{error}</span>
-        </div>
-      )}
-
-      {/* FIXED: Configuration with updated limits */}
       <div className="config-card">
         <h3>Quiz Settings</h3>
         <div className="config-grid">
@@ -336,15 +539,16 @@ const QuizPage = ({ noteId, userId }) => {
             <small>Must be between 1 and 25</small>
           </div>
           <div className="config-item">
-            <label>Difficulty</label>
+            <label>Difficulty Level</label>
             <select
               value={config.difficulty}
               onChange={(e) => setConfig({ ...config, difficulty: e.target.value })}
             >
-              <option value="easy">Easy</option>
-              <option value="medium">Medium</option>
-              <option value="hard">Hard</option>
+              <option value="easy">Easy {getDifficultyIcon('easy')}</option>
+              <option value="medium">Medium {getDifficultyIcon('medium')}</option>
+              <option value="hard">Hard {getDifficultyIcon('hard')}</option>
             </select>
+            <small>Start with Easy to unlock levels</small>
           </div>
           <div className="config-item">
             <label>Time Limit (minutes)</label>
@@ -357,7 +561,6 @@ const QuizPage = ({ noteId, userId }) => {
             />
             <small>Between 1 and 180 minutes</small>
           </div>
-          {/* FIXED: Dropdown for question type selection */}
           <div className="config-item">
             <label>Question Type</label>
             <select
@@ -373,14 +576,13 @@ const QuizPage = ({ noteId, userId }) => {
         </div>
       </div>
 
-      {/* File Upload with Drag & Drop */}
       <div className="upload-card">
         <input
           ref={fileInputRef}
           type="file"
           id="file-upload"
           multiple
-          accept=".pdf,.doc,.docx,.txt,.xlsx,.xls"
+          accept=".pdf,.doc,.docx,.txt,.xlsx,.xls,.ppt,.pptx,.jpg,.jpeg,.png,.gif,.webp,.epub"
           onChange={handleFileUpload}
           style={{ display: 'none' }}
         />
@@ -394,12 +596,13 @@ const QuizPage = ({ noteId, userId }) => {
         >
           <Upload size={48} />
           <h3>Drag & Drop files here or click to upload</h3>
-          <p>Supports: PDF, DOC, DOCX, TXT, XLSX, XLS (Max <strong>25MB</strong> each)</p>
+          {/* FIXED: Updated supported formats */}
+          <p>Supports: PDF, DOC/X, XLS/X, PPT/X, TXT, EPUB, IMAGES (Max 25MB each, {MAX_FILES} files max)</p>
         </div>
 
         {uploadedFiles.length > 0 && (
           <div className="uploaded-files">
-            <h4>Uploaded Files ({uploadedFiles.length})</h4>
+            <h4>Uploaded Files ({uploadedFiles.length}/{MAX_FILES})</h4>
             <div className="files-list">
               {uploadedFiles.map(file => (
                 <div key={file.id} className="file-item">
@@ -417,13 +620,24 @@ const QuizPage = ({ noteId, userId }) => {
                 </div>
               ))}
             </div>
+            {uploadedFiles.length >= MAX_FILES && (
+              <div className="file-limit-warning">
+                ⚠️ Maximum file limit reached ({MAX_FILES} files)
+              </div>
+            )}
+            {uploadedFiles.length >= MAX_FILES - 3 && uploadedFiles.length < MAX_FILES && (
+              <div className="file-limit-info">
+                ℹ️ You can upload {MAX_FILES - uploadedFiles.length} more file(s)
+              </div>
+            )}
           </div>
         )}
       </div>
 
+      {/* FIXED: Generate Quiz button FIRST */}
       <button
         className="generate-btn"
-        onClick={handleGenerateQuiz}
+        onClick={() => handleGenerateQuiz()}
         disabled={uploadedFiles.length === 0 || isGenerating}
       >
         {isGenerating ? (
@@ -438,12 +652,21 @@ const QuizPage = ({ noteId, userId }) => {
           </>
         )}
       </button>
+
+      {/* FIXED: View Quiz History button BELOW Generate Quiz */}
+      <button
+        className="history-btn"
+        onClick={() => setShowHistory(true)}
+      >
+        <BarChart3 size={20} />
+        <span>View Quiz History</span>
+      </button>
     </div>
   );
 
-  // Render quiz taking step (same as before but with proper handling)
+  // Render quiz taking step
   const renderTakingStep = () => {
-    if (!quiz) return null;
+    if (!quiz) return <div>Loading quiz...</div>;
 
     const question = quiz.questions[currentQuestion];
     const progress = ((currentQuestion + 1) / quiz.questions.length) * 100;
@@ -456,12 +679,21 @@ const QuizPage = ({ noteId, userId }) => {
             <div>
               <h1>{quiz.title}</h1>
               <p>{quiz.description}</p>
+              <div className="difficulty-indicator" style={{ color: getDifficultyColor(quiz.difficulty) }}>
+                {getDifficultyIcon(quiz.difficulty)} {quiz.difficulty?.toUpperCase()} Level
+              </div>
             </div>
-            <div className="quiz-timer">
-              <Clock size={20} />
-              <span className={timeRemaining < 60 ? 'timer-warning' : ''}>
-                {formatTime(timeRemaining)}
-              </span>
+            <div className="quiz-header-actions">
+              <div className="quiz-timer">
+                <Clock size={20} />
+                <span className={timeRemaining < 60 ? 'timer-warning' : ''}>
+                  {formatTime(timeRemaining)}
+                </span>
+              </div>
+              <button className="cancel-quiz-btn" onClick={handleCancelQuiz}>
+                <XCircle size={20} />
+                <span>Cancel Quiz</span>
+              </button>
             </div>
           </div>
 
@@ -565,57 +797,26 @@ const QuizPage = ({ noteId, userId }) => {
                 </button>
               ))}
             </div>
-            <div className="nav-legend">
-              <div className="legend-item">
-                <span className="legend-box answered"></span>
-                <span>Answered</span>
-              </div>
-              <div className="legend-item">
-                <span className="legend-box current"></span>
-                <span>Current</span>
-              </div>
-              <div className="legend-item">
-                <span className="legend-box"></span>
-                <span>Not Answered</span>
-              </div>
-              <div className="legend-item">
-                <span className="legend-box">✎</span>
-                <span>Short Answer</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="quiz-sidebar">
-          <div className="info-card">
-            <h3>Quiz Information</h3>
-            <div className="info-item">
-              <span>Total Questions:</span>
-              <strong>{quiz.questions.length}</strong>
-            </div>
-            <div className="info-item">
-              <span>Answered:</span>
-              <strong>{answeredCount}</strong>
-            </div>
-            <div className="info-item">
-              <span>Remaining:</span>
-              <strong>{quiz.questions.length - answeredCount}</strong>
-            </div>
           </div>
         </div>
       </div>
     );
   };
 
-  // Render results step (same as before)
+  // Render results step
   const renderResultsStep = () => {
-    if (!results) return null;
+    if (!results) return <div>Loading results...</div>;
 
     return (
       <div className="results-container">
         <div className="results-header">
           <h1>Quiz Results</h1>
           <p>Here's how you performed on this quiz</p>
+          {results.current_difficulty && (
+            <div className="level-indicator" style={{ color: getDifficultyColor(results.current_difficulty) }}>
+              {getDifficultyIcon(results.current_difficulty)} {results.current_difficulty.toUpperCase()} Level Completed
+            </div>
+          )}
         </div>
 
         <div className="score-card">
@@ -667,6 +868,62 @@ const QuizPage = ({ noteId, userId }) => {
           </div>
         </div>
 
+        {results.can_progress && (
+          <div className="level-progression-card">
+            <div className="progression-header">
+              <Award size={32} color="#f59e0b" />
+              <div>
+                <h3>Ready for Next Level?</h3>
+                <p>Challenge yourself with {results.next_difficulty} difficulty</p>
+              </div>
+            </div>
+            <div className="progression-path">
+              <div className={`level-step ${getLevelStepClass('easy')}`}>
+                <div className="level-icon" style={{ background: getDifficultyColor('easy') }}>
+                  {getDifficultyIcon('easy')}
+                </div>
+                <span>Easy</span>
+              </div>
+              <div className="level-connector"></div>
+              
+              <div className={`level-step ${getLevelStepClass('medium')}`}>
+                <div className="level-icon" style={{ background: getDifficultyColor('medium') }}>
+                  {getDifficultyIcon('medium')}
+                </div>
+                <span>Medium</span>
+              </div>
+              <div className="level-connector"></div>
+              
+              <div className={`level-step ${getLevelStepClass('hard')}`}>
+                <div className="level-icon" style={{ background: getDifficultyColor('hard') }}>
+                  {getDifficultyIcon('hard')}
+                </div>
+                <span>Hard</span>
+              </div>
+            </div>
+            <button 
+              className="next-level-btn" 
+              onClick={handleNextLevel}
+              disabled={isGenerating}
+            >
+              <TrendingUp size={20} />
+              <span>
+                {isGenerating 
+                  ? 'Generating...' 
+                  : `Progress to ${results.next_difficulty?.charAt(0).toUpperCase() + results.next_difficulty?.slice(1)} Level`
+                }
+              </span>
+            </button>
+          </div>
+        )}
+
+        {!results.can_progress && (
+          <div className="completion-card">
+            <Award size={48} color="#10b981" />
+            <h3>🏆 All Levels Completed!</h3>
+          </div>
+        )}
+
         <div className="results-actions">
           <button className="action-btn primary" onClick={() => setShowReview(!showReview)}>
             <FileText size={20} />
@@ -678,7 +935,7 @@ const QuizPage = ({ noteId, userId }) => {
           </button>
           <button className="action-btn secondary" onClick={handleRestart}>
             <Sparkles size={20} />
-            New Quiz
+            New Topic
           </button>
         </div>
 
@@ -733,11 +990,33 @@ const QuizPage = ({ noteId, userId }) => {
     );
   };
 
+  // Main render with Quiz History integration
   return (
     <div className="quiz-page">
-      {step === 'upload' && renderUploadStep()}
-      {step === 'taking' && renderTakingStep()}
-      {step === 'results' && renderResultsStep()}
+      {showHistory ? (
+        <QuizHistory 
+          userId={userId || 1} 
+          onBack={() => setShowHistory(false)} 
+        />
+      ) : (
+        <>
+          <div className="toast-container">
+            {toasts.map(toast => (
+              <Toast
+                key={toast.id}
+                message={toast.message}
+                type={toast.type}
+                duration={toast.duration}
+                onClose={() => removeToast(toast.id)}
+              />
+            ))}
+          </div>
+
+          {step === 'upload' && renderUploadStep()}
+          {step === 'taking' && renderTakingStep()}
+          {step === 'results' && renderResultsStep()}
+        </>
+      )}
     </div>
   );
 };

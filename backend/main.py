@@ -1,11 +1,12 @@
 """
-NeuraNote Quiz Module -  Backend
+NeuraNote Quiz Module - Backend
 """
 
 from fastapi import FastAPI, File, UploadFile, Form, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+from sqlalchemy import Text
 from typing import List, Optional
 from datetime import datetime
 import json
@@ -37,7 +38,7 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER
 
-app = FastAPI(title="NeuraNote Quiz API - Submission Fix")
+app = FastAPI(title="NeuraNote Quiz API - With Levels")
 
 app.add_middleware(
     CORSMiddleware,
@@ -63,6 +64,18 @@ else:
 
 
 # ==================== HELPER FUNCTIONS ====================
+
+# Difficulty progression mapping
+DIFFICULTY_PROGRESSION = {
+    'easy': 'medium',
+    'medium': 'hard',
+    'hard': None  # No next level after hard
+}
+
+def get_next_difficulty(current_difficulty: str) -> Optional[str]:
+    """Get the next difficulty level"""
+    return DIFFICULTY_PROGRESSION.get(current_difficulty.lower())
+
 
 def extract_text_from_file(uploaded_file: UploadFile) -> str:
     """Extract text from uploaded files"""
@@ -354,9 +367,10 @@ def generate_pdf_review(results_data: dict) -> bytes:
 @app.get("/")
 async def root():
     return {
-        "message": "NeuraNote Quiz API - Submission Fix",
+        "message": "NeuraNote Quiz API - With Levels",
         "status": "running",
-        "ai_enabled": llm is not None
+        "ai_enabled": llm is not None,
+        "features": ["quiz_levels", "difficulty_progression"]
     }
 
 
@@ -370,16 +384,17 @@ async def health():
 
 @app.post("/api/quizzes/generate")
 async def generate_quiz(
-    files: List[UploadFile] = File(...),
+    files: List[UploadFile] = File(None),
     num_questions: int = Form(10),
     difficulty: str = Form("medium"),
     time_limit: int = Form(30),
     question_type: str = Form("mixed"),
     user_id: int = Form(1),
     note_id: Optional[int] = Form(None),
+    source_content: Optional[str] = Form(None),  # NEW: For level progression
     db: Session = Depends(get_db)
 ):
-    """Generate quiz"""
+    """Generate quiz - Enhanced with source content for levels"""
     
     if num_questions > 25:
         raise HTTPException(400, "Number of questions must not exceed 25")
@@ -390,28 +405,38 @@ async def generate_quiz(
     if time_limit > 180:
         raise HTTPException(400, "Time limit must not exceed 180 minutes")
     
-    for file in files:
-        file.file.seek(0, 2)
-        file_size = file.file.tell()
-        file.file.seek(0)
-        
-        if file_size > 25 * 1024 * 1024:
-            raise HTTPException(400, f"File {file.filename} exceeds 25MB limit")
+    # Validate files only if no source_content provided
+    if not source_content and files:
+        for file in files:
+            file.file.seek(0, 2)
+            file_size = file.file.tell()
+            file.file.seek(0)
+            
+            if file_size > 25 * 1024 * 1024:
+                raise HTTPException(400, f"File {file.filename} exceeds 25MB limit")
     
     print(f"📝 Generating quiz: {num_questions} questions, {difficulty}, type: {question_type}")
     
     try:
-        file_texts = []
-        for file in files:
-            text = extract_text_from_file(file)
-            if text:
-                file_texts.append(text)
+        # Extract text from files OR use source_content
+        if source_content:
+            print("🔄 Using source content from previous level")
+            combined_text = source_content
+        else:
+            if not files:
+                raise HTTPException(400, "No files or source content provided")
+            file_texts = []
+            for file in files:
+                text = extract_text_from_file(file)
+                if text:
+                    file_texts.append(text)
+            
+            if not file_texts:
+                raise HTTPException(400, "No text could be extracted")
+            
+            combined_text = " ".join(file_texts)
         
-        if not file_texts:
-            raise HTTPException(400, "No text could be extracted")
-        
-        combined_text = " ".join(file_texts)
-        
+        # Generate questions
         try:
             if llm:
                 chunks = chunk_text(combined_text)
@@ -427,18 +452,21 @@ async def generate_quiz(
         if not questions_data:
             raise HTTPException(500, "No valid questions generated")
         
+        # Create quiz with source content stored
         quiz = models.Quiz(
             user_id=user_id,
             note_id=note_id,
-            title=f"AI Quiz - {datetime.now().strftime('%Y-%m-%d %H:%M')}",
-            description=f"Generated from {len(files)} file(s)",
+            title=f"AI Quiz - {difficulty.capitalize()} - {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+            description=f"Generated from {len(files) if not source_content else 'previous level'} file(s)",
             total_questions=len(questions_data),
             time_limit=time_limit * 60,
-            difficulty=difficulty
+            difficulty=difficulty,
+            source_content=combined_text  # Store for next level
         )
         db.add(quiz)
         db.flush()
         
+        # Create questions
         for idx, q_data in enumerate(questions_data):
             question = models.Question(
                 quiz_id=quiz.quiz_id,
@@ -461,10 +489,9 @@ async def generate_quiz(
                     )
                     db.add(option)
             elif q_data.get('question_type') == 'short_answer':
-                # Store expected answer
                 option = models.AnswerOption(
                     question_id=question.question_id,
-                    option_letter='SA_EXP',  # Shorter code
+                    option_letter='SA_EXPECTED',
                     option_text=q_data['correct_answer'],
                     is_correct=True
                 )
@@ -486,6 +513,7 @@ async def generate_quiz(
             "total_questions": quiz.total_questions,
             "time_limit": quiz.time_limit,
             "difficulty": quiz.difficulty,
+            "source_content": combined_text,  # Return for frontend storage
             "questions": [
                 {
                     "question_id": q.question_id,
@@ -524,10 +552,10 @@ async def submit_quiz(
     time_taken: int = Form(...),
     db: Session = Depends(get_db)
 ):
-    """Submit quiz - FIXED for short answers"""
+    """Submit quiz and store detailed results"""
     
     print(f"📤 Submitting quiz {quiz_id}")
-    print(f"📝 Answers received: {answers[:200]}...")
+    print(f"📝 Answers received: {answers[:100]}...")
     
     try:
         answers_dict = json.loads(answers)
@@ -537,10 +565,10 @@ async def submit_quiz(
             models.Question.quiz_id == quiz_id
         ).all()
         
+        print(f"❓ Found {len(questions)} questions")
+        
         if not questions:
             raise HTTPException(404, "Quiz not found")
-        
-        print(f"❓ Found {len(questions)} questions")
         
         correct_answers = 0
         detailed_results = []
@@ -549,66 +577,55 @@ async def submit_quiz(
             user_answer = answers_dict.get(str(idx))
             print(f"Q{idx+1} ({question.question_type}): user_answer = {user_answer}")
             
-            try:
-                if question.question_type == 'multiple_choice':
-                    correct_option = db.query(models.AnswerOption).filter(
-                        models.AnswerOption.question_id == question.question_id,
-                        models.AnswerOption.is_correct == True
-                    ).first()
-                    
-                    if not correct_option:
-                        print(f"⚠️ No correct option found for question {question.question_id}")
-                        continue
-                    
-                    is_correct = (user_answer == correct_option.option_letter) if user_answer else False
-                    if is_correct:
-                        correct_answers += 1
-                    
-                    user_option = db.query(models.AnswerOption).filter(
-                        models.AnswerOption.question_id == question.question_id,
-                        models.AnswerOption.option_letter == user_answer
-                    ).first() if user_answer else None
-                    
-                    detailed_results.append({
-                        "question_text": question.question_text,
-                        "question_type": "multiple_choice",
-                        "user_answer": user_answer or "N/A",
-                        "user_answer_text": user_option.option_text if user_option else "Not answered",
-                        "correct_answer": correct_option.option_letter,
-                        "correct_answer_text": correct_option.option_text,
-                        "is_correct": is_correct
-                    })
-                    
-                elif question.question_type == 'short_answer':
-                    # Get expected answer
-                    expected_option = db.query(models.AnswerOption).filter(
-                        models.AnswerOption.question_id == question.question_id,
-                        models.AnswerOption.option_letter.like('SA_%')
-                    ).first()
-                    
-                    expected_text = expected_option.option_text if expected_option else "Instructor will review"
-                    user_answer_text = user_answer if user_answer else "Not answered"
-                    
-                    detailed_results.append({
-                        "question_text": question.question_text,
-                        "question_type": "short_answer",
-                        "user_answer": user_answer or "",
-                        "user_answer_text": user_answer_text,
-                        "correct_answer": "Expected",
-                        "correct_answer_text": expected_text,
-                        "is_correct": None  # Needs manual review
-                    })
-                    print(f"✅ Short answer processed for Q{idx+1}")
-                    
-            except Exception as e:
-                print(f"❌ Error processing question {idx+1}: {e}")
-                import traceback
-                traceback.print_exc()
-                continue
+            if question.question_type == 'multiple_choice':
+                correct_option = db.query(models.AnswerOption).filter(
+                    models.AnswerOption.question_id == question.question_id,
+                    models.AnswerOption.is_correct == True
+                ).first()
+                
+                is_correct = (user_answer == correct_option.option_letter) if user_answer else False
+                if is_correct:
+                    correct_answers += 1
+                
+                user_option = db.query(models.AnswerOption).filter(
+                    models.AnswerOption.question_id == question.question_id,
+                    models.AnswerOption.option_letter == user_answer
+                ).first() if user_answer else None
+                
+                detailed_results.append({
+                    "question_text": question.question_text,
+                    "question_type": "multiple_choice",
+                    "user_answer": user_answer or "N/A",
+                    "user_answer_text": user_option.option_text if user_option else "Not answered",
+                    "correct_answer": correct_option.option_letter,
+                    "correct_answer_text": correct_option.option_text,
+                    "is_correct": is_correct
+                })
+                
+            elif question.question_type == 'short_answer':
+                expected_option = db.query(models.AnswerOption).filter(
+                    models.AnswerOption.question_id == question.question_id,
+                    models.AnswerOption.option_letter.like('SA_%')
+                ).first()
+                
+                print(f"✅ Short answer processed for Q{idx+1}")
+                
+                detailed_results.append({
+                    "question_text": question.question_text,
+                    "question_type": "short_answer",
+                    "user_answer": user_answer or "",
+                    "user_answer_text": user_answer or "Not answered",
+                    "correct_answer": "Expected",
+                    "correct_answer_text": expected_option.option_text if expected_option else "Instructor will review",
+                    "is_correct": None
+                })
         
         score_percentage = (correct_answers / len(questions)) * 100 if questions else 0
-        
         print(f"💯 Score: {score_percentage}%, Correct: {correct_answers}/{len(questions)}")
+        
+        # Get quiz to check for next level
+        quiz = db.query(models.Quiz).filter(models.Quiz.quiz_id == quiz_id).first()
+        next_difficulty = get_next_difficulty(quiz.difficulty)
         
         # Save attempt with detailed results
         attempt = models.QuizAttempt(
@@ -624,7 +641,7 @@ async def submit_quiz(
         db.commit()
         db.refresh(attempt)
         
-        print(f"✅ Quiz submitted successfully (Attempt ID: {attempt.attempt_id})")
+        print(f"✅ Quiz submitted. Score: {score_percentage}%")
         
         return {
             "attempt_id": attempt.attempt_id,
@@ -633,19 +650,21 @@ async def submit_quiz(
             "correct_answers": correct_answers,
             "total_questions": len(questions),
             "time_taken": time_taken,
-            "detailed_results": detailed_results
+            "detailed_results": detailed_results,
+            "current_difficulty": quiz.difficulty,
+            "next_difficulty": next_difficulty,
+            "can_progress": next_difficulty is not None,
+            "source_content": quiz.source_content if hasattr(quiz, 'source_content') else None
         }
     
     except json.JSONDecodeError as e:
         print(f"❌ JSON decode error: {e}")
-        raise HTTPException(400, f"Invalid answers format: {str(e)}")
-    except HTTPException:
-        raise
+        raise HTTPException(400, "Invalid answers format")
     except Exception as e:
         print(f"❌ Submission error: {e}")
         import traceback
         traceback.print_exc()
-        raise HTTPException(500, f"Submission failed: {str(e)}")
+        raise HTTPException(500, str(e))
 
 
 @app.get("/api/quizzes/{quiz_id}/results/{attempt_id}/pdf")
@@ -665,7 +684,6 @@ async def download_results_pdf(
         if not attempt:
             raise HTTPException(404, "Quiz attempt not found")
         
-        # Load detailed results from stored JSON
         detailed_results = []
         if hasattr(attempt, 'answers_json') and attempt.answers_json:
             try:
@@ -701,3 +719,284 @@ async def download_results_pdf(
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+from typing import Dict, Any
+from sqlalchemy import func, desc
+
+# QUIZ HISTORY & ANALYTICS ENDPOINTS
+
+@app.get("/api/quizzes/history/{user_id}")
+async def get_quiz_history(
+    user_id: int,
+    limit: int = 10,
+    offset: int = 0,
+    db: Session = Depends(get_db)
+):
+    """
+    Get quiz attempt history for a user with pagination
+    
+    Returns:
+    - List of quiz attempts with quiz details
+    - Total count of attempts
+    - Pagination info
+    """
+    
+    # Get total count
+    total_count = db.query(models.QuizAttempt).filter(
+        models.QuizAttempt.user_id == user_id
+    ).count()
+    
+    # Get attempts with quiz details
+    attempts = db.query(
+        models.QuizAttempt,
+        models.Quiz
+    ).join(
+        models.Quiz, models.QuizAttempt.quiz_id == models.Quiz.quiz_id
+    ).filter(
+        models.QuizAttempt.user_id == user_id
+    ).order_by(
+        desc(models.QuizAttempt.attempt_date)
+    ).limit(limit).offset(offset).all()
+    
+    history = []
+    for attempt, quiz in attempts:
+        history.append({
+            "attempt_id": attempt.attempt_id,
+            "quiz_id": quiz.quiz_id,
+            "quiz_title": quiz.title,
+            "quiz_description": quiz.description,
+            "difficulty": quiz.difficulty,
+            "total_questions": attempt.total_questions,
+            "correct_answers": attempt.correct_answers,
+            "score_percentage": float(attempt.score_percentage) if attempt.score_percentage else 0,
+            "time_taken": attempt.time_taken,
+            "time_limit": quiz.time_limit,
+            "attempt_date": attempt.attempt_date.isoformat() if attempt.attempt_date else None,
+            "passed": float(attempt.score_percentage) >= 70 if attempt.score_percentage else False
+        })
+    
+    return {
+        "history": history,
+        "total_count": total_count,
+        "limit": limit,
+        "offset": offset,
+        "has_more": (offset + limit) < total_count
+    }
+
+
+@app.get("/api/quizzes/analytics/{user_id}")
+async def get_quiz_analytics(
+    user_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Get comprehensive analytics for a user's quiz performance
+    
+    Returns:
+    - Overall statistics
+    - Performance by difficulty
+    - Recent trends
+    - Best/worst performances
+    """
+    
+    # Total attempts
+    total_attempts = db.query(func.count(models.QuizAttempt.attempt_id)).filter(
+        models.QuizAttempt.user_id == user_id
+    ).scalar() or 0
+    
+    if total_attempts == 0:
+        return {
+            "total_attempts": 0,
+            "overall_stats": {},
+            "by_difficulty": {},
+            "recent_trend": [],
+            "best_attempts": [],
+            "time_stats": {}
+        }
+    
+    # Overall statistics
+    overall_stats = db.query(
+        func.avg(models.QuizAttempt.score_percentage).label('avg_score'),
+        func.max(models.QuizAttempt.score_percentage).label('best_score'),
+        func.min(models.QuizAttempt.score_percentage).label('worst_score'),
+        func.sum(models.QuizAttempt.correct_answers).label('total_correct'),
+        func.sum(models.QuizAttempt.total_questions).label('total_questions')
+    ).filter(
+        models.QuizAttempt.user_id == user_id
+    ).first()
+    
+    # Performance by difficulty
+    difficulty_stats = db.query(
+        models.Quiz.difficulty,
+        func.count(models.QuizAttempt.attempt_id).label('attempts'),
+        func.avg(models.QuizAttempt.score_percentage).label('avg_score'),
+        func.max(models.QuizAttempt.score_percentage).label('best_score')
+    ).join(
+        models.Quiz, models.QuizAttempt.quiz_id == models.Quiz.quiz_id
+    ).filter(
+        models.QuizAttempt.user_id == user_id
+    ).group_by(
+        models.Quiz.difficulty
+    ).all()
+    
+    by_difficulty = {}
+    for difficulty, attempts, avg_score, best_score in difficulty_stats:
+        by_difficulty[difficulty] = {
+            "attempts": attempts,
+            "average_score": float(avg_score) if avg_score else 0,
+            "best_score": float(best_score) if best_score else 0
+        }
+    
+    # Recent trend (last 7 attempts)
+    recent_attempts = db.query(
+        models.QuizAttempt.score_percentage,
+        models.QuizAttempt.attempt_date,
+        models.Quiz.difficulty
+    ).join(
+        models.Quiz, models.QuizAttempt.quiz_id == models.Quiz.quiz_id
+    ).filter(
+        models.QuizAttempt.user_id == user_id
+    ).order_by(
+        desc(models.QuizAttempt.attempt_date)
+    ).limit(7).all()
+    
+    recent_trend = [
+        {
+            "score": float(score) if score else 0,
+            "date": date.isoformat() if date else None,
+            "difficulty": difficulty
+        }
+        for score, date, difficulty in reversed(recent_attempts)
+    ]
+    
+    # Best attempts (top 5)
+    best_attempts_query = db.query(
+        models.QuizAttempt,
+        models.Quiz
+    ).join(
+        models.Quiz, models.QuizAttempt.quiz_id == models.Quiz.quiz_id
+    ).filter(
+        models.QuizAttempt.user_id == user_id
+    ).order_by(
+        desc(models.QuizAttempt.score_percentage),
+        models.QuizAttempt.time_taken
+    ).limit(5).all()
+    
+    best_attempts = [
+        {
+            "quiz_title": quiz.title,
+            "difficulty": quiz.difficulty,
+            "score": float(attempt.score_percentage) if attempt.score_percentage else 0,
+            "time_taken": attempt.time_taken,
+            "date": attempt.attempt_date.isoformat() if attempt.attempt_date else None
+        }
+        for attempt, quiz in best_attempts_query
+    ]
+    
+    # Time statistics
+    time_stats = db.query(
+        func.avg(models.QuizAttempt.time_taken).label('avg_time'),
+        func.min(models.QuizAttempt.time_taken).label('fastest_time'),
+        func.max(models.QuizAttempt.time_taken).label('slowest_time')
+    ).filter(
+        models.QuizAttempt.user_id == user_id
+    ).first()
+    
+    # Pass rate
+    passed_count = db.query(func.count(models.QuizAttempt.attempt_id)).filter(
+        models.QuizAttempt.user_id == user_id,
+        models.QuizAttempt.score_percentage >= 70
+    ).scalar() or 0
+    
+    return {
+        "total_attempts": total_attempts,
+        "overall_stats": {
+            "average_score": float(overall_stats.avg_score) if overall_stats.avg_score else 0,
+            "best_score": float(overall_stats.best_score) if overall_stats.best_score else 0,
+            "worst_score": float(overall_stats.worst_score) if overall_stats.worst_score else 0,
+            "total_correct": overall_stats.total_correct or 0,
+            "total_questions": overall_stats.total_questions or 0,
+            "pass_rate": (passed_count / total_attempts * 100) if total_attempts > 0 else 0
+        },
+        "by_difficulty": by_difficulty,
+        "recent_trend": recent_trend,
+        "best_attempts": best_attempts,
+        "time_stats": {
+            "average_time": time_stats.avg_time or 0,
+            "fastest_time": time_stats.fastest_time or 0,
+            "slowest_time": time_stats.slowest_time or 0
+        }
+    }
+
+
+@app.get("/api/quizzes/attempt/{attempt_id}/details")
+async def get_attempt_details(
+    attempt_id: int,
+    user_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Get detailed information about a specific quiz attempt
+    Including all questions and answers
+    """
+    
+    # Get attempt with quiz
+    attempt = db.query(models.QuizAttempt).filter(
+        models.QuizAttempt.attempt_id == attempt_id,
+        models.QuizAttempt.user_id == user_id
+    ).first()
+    
+    if not attempt:
+        raise HTTPException(status_code=404, detail="Attempt not found")
+    
+    quiz = db.query(models.Quiz).filter(
+        models.Quiz.quiz_id == attempt.quiz_id
+    ).first()
+    
+    # Parse answers from JSON
+    detailed_results = []
+    if attempt.answers_json:
+        try:
+            detailed_results = json.loads(attempt.answers_json)
+        except:
+            # Fallback if JSON parsing fails
+            detailed_results = []
+    
+    return {
+        "attempt_id": attempt.attempt_id,
+        "quiz_id": quiz.quiz_id,
+        "quiz_title": quiz.title,
+        "quiz_description": quiz.description,
+        "difficulty": quiz.difficulty,
+        "total_questions": attempt.total_questions,
+        "correct_answers": attempt.correct_answers,
+        "score_percentage": float(attempt.score_percentage) if attempt.score_percentage else 0,
+        "time_taken": attempt.time_taken,
+        "time_limit": quiz.time_limit,
+        "attempt_date": attempt.attempt_date.isoformat() if attempt.attempt_date else None,
+        "detailed_results": detailed_results
+    }
+
+
+@app.delete("/api/quizzes/history/{attempt_id}")
+async def delete_quiz_attempt(
+    attempt_id: int,
+    user_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Delete a specific quiz attempt from history
+    """
+    
+    attempt = db.query(models.QuizAttempt).filter(
+        models.QuizAttempt.attempt_id == attempt_id,
+        models.QuizAttempt.user_id == user_id
+    ).first()
+    
+    if not attempt:
+        raise HTTPException(status_code=404, detail="Attempt not found")
+    
+    db.delete(attempt)
+    db.commit()
+    
+    return {"message": "Attempt deleted successfully", "attempt_id": attempt_id}

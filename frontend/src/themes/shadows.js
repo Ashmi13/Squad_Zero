@@ -1,7 +1,4 @@
-﻿/**
- * NeuraNote Shadow Definitions
- * Dark theme shadows with indigo glow
- */
+﻿
 
 export const shadows = [
   'none',

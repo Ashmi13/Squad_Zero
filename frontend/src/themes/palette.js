@@ -1,10 +1,7 @@
-﻿/**
- * NeuraNote Team Color Palette
- * Indigo-Pink Dark Theme
- */
+﻿
 
 export const palette = {
-  mode: 'dark',  // Dark theme like team
+  mode: 'dark',  
   
   // Primary - Indigo
   primary: {

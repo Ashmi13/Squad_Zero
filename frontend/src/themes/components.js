@@ -1,8 +1,4 @@
-﻿/**
- * NeuraNote Component Overrides
- * Indigo-Pink Dark Theme
- */
-
+﻿
 export const components = {
   MuiPaper: {
     styleOverrides: {

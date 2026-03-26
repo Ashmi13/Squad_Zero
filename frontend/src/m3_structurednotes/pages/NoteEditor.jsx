@@ -344,8 +344,8 @@ const NoteEditor = () => {
                                     )}
                                 </div>
                                 <div className={styles.actionGroup}>
-                                    <button className={styles.textBtn} onClick={handleExport} disabled={isProcessing}>
-                                        {isProcessing ? '...' : 'Export'}
+                                    <button className={styles.headerBtn} onClick={handleExport} disabled={isProcessing} style={{ padding: '8px 16px', background: '#f5f5f5', border: '1px solid #ddd', borderRadius: '6px', cursor: 'pointer' }}>
+                                        {isProcessing ? '...' : 'Download PDF'}
                                     </button>
                                     <button className={styles.primaryBtn} onClick={() => setShowSaveModal(true)}>Save</button>
                                 </div>

@@ -2,21 +2,40 @@ import React, { useState, useRef } from 'react';
 import { CloudUpload, FolderOpen, Plus, Loader2, FileText, X, File, CheckCircle2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import styles from './UploadSection.module.css';
-import { uploadPDF, createNote } from '../api';
+import { uploadPDF, createNote, generateNote } from '../api';
 
 const UploadSection = () => {
     const navigate = useNavigate();
     const [selectedFiles, setSelectedFiles] = useState([]);
     const [isUploading, setIsUploading] = useState(false);
     const [uploadStatus, setUploadStatus] = useState('');
+    const [selectedLanguage, setSelectedLanguage] = useState("English");
     const fileInputRef = useRef(null);
 
     const handleFileSelect = (e) => {
         const files = Array.from(e.target.files);
         if (files.length === 0) return;
 
+        const MAX_SIZE_MB = 25;
+        const MAX_SIZE_BYTES = MAX_SIZE_MB * 1024 * 1024;
+        
+        let validFiles = [];
+        let oversizedFiles = [];
+
+        files.forEach(file => {
+            if (file.size > MAX_SIZE_BYTES) {
+                oversizedFiles.push(file.name);
+            } else {
+                validFiles.push(file);
+            }
+        });
+
+        if (oversizedFiles.length > 0) {
+            alert(`The following files exceed the 25MB limit:\n- ${oversizedFiles.join('\n- ')}`);
+        }
+
         // Filter out duplicates based on name and size
-        const newFiles = files.filter(file =>
+        const newFiles = validFiles.filter(file =>
             !selectedFiles.some(f => f.name === file.name && f.size === file.size)
         );
 
@@ -45,24 +64,22 @@ const UploadSection = () => {
             console.log("Upload result:", uploadResult);
 
             if (uploadResult.pdf_id) {
-                setUploadStatus("Processing & Generating Note...");
-
-                let rawText = uploadResult.extracted_text || "";
-
-                // Clean text
-                let cleanText = rawText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-                cleanText = cleanText.replace(/([^\n])\n(?=[^\n])/g, '$1 ');
-
-                const title = uploadResult.filename || (selectedFiles.length > 1 ? `Combined Note (${selectedFiles.length} files)` : selectedFiles[0].name);
+                setUploadStatus(`Generating Structured Note in ${selectedLanguage} (Using TF-IDF & AI)...`);
                 const userId = "test_user";
 
-                // 2. CREATE NOTE IN DB
-                const createResult = await createNote(userId, title, cleanText, uploadResult.pdf_id);
+                // 2. GENERATE NOTE WITH AI
+                const generatedNoteContent = await generateNote(uploadResult.pdf_id, userId, "", selectedLanguage);
+
+                const title = uploadResult.filename || (selectedFiles.length > 1 ? `Combined Note (${selectedFiles.length} files)` : selectedFiles[0].name);
+
+                setUploadStatus("Saving to Database...");
+                // 3. CREATE NOTE IN DB
+                const createResult = await createNote(userId, title, generatedNoteContent, uploadResult.pdf_id);
                 console.log("Initial Note Created in DB:", createResult);
                 const noteId = createResult.note_id;
 
                 localStorage.setItem('currentNote', JSON.stringify({
-                    content: cleanText,
+                    content: generatedNoteContent,
                     pdfId: uploadResult.pdf_id,
                     pdfUrl: uploadResult.pdf_url,
                     noteId: noteId,
@@ -150,6 +167,20 @@ const UploadSection = () => {
                         </div>
                     </div>
                 )}
+
+                <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '15px' }}>
+                    <span style={{ fontSize: '16px', fontWeight: '500', color: '#4a4a4a' }}>Output Language:</span>
+                    <select 
+                        value={selectedLanguage} 
+                        onChange={(e) => setSelectedLanguage(e.target.value)}
+                        disabled={isUploading}
+                        style={{ padding: '10px 15px', borderRadius: '8px', border: '1px solid #ddd', fontSize: '15px', minWidth: '150px' }}
+                    >
+                        <option value="English">English</option>
+                        <option value="Sinhala">Sinhala</option>
+                        <option value="Tamil">Tamil</option>
+                    </select>
+                </div>
 
                 <div className={styles.buttonRow} style={{ marginTop: '30px' }}>
                     <button

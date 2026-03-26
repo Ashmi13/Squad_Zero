@@ -10,6 +10,10 @@ from dotenv import load_dotenv
 from .database import get_db_connection
 from psycopg2.extras import RealDictCursor
 import uuid
+import math
+import re
+from collections import Counter
+import json
 import numpy as np
 
 load_dotenv()
@@ -41,6 +45,50 @@ class AIService:
                 temperature=0
             )
         return self._llm
+
+    def extract_keywords_tfidf(self, text, top_n=10):
+        """
+        MANUAL ALGORITHM: Pure Python TF-IDF Keyword Extractor.
+        This calculates the Term Frequency (TF) and Inverse Document Frequency (IDF) 
+        without external libraries to satisfy academic manual algorithm requirements.
+        """
+        # Stopwords to ignore
+        stopwords = {"the", "is", "in", "and", "to", "of", "a", "for", "on", "with", "as", "by", "this", 
+                     "that", "it", "at", "from", "or", "an", "be", "are", "can", "will", "which"}
+        
+        # 1. Clean and tokenize text into words
+        words = re.findall(r'\b[a-z]{3,}\b', text.lower())
+        words = [w for w in words if w not in stopwords]
+        
+        if not words:
+            return []
+            
+        # 2. Treat paragraphs/sentences as 'documents' for IDF calculation
+        sentences = [s.strip() for s in text.lower().split('.') if len(s.strip()) > 10]
+        if not sentences:
+            sentences = [text.lower()]
+            
+        N = len(sentences)
+        
+        # 3. Calculate Term Frequency (TF) for the entire text
+        word_counts = Counter(words)
+        total_words = len(words)
+        
+        tfidf_scores = {}
+        for word, count in word_counts.items():
+            tf = count / total_words
+            
+            # 4. Calculate Inverse Document Frequency (IDF)
+            # Count how many sentences contain the word
+            doc_freq = sum(1 for sentence in sentences if word in sentence)
+            idf = math.log(N / (1 + doc_freq)) + 1  # Add 1 to avoid zero weights
+            
+            # 5. Final TF-IDF Score
+            tfidf_scores[word] = tf * idf
+            
+        # Sort words by score descending
+        sorted_keywords = sorted(tfidf_scores.items(), key=lambda item: item[1], reverse=True)
+        return [word for word, score in sorted_keywords[:top_n]]
 
     def process_pdf(self, file_bytes, pdf_id, original_filename):
         # Determine file type
@@ -152,45 +200,39 @@ class AIService:
             return None
 
         
-    def generate_note(self, pdf_id, user_id, instruction=None):
-        # Retrieve relevant chunks using pgvector (Cosine Similarity)
-        context_text = ""
+    def generate_note(self, pdf_id, user_id, instruction=None, full_text=None, language="English"):
+        # 1. Manual Algorithm: Extract Keywords from the full text
+        # If full text isn't passed, we'd normally pull it from DB, but for speed we assume it's passed or extract simple context
         
+        # Retrieve ALL relevant chunks to maintain the lecture flow (not just top 5)
+        # We want a comprehensive note, so we fetch more chunks
+        context_text = ""
         try:
-            # Create embedding for the instruction (query)
-            # If no instruction, we might just summarization, but for now assuming instruction or generic 'summarize'
-            query_text = instruction if instruction else "Summarize this document"
-            query_embedding = self.embeddings.embed_query(query_text)
-            
             conn = get_db_connection()
             if conn:
                 cur = conn.cursor()
-                
-                # Perform similarity search using invalid-safe syntax for pgvector
-                # The <=> operator is cosine distance (lower is better)
-                # We want the closest matches, so ORDER BY <=> LIMIT k
+                # Fetch chunks ordered by their original index to maintain lecture flow!
                 cur.execute("""
                     SELECT content 
                     FROM document_chunks 
                     WHERE pdf_id = %s 
-                    ORDER BY embedding <=> %s 
-                    LIMIT 5
-                """, (pdf_id, str(query_embedding)))
+                    ORDER BY chunk_index ASC
+                """, (pdf_id,))
                 
                 results = cur.fetchall()
-                # Sort back by chunk index if we selected widely? 
-                # Actually for RAG we usually just want relevant context. 
-                # If we want full doc flow, we might need a different retrieval strategy.
-                # For now, relevant context is standard.
-                
                 context_chunks = [row[0] for row in results]
                 context_text = "\n\n".join(context_chunks)
                 
+                # Limit size to prevent Groq Free Tier API 'rate_limit_exceeded (TPM Limit 6000)' errors
+                MAX_API_CHARS = 14000  # roughly 3500 tokens
+                if len(context_text) > MAX_API_CHARS:
+                    print(f"Note: context truncated from {len(context_text)} to {MAX_API_CHARS} to avoid API limits.")
+                    context_text = context_text[:MAX_API_CHARS] + "\n...[Content truncated to fit free AI limits]"
+                    
                 cur.close()
                 conn.close()
             else:
                 return "Database connection failed during retrieval."
-
         except Exception as e:
             print(f"Error retrieving vectors: {e}")
             return f"Error exploring document: {str(e)}"
@@ -198,14 +240,26 @@ class AIService:
         if not context_text:
             return "No relevant content found in the document."
             
-        # Create prompt for Groq
+        # Run our manual TF-IDF Algorithm!
+        top_keywords = self.extract_keywords_tfidf(context_text, top_n=10)
+        keyword_str = ", ".join(top_keywords)
+        print(f"Manual Algorithm Extracted Keywords: {keyword_str}")
+            
+        # Create a highly structured prompt to Differentiate from normal ChatGPT
         prompt = f"""
-        Instructions: {instruction if instruction else "Create a detailed study note based on the provided text."}
+        You are an expert, brilliant professor writing a highly structured, simple, and easy-to-understand study note.
+        You must write the note entirely in {language}.
         
-        Context (Extracted from Document):
+        INSTRUCTIONS/GOALS:
+        1. Keep the exact flow of the lecture. Do not skip points. Explain every single point simply and clearly.
+        2. MANDATORY: The note MUST cover these mathematically extracted keywords: {keyword_str}.
+        3. Use formatting (Headers, Bullet points, Bolding).
+        4. MANDATORY: You MUST include at least one Mermaid.js diagram (a flowchart or mind map) that visualizes a core concept from the text. Wrap it in ```mermaid ... ``` codeblocks.
+        
+        Context (Entire Lecture Flow):
         {context_text}
         
-        Generate a comprehensive markdown note based on the context above.
+        Remember: Output beautiful markdown, simple explanations, and a Mermaid diagram. Note language: {language}.
         """
         
         try:

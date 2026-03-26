@@ -32,6 +32,7 @@ class NoteRequest(BaseModel):
     pdf_id: str
     user_id: str
     instruction: str = None  # Optional user instruction
+    language: str = "English"
 
 class RefineRequest(BaseModel):
     pdf_id: str
@@ -88,7 +89,7 @@ async def upload_pdf(files: List[UploadFile] = File(...)):
 
 @app.post("/generate-note")
 async def generate_note(request: NoteRequest):
-    result = ai_service.generate_note(request.pdf_id, request.user_id, request.instruction)
+    result = ai_service.generate_note(request.pdf_id, request.user_id, request.instruction, language=request.language)
     return result
 
 @app.put("/notes/{note_id}")

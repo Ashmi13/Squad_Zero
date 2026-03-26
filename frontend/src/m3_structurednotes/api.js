@@ -35,11 +35,12 @@ export const uploadPDF = async (files) => {
     }
 };
 
-export const generateNote = async (pdfId, userId, instruction) => {
+export const generateNote = async (pdfId, userId, instruction, language = "English") => {
     const response = await api.post('/generate-note', {
         pdf_id: pdfId,
         user_id: userId,
-        instruction,
+        instruction: instruction,
+        language: language
     });
     return response.data;
 };

@@ -1,3 +1,4 @@
+
 # FastAPI Backend - SquadZero Authentication
 
 Production-ready FastAPI backend with JWT authentication.
@@ -294,3 +295,4 @@ Check CORS configuration in `main.py` and ensure frontend URL is in `allow_origi
 ---
 
 **Happy Coding! 🚀**
+

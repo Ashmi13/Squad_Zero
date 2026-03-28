@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Upload, X, Sparkles, Clock, ChevronLeft, ChevronRight, FileText, Download, TrendingUp, Award, XCircle, BarChart3 } from 'lucide-react';
 import Toast from './Toast';
 import QuizHistory from './QuizHistory';
+import ConfirmDialog from './ConfirmDialog';
 import './QuizPage.css';
 
 const QuizPage = ({ noteId, userId }) => {
@@ -26,6 +27,10 @@ const QuizPage = ({ noteId, userId }) => {
 
   // Quiz History State
   const [showHistory, setShowHistory] = useState(false);
+
+  // Custom in-page confirmation dialog (portal-based, bypasses stacking context)
+  const [dialog, setDialog] = useState({ isOpen: false });
+  const closeDialog = () => setDialog({ isOpen: false });
 
   const [config, setConfig] = useState({
     numQuestions: 10,
@@ -53,37 +58,95 @@ const QuizPage = ({ noteId, userId }) => {
 
   // Cancel Quiz functionality
   const handleCancelQuiz = () => {
-    const confirmed = window.confirm(
-      'Are you sure you want to cancel this quiz? All progress will be lost.'
-    );
-    
-    if (confirmed) {
-      setStep('upload');
-      setQuiz(null);
-      setAnswers({});
-      setCurrentQuestion(0);
-      setTimeRemaining(null);
-      setQuizStartTime(null);
-      
-      showToast('Quiz cancelled', 'info', 3000);
-    }
+    setDialog({
+      isOpen: true,
+      type: 'cancel',
+      message: 'Are you sure you want to cancel? All progress will be lost.',
+      okLabel: 'Yes, Cancel Quiz',
+      cancelLabel: 'Return to Quiz',
+      onConfirm: () => {
+        closeDialog();
+        setStep('upload');
+        setQuiz(null);
+        setAnswers({});
+        setCurrentQuestion(0);
+        setTimeRemaining(null);
+        setQuizStartTime(null);
+        showToast('Quiz cancelled', 'info', 3000);
+      },
+    });
   };
 
-  // Timer countdown
+  // Timer countdown — ref prevents stale closure on handleAutoSubmit
+  const handleAutoSubmitRef = React.useRef(null);
+  useEffect(() => { handleAutoSubmitRef.current = handleAutoSubmit; });
+
   useEffect(() => {
-    if (step === 'taking' && timeRemaining > 0) {
-      const timer = setInterval(() => {
-        setTimeRemaining(prev => {
-          if (prev <= 1) {
-            handleAutoSubmit();
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-      return () => clearInterval(timer);
+    if (step !== 'taking' || timeRemaining === null || timeRemaining <= 0) return;
+    const timer = setInterval(() => {
+      setTimeRemaining(prev => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          handleAutoSubmitRef.current && handleAutoSubmitRef.current();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [step]); // only restart when step changes, not every tick
+
+  // ── Session persistence ──────────────────────────────────────────────────
+  // Restore state from sessionStorage on first mount (handles page refresh)
+  useEffect(() => {
+    try {
+      const saved = sessionStorage.getItem('neuranote_quiz_state');
+      if (saved) {
+        const s = JSON.parse(saved);
+        if (s.step) setStep(s.step);
+        if (s.quiz) setQuiz(s.quiz);
+        if (s.answers) setAnswers(s.answers);
+        if (s.currentQuestion !== undefined) setCurrentQuestion(s.currentQuestion);
+        if (s.timeRemaining !== undefined) setTimeRemaining(s.timeRemaining);
+        if (s.quizStartTime) setQuizStartTime(s.quizStartTime);
+        if (s.results) setResults(s.results);
+        if (s.showReview !== undefined) setShowReview(s.showReview);
+        if (s.sourceContent) setSourceContent(s.sourceContent);
+        if (s.completedLevels) setCompletedLevels(s.completedLevels);
+        if (s.config) setConfig(s.config);
+        if (s.showHistory !== undefined) setShowHistory(s.showHistory);
+      }
+    } catch (e) {
+      // Ignore parse errors — start fresh
     }
-  }, [step, timeRemaining]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Persist key state to sessionStorage whenever it changes
+  useEffect(() => {
+    try {
+      const state = {
+        step, quiz, answers, currentQuestion, timeRemaining,
+        quizStartTime, results, showReview, sourceContent,
+        completedLevels, config, showHistory
+      };
+      sessionStorage.setItem('neuranote_quiz_state', JSON.stringify(state));
+    } catch (e) {
+      // Ignore quota errors
+    }
+  }, [step, quiz, answers, currentQuestion, timeRemaining, quizStartTime,
+      results, showReview, sourceContent, completedLevels, config, showHistory]);
+
+  // Warn before page refresh/close ONLY while a quiz is in progress
+  useEffect(() => {
+    if (step !== 'taking') return;
+    const handleBeforeUnload = (e) => {
+      e.preventDefault();
+      e.returnValue = 'You have a quiz in progress. If you refresh, your current answers will be lost. Are you sure?';
+      return e.returnValue;
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [step]);
 
   // Drag and drop handlers
   const handleDrag = (e) => {
@@ -235,7 +298,7 @@ const QuizPage = ({ noteId, userId }) => {
         console.log('✅ Quiz generated:', data.quiz_id, 'Difficulty:', data.difficulty);
         
         setQuiz(data);
-        setTimeRemaining(data.time_limit);
+        setTimeRemaining(data.time_limit * 60); // convert minutes → seconds
         setQuizStartTime(Date.now());
         setSourceContent(data.source_content);
         
@@ -264,6 +327,20 @@ const QuizPage = ({ noteId, userId }) => {
     return generationPromise;
   };
 
+  // Retry: reset all state then generate a NEW quiz at same level
+  const handleRetryLevel = async (sourceContent, difficulty) => {
+    const savedContent = sourceContent;
+    const savedDifficulty = difficulty;
+    setQuiz(null);
+    setAnswers({});
+    setCurrentQuestion(0);
+    setResults(null);
+    setShowReview(false);
+    setTimeRemaining(null);
+    setQuizStartTime(null);
+    await handleGenerateQuiz(savedContent, savedDifficulty);
+  };
+
   const handleNextLevel = async () => {
     if (!results?.can_progress) {
       showToast('You have completed all difficulty levels!', 'info');
@@ -287,6 +364,8 @@ const QuizPage = ({ noteId, userId }) => {
     }
 
     const nextDiff = results.next_difficulty;
+    // Capture source_content NOW before we clear results state
+    const savedSourceContent = results.source_content;
     
     // Reset quiz state
     setAnswers({});
@@ -294,10 +373,9 @@ const QuizPage = ({ noteId, userId }) => {
     setResults(null);
     setShowReview(false);
     
-    // Generate quiz with the next difficulty level
-    // Pass the difficulty as the third parameter
+    // Generate quiz with the next difficulty level using the captured source content
     console.log('🎯 Progressing to', nextDiff, 'level');
-    await handleGenerateQuiz(results.source_content, nextDiff);
+    await handleGenerateQuiz(savedSourceContent, nextDiff);
   };
 
   // Answer handlers
@@ -332,15 +410,42 @@ const QuizPage = ({ noteId, userId }) => {
     setCurrentQuestion(index);
   };
 
-  const handleSubmitQuiz = async () => {
-    const unanswered = quiz.questions.length - Object.keys(answers).length;
-    
-    if (unanswered > 0) {
-      if (!window.confirm(`You have ${unanswered} unanswered question(s). Submit anyway?`)) {
-        return;
-      }
+  const handleSubmitQuiz = async (autoSubmit = false) => {
+    const totalQ = quiz.questions.length;
+    const answered = Object.values(answers).filter(
+      v => v !== null && v !== undefined && String(v).trim() !== ''
+    ).length;
+    const unanswered = totalQ - answered;
+
+    // Timer auto-submit — no confirmation needed
+    if (autoSubmit) {
+      await _doSubmit();
+      return;
     }
 
+    if (unanswered > 0) {
+      setDialog({
+        isOpen: true,
+        type: 'unanswered',
+        message: `You have ${unanswered} unanswered question${unanswered > 1 ? 's' : ''} out of ${totalQ}. Unanswered questions will be marked incorrect. Submit anyway?`,
+        okLabel: 'Submit Anyway',
+        cancelLabel: 'Return to Quiz',
+        onConfirm: () => { closeDialog(); _doSubmit(); },
+      });
+    } else {
+      setDialog({
+        isOpen: true,
+        type: 'submit',
+        message: `All ${totalQ} questions answered. Are you ready to submit?`,
+        okLabel: 'Submit Quiz',
+        cancelLabel: 'Return to Quiz',
+        onConfirm: () => { closeDialog(); _doSubmit(); },
+      });
+    }
+  };
+
+  // Extracted core submit logic so modal's onConfirm can also call it
+  const _doSubmit = async () => {
     try {
       const timeTaken = Math.floor((Date.now() - quizStartTime) / 1000);
 
@@ -359,24 +464,25 @@ const QuizPage = ({ noteId, userId }) => {
       }
 
       const data = await response.json();
-      
+
       if (quiz.difficulty && !completedLevels.includes(quiz.difficulty)) {
-        setCompletedLevels([...completedLevels, quiz.difficulty]);
+        setCompletedLevels(prev => [...prev, quiz.difficulty]);
       }
-      
+
       setResults(data);
       setStep('results');
       showToast('Quiz submitted successfully!', 'success', 3000);
-      
+
     } catch (error) {
       console.error('Error submitting quiz:', error);
       showToast('Failed to submit quiz. Please try again.', 'error');
     }
   };
 
+  // autoSubmit = true skips the "unanswered questions" confirm dialog
   const handleAutoSubmit = async () => {
     showToast('Time is up! Submitting your answers...', 'info', 3000);
-    await handleSubmitQuiz();
+    await handleSubmitQuiz(true);
   };
 
   const handleDownloadPDF = async () => {
@@ -405,6 +511,7 @@ const QuizPage = ({ noteId, userId }) => {
   };
 
   const handleRestart = () => {
+    sessionStorage.removeItem('neuranote_quiz_state');
     setStep('upload');
     setUploadedFiles([]);
     setQuiz(null);
@@ -670,7 +777,7 @@ const QuizPage = ({ noteId, userId }) => {
 
     const question = quiz.questions[currentQuestion];
     const progress = ((currentQuestion + 1) / quiz.questions.length) * 100;
-    const answeredCount = Object.keys(answers).length;
+    const answeredCount = Object.values(answers).filter(v => v !== null && v !== undefined && String(v).trim() !== '').length;
 
     return (
       <div className="quiz-layout">
@@ -728,7 +835,7 @@ const QuizPage = ({ noteId, userId }) => {
               <div className="options-list">
                 {question.options.map(option => (
                   <label
-                    key={option.option_id}
+                    key={option.option_letter}
                     className={`option-item ${answers[currentQuestion] === option.option_letter ? 'selected' : ''}`}
                   >
                     <input
@@ -769,7 +876,7 @@ const QuizPage = ({ noteId, userId }) => {
               </button>
 
               {currentQuestion === quiz.questions.length - 1 ? (
-                <button className="nav-btn submit" onClick={handleSubmitQuiz}>
+                <button className="nav-btn submit" onClick={() => handleSubmitQuiz()}>
                   Submit Quiz
                   <ChevronRight size={20} />
                 </button>
@@ -788,7 +895,7 @@ const QuizPage = ({ noteId, userId }) => {
               {quiz.questions.map((q, index) => (
                 <button
                   key={q.question_id}
-                  className={`nav-number ${index === currentQuestion ? 'current' : ''} ${answers[index] ? 'answered' : ''}`}
+                  className={`nav-number ${index === currentQuestion ? 'current' : ''} ${answers[index] !== undefined && String(answers[index]).trim() !== '' ? 'answered' : ''}`}
                   onClick={() => handleQuestionNavigate(index)}
                   title={q.question_type === 'short_answer' ? 'Short Answer' : 'Multiple Choice'}
                 >
@@ -868,59 +975,100 @@ const QuizPage = ({ noteId, userId }) => {
           </div>
         </div>
 
-        {results.can_progress && (
-          <div className="level-progression-card">
+        {/* Level Progression — always shown unless already on hard and passed */}
+        {results.current_difficulty !== 'hard' && (
+          <div className={`level-progression-card ${results.can_progress ? 'can-progress' : 'needs-retry'}`}>
             <div className="progression-header">
-              <Award size={32} color="#f59e0b" />
+              <Award size={32} color={results.can_progress ? '#f59e0b' : '#9333ea'} />
               <div>
-                <h3>Ready for Next Level?</h3>
-                <p>Challenge yourself with {results.next_difficulty} difficulty</p>
+                {results.can_progress ? (
+                  <>
+                    <h3>🎉 Ready for Next Level!</h3>
+                    <p>You passed! Move on to <strong>{results.next_difficulty}</strong> difficulty</p>
+                  </>
+                ) : (
+                  <>
+                    <h3>📚 Keep Practicing!</h3>
+                    <p>Score 50% or more to unlock the next level</p>
+                  </>
+                )}
               </div>
             </div>
+
+            {/* Progress path — Easy → Medium → Hard */}
             <div className="progression-path">
-              <div className={`level-step ${getLevelStepClass('easy')}`}>
-                <div className="level-icon" style={{ background: getDifficultyColor('easy') }}>
-                  {getDifficultyIcon('easy')}
-                </div>
-                <span>Easy</span>
-              </div>
-              <div className="level-connector"></div>
-              
-              <div className={`level-step ${getLevelStepClass('medium')}`}>
-                <div className="level-icon" style={{ background: getDifficultyColor('medium') }}>
-                  {getDifficultyIcon('medium')}
-                </div>
-                <span>Medium</span>
-              </div>
-              <div className="level-connector"></div>
-              
-              <div className={`level-step ${getLevelStepClass('hard')}`}>
-                <div className="level-icon" style={{ background: getDifficultyColor('hard') }}>
-                  {getDifficultyIcon('hard')}
-                </div>
-                <span>Hard</span>
-              </div>
+              {['easy', 'medium', 'hard'].map((level, idx, arr) => (
+                <React.Fragment key={level}>
+                  <div className={`level-step ${getLevelStepClass(level)}`}>
+                    <div className="level-icon" style={{ background: getDifficultyColor(level) }}>
+                      {getDifficultyIcon(level)}
+                    </div>
+                    <span>{level.charAt(0).toUpperCase() + level.slice(1)}</span>
+                    {getLevelStepClass(level) === 'completed' && (
+                      <span className="level-check">✓</span>
+                    )}
+                    {getLevelStepClass(level) === 'current' && (
+                      <span className="level-next-label">Next</span>
+                    )}
+                  </div>
+                  {idx < arr.length - 1 && (
+                    <div className={`level-connector ${getLevelStepClass(level) === 'completed' ? 'active' : ''}`}></div>
+                  )}
+                </React.Fragment>
+              ))}
             </div>
-            <button 
-              className="next-level-btn" 
-              onClick={handleNextLevel}
-              disabled={isGenerating}
-            >
-              <TrendingUp size={20} />
-              <span>
-                {isGenerating 
-                  ? 'Generating...' 
-                  : `Progress to ${results.next_difficulty?.charAt(0).toUpperCase() + results.next_difficulty?.slice(1)} Level`
-                }
-              </span>
-            </button>
+
+            {results.can_progress ? (
+              <button
+                className="next-level-btn"
+                onClick={handleNextLevel}
+                disabled={isGenerating}
+              >
+                <TrendingUp size={20} />
+                <span>
+                  {isGenerating
+                    ? 'Generating...'
+                    : `Progress to ${results.next_difficulty?.charAt(0).toUpperCase() + results.next_difficulty?.slice(1)} Level →`}
+                </span>
+              </button>
+            ) : (
+              <button
+                className="retry-level-btn"
+                onClick={() => handleRetryLevel(results.source_content, results.current_difficulty)}
+                disabled={isGenerating}
+              >
+                <Sparkles size={20} />
+                <span>{isGenerating ? 'Generating...' : `Retry ${results.current_difficulty?.charAt(0).toUpperCase() + results.current_difficulty?.slice(1)} Level`}</span>
+              </button>
+            )}
           </div>
         )}
 
-        {!results.can_progress && (
+        {results.current_difficulty === 'hard' && results.passed && (
           <div className="completion-card">
             <Award size={48} color="#10b981" />
             <h3>🏆 All Levels Completed!</h3>
+            <p>Congratulations — you mastered all three difficulty levels!</p>
+          </div>
+        )}
+
+        {results.current_difficulty === 'hard' && !results.passed && (
+          <div className={`level-progression-card needs-retry`}>
+            <div className="progression-header">
+              <Award size={32} color="#9333ea" />
+              <div>
+                <h3>📚 Almost There!</h3>
+                <p>Score 50% or more to complete the Hard level</p>
+              </div>
+            </div>
+            <button
+              className="retry-level-btn"
+              onClick={() => handleRetryLevel(results.source_content, 'hard')}
+              disabled={isGenerating}
+            >
+              <Sparkles size={20} />
+              <span>{isGenerating ? 'Generating...' : 'Retry Hard Level'}</span>
+            </button>
           </div>
         )}
 
@@ -1015,6 +1163,17 @@ const QuizPage = ({ noteId, userId }) => {
           {step === 'upload' && renderUploadStep()}
           {step === 'taking' && renderTakingStep()}
           {step === 'results' && renderResultsStep()}
+
+          {/* Portal-based confirm dialog — renders on document.body */}
+          <ConfirmDialog
+            isOpen={dialog.isOpen}
+            type={dialog.type}
+            message={dialog.message}
+            okLabel={dialog.okLabel}
+            cancelLabel={dialog.cancelLabel}
+            onConfirm={dialog.onConfirm || closeDialog}
+            onCancel={closeDialog}
+          />
         </>
       )}
     </div>

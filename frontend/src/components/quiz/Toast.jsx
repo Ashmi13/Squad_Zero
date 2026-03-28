@@ -1,17 +1,23 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { X, AlertCircle, CheckCircle, Info } from 'lucide-react';
 import './Toast.css';
 
 const Toast = ({ message, type = 'error', onClose, duration = 5000 }) => {
+  const [closing, setClosing] = useState(false);
+
+  const triggerClose = () => {
+    setClosing(true);
+    setTimeout(() => onClose(), 300); // wait for slideOut animation
+  };
+
   useEffect(() => {
     if (duration > 0) {
       const timer = setTimeout(() => {
-        onClose();
+        triggerClose();
       }, duration);
-      
       return () => clearTimeout(timer);
     }
-  }, [duration, onClose]);
+  }, [duration]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const getIcon = () => {
     switch (type) {
@@ -38,14 +44,14 @@ const Toast = ({ message, type = 'error', onClose, duration = 5000 }) => {
   };
 
   return (
-    <div className={`toast ${getTypeClass()}`}>
+    <div className={`toast ${getTypeClass()} ${closing ? 'closing' : ''}`}>
       <div className="toast-icon">
         {getIcon()}
       </div>
       <div className="toast-message">
         {message}
       </div>
-      <button className="toast-close" onClick={onClose}>
+      <button className="toast-close" onClick={triggerClose}>
         <X size={18} />
       </button>
     </div>

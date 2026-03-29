@@ -1,57 +1,66 @@
+# backend/main.py
+import os
+import sys
 
-# FastAPI Backend Dependencies
+# Member 1's fix — ensures app/ subfolder is importable
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-# Core Framework
-fastapi==0.115.0
-uvicorn[standard]==0.30.0
-pydantic[email]==2.9.0
+from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.exc import SQLAlchemyError
+from database import engine, Base
+from dotenv import load_dotenv
 
-# Security & Authentication
-python-jose[cryptography]==3.3.0
-passlib==1.7.4
-python-multipart==0.0.6
-PyJWT==2.10.0
+from middleware.error_handler import (
+    validation_exception_handler,
+    database_exception_handler,
+    general_exception_handler
+)
 
-# Database (MongoDB)
-pymongo==4.7.3
+load_dotenv()
 
-# OAuth + HTTP client
-authlib==1.3.2
-httpx==0.27.2
+# Create database tables
+Base.metadata.create_all(bind=engine)
 
-# Environment Variables
-python-dotenv==1.0.1
+app = FastAPI(
+    title="NeuraNote API",
+    version="1.0.0",
+    debug=os.getenv("DEBUG", "False") == "True"
+)
 
-# Optional: For production
-# gunicorn==23.0.0
-# psycopg2-binary==2.9.10  # PostgreSQL
+# CORS Middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://localhost:5173"],  # 5173 = Vite port
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-annotated-doc==0.0.4
-annotated-types==0.7.0
-anyio==4.13.0
-APScheduler==3.11.2
-bcrypt==5.0.0
-click==8.3.1
-colorama==0.4.6
-ecdsa==0.19.1
-fastapi==0.135.2
-greenlet==3.3.2
-h11==0.16.0
-idna==3.11
-passlib==1.7.4
-psycopg2-binary==2.9.11
-pyasn1==0.6.3
-pydantic==2.12.5
-pydantic_core==2.41.5
-python-dotenv==1.2.2
-python-jose==3.5.0
-rsa==4.9.1
-six==1.17.0
-SQLAlchemy==2.0.48
-starlette==1.0.0
-typing-inspection==0.4.2
-typing_extensions==4.15.0
-tzdata==2025.3
-tzlocal==5.3.1
-uvicorn==0.42.0
+# Exception handlers (Member 4)
+app.add_exception_handler(RequestValidationError, validation_exception_handler)
+app.add_exception_handler(SQLAlchemyError, database_exception_handler)
+app.add_exception_handler(Exception, general_exception_handler)
 
+# ✅ Routers — add each member's router as files are ready
+from routes.health_routes import router as health_router
+from routes.quiz_routes import router as quiz_router
+from routes.history_routes import router as history_router
+# from routes.auth_routes import router as auth_router      # Member 1 — uncomment when ready
+# from routes.notes_routes import router as notes_router    # Member 2 — uncomment when ready
+# from routes.tasks_routes import router as tasks_router    # Member 5 — uncomment when ready
+
+app.include_router(health_router)
+app.include_router(quiz_router,    prefix="/api/quiz",    tags=["Quiz"])
+app.include_router(history_router, prefix="/api/history", tags=["History"])
+# app.include_router(auth_router,  prefix="/api/auth",    tags=["Auth"])
+
+# Member 1's health check (keep it — useful for quick testing)
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

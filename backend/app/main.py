@@ -1,46 +1,77 @@
-from fastapi import FastAPI, Request
+"""FastAPI application factory and CORS configuration"""
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api.v1.api import api_router
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from app.core.config import settings
+from app.api.v1.router import router as v1_router
 
-app = FastAPI(
-    title=settings.PROJECT_NAME,
-    description=settings.DESCRIPTION,
-    version=settings.VERSION
-)
 
-# CORS Configuration
-allowed_origins = [origin.strip() for origin in settings.CORS_ORIGINS.split(",") if origin.strip()]
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=allowed_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"]
-)
+def create_app() -> FastAPI:
+    """Create and configure FastAPI application"""
+    
+    app = FastAPI(
+        title=settings.app_name,
+        description="SquadZero Backend API with Supabase",
+        version="1.0.0",
+        docs_url="/docs",
+        redoc_url="/redoc",
+    )
+    
+    # Add CORS middleware BEFORE other routes
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins_list,
+        allow_credentials=settings.allow_credentials,
+        allow_methods=["*"],
+        allow_headers=["*"],
+        expose_headers=["X-Total-Count", "X-Page", "X-Page-Size"],
+    )
+    
+    # Add trusted host middleware
+    app.add_middleware(
+        TrustedHostMiddleware,
+        allowed_hosts=["localhost", "127.0.0.1"]
+    )
+    
+    # Include routers
+    app.include_router(v1_router)
+    
+    # Root health endpoint
+    @app.get("/")
+    async def root():
+        """Root endpoint"""
+        return {
+            "message": f"Welcome to {settings.app_name}",
+            "version": "1.0.0",
+            "environment": settings.environment,
+            "docs": "/docs",
+            "redoc": "/redoc",
+        }
+    
+    # Lifespan events (optional)
+    @app.on_event("startup")
+    async def startup_event():
+        """Run on application startup"""
+        print(f"🚀 Starting {settings.app_name}")
+        print(f"Environment: {settings.environment}")
+    
+    @app.on_event("shutdown")
+    async def shutdown_event():
+        """Run on application shutdown"""
+        print(f"🛑 Shutting down {settings.app_name}")
+    
+    return app
 
-# Basic security headers
-@app.middleware("http")
-async def set_security_headers(request: Request, call_next):
-    response = await call_next(request)
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
-    response.headers["Referrer-Policy"] = "no-referrer"
-    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
-    return response
 
-# Include all API routes
-app.include_router(api_router)
+# Create the FastAPI app instance
+app = create_app()
 
-@app.get("/")
-async def root():
-    """Health check endpoint"""
-    return {
-        "status": "online",
-        "message": settings.PROJECT_NAME,
-        "version": settings.VERSION
-    }
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run(
+        "app.main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=settings.debug,
+    )

@@ -6,21 +6,30 @@ Write-Host "SquadZero - Full Stack Startup" -ForegroundColor Green
 Write-Host "======================================" -ForegroundColor Green
 Write-Host ""
 
-# Check if root .env exists
-if (-not (Test-Path ".env")) {
-    Write-Host "NOTE: .env file not found!" -ForegroundColor Yellow
-    Write-Host "Creating .env from .env.example..." -ForegroundColor Cyan
-    Copy-Item .env.example .env
-    Write-Host "SUCCESS: .env created!" -ForegroundColor Green
+# Check backend env file
+if (-not (Test-Path "backend/.env")) {
+    Write-Host "NOTE: backend/.env file not found!" -ForegroundColor Yellow
+    if (Test-Path "backend/.env.example") {
+        Write-Host "Creating backend/.env from backend/.env.example..." -ForegroundColor Cyan
+        Copy-Item "backend/.env.example" "backend/.env"
+        Write-Host "SUCCESS: backend/.env created!" -ForegroundColor Green
+    }
+}
+
+# Check frontend env file
+if (-not (Test-Path "frontend/.env")) {
+    Write-Host "NOTE: frontend/.env file not found!" -ForegroundColor Yellow
+    if (Test-Path "frontend/.env.example") {
+        Write-Host "Creating frontend/.env from frontend/.env.example..." -ForegroundColor Cyan
+        Copy-Item "frontend/.env.example" "frontend/.env"
+        Write-Host "SUCCESS: frontend/.env created!" -ForegroundColor Green
+    }
+}
+
+if ((-not (Test-Path "backend/.env")) -or (-not (Test-Path "frontend/.env"))) {
     Write-Host ""
-    Write-Host "IMPORTANT: Please update .env file:" -ForegroundColor Red
-    Write-Host "1. Set a strong SECRET_KEY" -ForegroundColor Yellow
-    Write-Host "2. Review other settings" -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host "Generate SECRET_KEY with:" -ForegroundColor Cyan
-    Write-Host "python -c 'import secrets; print(secrets.token_urlsafe(32))'" -ForegroundColor White
-    Write-Host ""
-    Read-Host "Press Enter to continue after updating .env"
+    Write-Host "IMPORTANT: Configure missing env files before continuing." -ForegroundColor Red
+    Read-Host "Press Enter to continue after updating env files"
 }
 
 # Start Backend in new window
@@ -49,5 +58,6 @@ Write-Host ""
 Write-Host "Project Structure:" -ForegroundColor Yellow
 Write-Host "  frontend/  - React application" -ForegroundColor White
 Write-Host "  backend/   - FastAPI server" -ForegroundColor White
-Write-Host "  .env       - Configuration file" -ForegroundColor White
+Write-Host "  backend/.env   - Backend configuration" -ForegroundColor White
+Write-Host "  frontend/.env  - Frontend configuration" -ForegroundColor White
 Write-Host ""

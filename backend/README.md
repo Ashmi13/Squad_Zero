@@ -1,296 +1,412 @@
-# FastAPI Backend - SquadZero Authentication
+# SquadZero Backend API
 
-Production-ready FastAPI backend with JWT authentication.
+Production-grade FastAPI backend with Supabase authentication, PostgreSQL database, HttpOnly cookie sessions, and AWS S3 file storage.
 
-## 🚀 Quick Start
+## Overview
 
-### 1. Install Python Dependencies
+This backend provides:
+- **Modular Architecture**: Separated concerns across config, core, endpoints, schemas, and services
+- **Supabase Authentication**: User auth with email/password and OAuth support
+- **Session Management**: Secure HttpOnly cookies for session persistence
+- **Password Reset**: Custom token-based password reset flow
+- **Role-Based Access Control**: Admin dashboard with admin@university.com restriction
+- **File Uploads**: AWS S3 integration with presigned URLs and metadata tracking
+- **Protected Endpoints**: /me endpoint for authenticated users with module progress
+- **API Documentation**: Auto-generated Swagger UI and ReDoc
 
-```powershell
-cd backend
-pip install -r requirements.txt
+## Project Structure
+
+```
+backend/
+├── app/
+│   ├── main.py                 # FastAPI app factory
+│   ├── core/
+│   │   ├── config.py          # Pydantic settings
+│   │   ├── security.py        # JWT, cookies, auth utils
+│   │   └── __init__.py
+│   ├── db/
+│   │   ├── supabase.py        # Supabase client manager
+│   │   └── __init__.py
+│   ├── api/
+│   │   ├── deps.py            # Dependency injection
+│   │   ├── v1/
+│   │   │   ├── router.py      # V1 router composition
+│   │   │   ├── endpoints/
+│   │   │   │   ├── auth.py    # Auth endpoints
+│   │   │   │   ├── user.py    # User profile endpoints
+│   │   │   │   ├── admin.py   # Admin management endpoints
+│   │   │   │   ├── uploads.py # File upload endpoints
+│   │   │   │   └── __init__.py
+│   │   │   └── __init__.py
+│   │   └── __init__.py
+│   ├── schemas/
+│   │   ├── auth.py            # Auth schemas
+│   │   ├── user.py            # User schemas
+│   │   ├── admin.py           # Admin schemas
+│   │   ├── upload.py          # Upload schemas
+│   │   └── __init__.py
+│   ├── services/
+│   │   ├── auth_service.py    # Supabase auth operations
+│   │   ├── password_reset_service.py  # Reset token management
+│   │   ├── upload_service.py  # AWS S3 operations
+│   │   └── __init__.py
+│   └── __init__.py
+├── sql/
+│   └── schema.sql             # PostgreSQL schema with RLS
+├── tests/
+│   ├── conftest.py            # Test fixtures
+│   ├── test_auth.py           # Auth tests
+│   ├── test_user.py           # User tests
+│   ├── test_admin.py          # Admin tests
+│   ├── test_uploads.py        # Upload tests
+│   └── __init__.py
+├── requirements.txt           # Python dependencies
+└── README.md                  # This file
 ```
 
-Or using virtual environment (recommended):
+## Setup
+
+### Prerequisites
+
+- Python 3.10+
+- Supabase account (https://supabase.com)
+- AWS S3 bucket and credentials
+- PostgreSQL database (via Supabase)
+
+### 1. Environment Configuration
+
+Copy the root `.env.example` and fill in your Supabase and AWS credentials:
 
 ```powershell
-cd backend
+Copy-Item ..\.env.example ..\.env
+```
+
+Edit `.env` with:
+- Supabase URL and keys
+- AWS S3 credentials and bucket
+- Admin email address
+- Secret key for JWT
+
+### 2. Install Dependencies
+
+```powershell
 python -m venv venv
 .\venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
-### 2. Configure Environment
+### 3. Initialize Database Schema
 
-Create `.env` file:
+Run the SQL schema in your Supabase dashboard SQL editor:
 
+1. Go to Supabase dashboard → SQL Editor
+2. Create new query
+3. Copy contents of `sql/schema.sql`
+4. Execute
+
+This creates:
+- `profiles` table (user profiles)
+- `modules` table (course modules)
+- `module_progress` table (user progress tracking)
+- `password_reset_tokens` table (reset token storage)
+- `uploads` table (file metadata)
+- RLS policies for data isolation
+
+### 4. Run the Backend
+
+Development:
 ```powershell
-Copy-Item .env.example .env
+python -m app.main
 ```
 
-Edit `.env` and set your SECRET_KEY:
-
-```env
-SECRET_KEY=your-super-secret-key-minimum-32-characters
-```
-
-Generate a secure SECRET_KEY:
-
+Or with Uvicorn directly:
 ```powershell
-python -c "import secrets; print(secrets.token_urlsafe(32))"
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### 3. Run Development Server
+Backend runs at: **http://localhost:8000**
 
-```powershell
-python main.py
-```
+API Documentation: **http://localhost:8000/docs**
 
-Or using uvicorn directly:
+## API Endpoints
 
-```powershell
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
-```
+### Authentication (`/api/v1/auth`)
 
-The API will be available at: **http://localhost:8000**
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/signup` | Register new user |
+| POST | `/signin` | Login user |
+| POST | `/logout` | Logout (clear cookie) |
+| POST | `/refresh-token` | Refresh access token |
+| POST | `/request-password-reset` | Request password reset |
+| POST | `/confirm-password-reset` | Confirm password reset |
 
-## 📚 API Documentation
+### Users (`/api/v1/users`)
 
-FastAPI provides automatic interactive API documentation:
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/me` | Get current user profile + module progress |
 
-- **Swagger UI**: http://localhost:8000/docs
-- **ReDoc**: http://localhost:8000/redoc
+**Protected**: Requires authentication (cookie or Bearer token)
 
-## 🔌 API Endpoints
+### Admin (`/api/v1/admin`)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/users` | List all users (paginated) |
+| GET | `/uploads` | List all uploads (paginated) |
+| PATCH | `/uploads/{id}/status` | Update upload status |
+| DELETE | `/uploads/{id}` | Delete upload |
+
+**Protected**: Requires admin@university.com role
+
+### Uploads (`/api/v1/uploads`)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/presigned-url` | Get presigned S3 upload URL |
+| POST | `/confirm/{id}` | Mark upload as completed |
+| GET | `/my-uploads` | List user's uploads |
+| DELETE | `/{id}` | Delete upload |
+
+**Protected**: Requires authentication; users can only manage their own uploads
+
+## Configuration
+
+All configuration is loaded from `.env` file via `app/core/config.py`:
+
+### Supabase
+- `SUPABASE_URL`: Your Supabase project URL
+- `SUPABASE_ANON_KEY`: Anonymous key (for user context)
+- `SUPABASE_SERVICE_ROLE_KEY`: Service role key (for admin operations)
+
+### JWT & Session
+- `SECRET_KEY`: Secret for JWT signing (generate: `python -c "import secrets; print(secrets.token_urlsafe(32))"`)
+- `ALGORITHM`: JWT algorithm (default: HS256)
+- `ACCESS_TOKEN_EXPIRE_MINUTES`: Access token lifetime (default: 30)
+- `REFRESH_TOKEN_EXPIRE_DAYS`: Refresh token lifetime (default: 7)
+
+### Cookies
+- `COOKIE_NAME`: Session cookie name (default: "session")
+- `COOKIE_SECURE`: HTTPS only (default: true, set false in dev)
+- `COOKIE_HTTPONLY`: Cannot be accessed by JavaScript (default: true)
+- `COOKIE_SAMESITE`: CSRF protection level (default: "lax")
+
+### CORS
+- `CORS_ORIGINS`: Comma-separated list of allowed origins (default: http://localhost:3000,http://localhost:5173)
+- `ALLOW_CREDENTIALS`: Allow credentials (default: true)
+
+### Admin
+- `ADMIN_EMAIL`: Email for admin access (default: admin@university.com)
+
+### AWS S3
+- `AWS_S3_BUCKET`: S3 bucket name
+- `AWS_ACCESS_KEY_ID`: AWS access key
+- `AWS_SECRET_ACCESS_KEY`: AWS secret key
+- `AWS_REGION`: AWS region (default: us-east-1)
+
+## Security Features
 
 ### Authentication
+- **Supabase Auth**: Enterprise-grade email/password authentication
+- **JWT Tokens**: Access tokens with 30-minute expiry
+- **Refresh Tokens**: 7-day refresh tokens for long-lived sessions
 
-#### POST `/register`
+### Session Management
+- **HttpOnly Cookies**: Session token stored securely, inaccessible to JavaScript
+- **Secure Flag**: Cookies only sent over HTTPS (configurable)
+- **SameSite Policy**: CSRF protection with Lax policy
 
-Register a new user
+### Password Reset
+- **Custom Token Flow**: Secure one-time reset tokens
+- **Token Expiry**: Configurable expiration (default: 60 minutes)
+- **One-Time Use**: Tokens become invalid after first use
+- **User Enumeration Protection**: Generic responses prevent email discovery
 
-**Request:**
+### Authorization
+- **Role-Based Access Control**: Admin routes restricted to admin@university.com
+- **Data Isolation**: RLS policies ensure users see only their data
+- **Admin Context**: Service-role client for admin operations
 
-```json
-{
-  "email": "user@example.com",
-  "password": "password123",
-  "full_name": "John Doe"
-}
+### File Storage
+- **AWS S3 Integration**: Secure cloud storage
+- **Presigned URLs**: Direct client uploads without backend file handling
+- **Metadata Tracking**: File ownership and audit trail
+- **Cleanup**: Orphaned records can be cleaned up
+
+## Testing
+
+Run tests with pytest:
+
+```powershell
+pytest backend/tests -v
 ```
 
-**Response:**
+Run specific test file:
+```powershell
+pytest backend/tests/test_auth.py -v
+```
 
-```json
-{
-  "access_token": "eyJ...",
-  "refresh_token": "eyJ...",
-  "token_type": "bearer",
-  "user": {
-    "id": "user-1",
+With coverage:
+```powershell
+pytest backend/tests --cov=app
+```
+
+Current tests cover:
+- Health checks and root endpoints
+- Auth endpoint validation
+- Unauthorized access detection
+- Password reset flow
+- Admin authorization
+- Upload endpoint structure
+
+**Note**: Full integration tests require Supabase credentials and will mock certain components.
+
+## Development Notes
+
+### Backend-Only Scope
+This phase implements the backend with cookie-based session support. The frontend currently uses localStorage bearer tokens. Frontend migration to use cookies is left for a follow-up phase:
+
+- Frontend cookie migration: `withCredentials: true`, remove localStorage flow
+- Backend already supports both cookies and Bearer tokens for flexibility
+
+### Password Reset Implementation
+The current implementation logs reset tokens to console in development. For production:
+
+1. Implement email service (SendGrid, Mailgun, etc.)
+2. Create email template with reset link
+3. Replace console logging with actual email sending
+4. Set up email verification webhook
+
+### S3 Presigned URLs
+Uploads use presigned URLs for scalability:
+
+1. Client requests presigned URL via `/presigned-url`
+2. Backend generates time-limited URL (1 hour default)
+3. Client uploads directly to S3
+4. Client confirms upload completion via `/confirm/{id}`
+5. Backend marks metadata as active
+
+Benefits:
+- No files pass through backend
+- Faster uploads
+- Automatic cleanup of incomplete uploads
+- S3 handles multipart uploads
+
+### Database Seeding
+To create test data:
+
+```sql
+-- Insert test modules
+INSERT INTO modules (title, description, code) VALUES
+('Module 1', 'Introduction', 'MOD001'),
+('Module 2', 'Advanced Topics', 'MOD002');
+```
+
+## Troubleshooting
+
+### Import Errors
+Ensure you're running from project root and have activated venv:
+```powershell
+Set-Location backend
+.\venv\Scripts\Activate.ps1
+```
+
+### Supabase Connection Issues
+Verify credentials in `.env`:
+- URLs should include `https://`
+- Keys should match your Supabase project
+- Check firewall/VPN if in corporate environment
+
+### S3 Configuration Issues
+Verify AWS credentials:
+- Access key and secret are correct
+- Bucket exists and is in configured region
+- IAM user has S3 permissions
+
+### CORS Issues with Frontend
+Check `.env`:
+- `CORS_ORIGINS` matches frontend URL
+- `ALLOW_CREDENTIALS` is true
+- Frontend uses correct `VITE_API_BASE_URL`
+
+## Production Deployment
+
+### Environment
+- Set `ENVIRONMENT=production`
+- Set `DEBUG=false`
+- Set `COOKIE_SECURE=true` (requires HTTPS)
+- Generate strong `SECRET_KEY`
+- Set `CORS_ORIGINS` to actual frontend domain
+
+### Database
+- Ensure RLS policies are enabled (default in schema.sql)
+- Review RLS policies for your use case
+- Set up automated backups
+- Monitor database performance
+
+### Security
+- Use HTTPS only
+- Rotate AWS credentials regularly
+- Monitor Supabase audit logs
+- Set up rate limiting (consider CloudFlare)
+- Use environment-specific secrets
+
+### Deployment Options
+- **Docker**: Create Dockerfile and use container deployment
+- **Railway/Render**: Deploy from GitHub with auto-deployment
+- **AWS Elastic Beanstalk**: Scale with auto-scaling
+- **Heroku**: Free tier available for prototyping
+
+## API Examples
+
+### Sign Up
+```bash
+curl -X POST http://localhost:8000/api/v1/auth/signup \
+  -H "Content-Type: application/json" \
+  -d '{
     "email": "user@example.com",
+    "password": "SecurePassword123",
     "full_name": "John Doe"
-  }
-}
+  }'
 ```
 
-#### POST `/login`
-
-Login with email and password
-
-**Request:**
-
-```json
-{
-  "email": "user@example.com",
-  "password": "password123"
-}
+### Sign In
+```bash
+curl -X POST http://localhost:8000/api/v1/auth/signin \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@example.com",
+    "password": "SecurePassword123"
+  }'
 ```
 
-**Response:** Same as register
-
-#### GET `/auth/google`
-
-Redirect to Google OAuth
-
-#### GET `/auth/github`
-
-Redirect to GitHub OAuth
-
-#### POST `/refresh-token`
-
-Refresh access token
-
-**Request:**
-
-```json
-{
-  "refresh_token": "eyJ..."
-}
-```
-
-#### GET `/me`
-
-Get current user (requires authentication)
-
-**Headers:**
-
-```
-Authorization: Bearer <access_token>
-```
-
-#### POST `/forgot-password`
-
-Request password reset
-
-**Request:**
-
-```json
-{
-  "email": "user@example.com"
-}
-```
-
-## 🧪 Testing the API
-
-### Using curl:
-
-**Register:**
-
-```powershell
-curl -X POST "http://localhost:8000/register" `
-  -H "Content-Type: application/json" `
-  -d '{\"email\":\"test@example.com\",\"password\":\"password123\",\"full_name\":\"Test User\"}'
-```
-
-**Login:**
-
-```powershell
-curl -X POST "http://localhost:8000/login" `
-  -H "Content-Type: application/json" `
-  -d '{\"email\":\"test@example.com\",\"password\":\"password123\"}'
-```
-
-**Get Current User:**
-
-```powershell
-curl -X GET "http://localhost:8000/me" `
+### Get User Profile (with Bearer token)
+```bash
+curl -X GET http://localhost:8000/api/v1/users/me \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
-### Default Test Account
-
-For development, a test account is pre-configured:
-
-- **Email**: test@example.com
-- **Password**: password123
-
-## 🔐 Security Features
-
-✅ **Password Hashing** - bcrypt for secure password storage
-✅ **JWT Tokens** - Access and refresh token support
-✅ **Token Expiration** - Automatic token expiry
-✅ **CORS Protection** - Configured for frontend origins
-✅ **Input Validation** - Pydantic models for request validation
-✅ **Email Validation** - Valid email format checking
-
-## 📁 Project Structure
-
-```
-backend/
-├── main.py              # Main FastAPI application
-├── requirements.txt     # Python dependencies
-├── .env.example        # Environment variables template
-├── .env                # Your environment configuration (create this)
-└── README.md           # This file
+### Get Presigned Upload URL
+```bash
+curl -X POST http://localhost:8000/api/v1/uploads/presigned-url \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "filename": "document.pdf",
+    "mime_type": "application/pdf",
+    "file_size": 1024000,
+    "description": "Course material"
+  }'
 ```
 
-## 🔄 Integration with React Frontend
+## Support & Documentation
 
-The backend is configured to work with the React frontend on:
+- **FastAPI Docs**: https://fastapi.tiangolo.com
+- **Supabase Docs**: https://supabase.com/docs
+- **AWS S3 Docs**: https://docs.aws.amazon.com/s3/
+- **PyJWT Docs**: https://pyjwt.readthedocs.io
 
-- http://localhost:3000 (Create React App)
-- http://localhost:5173 (Vite)
+## License
 
-Update CORS origins in `main.py` if using different ports.
-
-## 🚀 Production Deployment
-
-### Using Gunicorn + Uvicorn
-
-```powershell
-pip install gunicorn
-gunicorn main:app --workers 4 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
-```
-
-### Environment Variables
-
-Set these in production:
-
-- `SECRET_KEY` - Strong random key (32+ characters)
-- `DATABASE_URL` - Production database connection string
-- `CORS_ORIGINS` - Your frontend domain
-
-### Security Checklist
-
-- [ ] Change SECRET_KEY
-- [ ] Use HTTPS in production
-- [ ] Set up proper database (PostgreSQL/MySQL)
-- [ ] Configure rate limiting
-- [ ] Set up proper logging
-- [ ] Use environment variables for sensitive data
-- [ ] Enable OAuth providers
-- [ ] Configure email service for password reset
-
-## 📝 Next Steps
-
-1. **Database Integration**
-   - Replace mock database with SQLAlchemy + PostgreSQL
-   - Set up migrations with Alembic
-
-2. **OAuth Implementation**
-   - Configure Google OAuth credentials
-   - Configure GitHub OAuth credentials
-   - Implement callback handlers
-
-3. **Email Service**
-   - Set up SMTP for password reset emails
-   - Configure email templates
-
-4. **Enhanced Security**
-   - Add rate limiting (slowapi)
-   - Implement 2FA support
-   - Add IP whitelist/blacklist
-
-## 🐛 Troubleshooting
-
-### Port already in use
-
-```powershell
-# Find process using port 8000
-netstat -ano | findstr :8000
-
-# Kill the process (replace PID)
-taskkill /PID <PID> /F
-```
-
-### Module not found
-
-```powershell
-pip install -r requirements.txt --upgrade
-```
-
-### CORS errors
-
-Check CORS configuration in `main.py` and ensure frontend URL is in `allow_origins`
-
-## 📚 Documentation
-
-- [FastAPI Documentation](https://fastapi.tiangolo.com/)
-- [Pydantic Documentation](https://docs.pydantic.dev/)
-- [JWT.io](https://jwt.io/) - JWT debugger
-- [Python-JOSE](https://python-jose.readthedocs.io/)
-
----
-
-**Happy Coding! 🚀**
+Part of SquadZero project.

@@ -8,6 +8,7 @@ import { getAccessToken, getRefreshToken, setTokens, clearTokens } from '@/utils
 export const axiosInstance = axios.create({
   baseURL: config.apiBaseUrl,
   timeout: 10000,
+  withCredentials: true, // Enable sending/receiving HttpOnly cookies
   headers: {
     'Content-Type': 'application/json',
   },

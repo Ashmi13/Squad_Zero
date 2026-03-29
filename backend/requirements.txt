@@ -1,16 +1,50 @@
+# ===== CORE FASTAPI =====
 fastapi
-uvicorn
+uvicorn[standard]
 python-multipart
 python-dotenv
-langchain-openai
-langchain-community
-chromadb
-PyPDF2
-openai
-tiktoken
-langchain-groq
-sentence-transformers
-langchain-huggingface
+pydantic[email]
+
+# ===== DATABASE (SQL) =====
+sqlalchemy
 psycopg2-binary
 pgvector
+
+# ===== AUTH & SECURITY (Member 1) =====
+python-jose[cryptography]
+passlib
+PyJWT
+bcrypt
+authlib
+httpx
+
+# ===== DATABASE (MongoDB - Member 1) =====
+pymongo
+
+# ===== AI / LANGCHAIN (Member 3 & 4) =====
+langchain-openai
+langchain-community
+langchain-core
+langchain-text-splitters
+langchain-groq
+langchain-huggingface
+openai
+tiktoken
+sentence-transformers
+chromadb
+
+# ===== DOCUMENT PROCESSING (Member 3) =====
+PyPDF2
 python-pptx
+python-docx
+openpyxl
+reportlab
+
+# ===== SCHEDULING =====
+APScheduler
+
+# ===== UTILITIES =====
+anyio
+typing_extensions
+tzdata
+tzlocal

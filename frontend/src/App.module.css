@@ -1,0 +1,71 @@
+.app {
+    display: flex;
+    min-height: 100vh;
+}
+
+.mainContent {
+    flex: 1;
+    margin-left: 320px;
+    /* Sidebar width */
+    padding: 40px;
+    background-color: var(--bg-main);
+    min-height: 100vh;
+}
+
+.sectionHeader {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    margin-bottom: 20px;
+}
+
+.sectionTitle h2 {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text-main);
+    margin-bottom: 4px;
+}
+
+.sectionTitle p {
+    font-size: 13px;
+    color: var(--secondary);
+}
+
+.sectionControls {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.controlBtn {
+    background-color: white;
+    border: 1px solid var(--border-color);
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    color: var(--text-main);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.controlBtn:hover {
+    background-color: var(--bg-main);
+}
+
+.sortSelect {
+    padding: 6px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    background-color: white;
+    font-size: 13px;
+    color: var(--text-main);
+    cursor: pointer;
+}
+
+.contentGrid {
+    display: flex;
+    flex-direction: column;
+    gap: 30px;
+}

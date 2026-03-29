@@ -23,5 +23,4 @@ export default defineConfig({
       },
     },
   },
-  envDir: '../', // Look for .env file in parent directory (root)
 });

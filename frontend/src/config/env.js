@@ -2,13 +2,16 @@
 export const config = {
   apiBaseUrl: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000',
   oauth: {
-    googleAuthUrl: '/auth/google',
-    githubAuthUrl: '/auth/github',
+    googleAuthUrl: '/api/v1/auth/google',
+    githubAuthUrl: '/api/v1/auth/github',
   },
   endpoints: {
-    login: '/login',
-    register: '/register',
-    forgotPassword: '/forgot-password',
-    refreshToken: '/refresh-token',
+    login: '/api/v1/auth/signin',
+    register: '/api/v1/auth/signup',
+    forgotPassword: '/api/v1/auth/request-password-reset',
+    resetPassword: '/api/v1/auth/confirm-password-reset',
+    refreshToken: '/api/v1/auth/refresh-token',
+    logout: '/api/v1/auth/logout',
+    me: '/api/v1/users/me',
   },
 };

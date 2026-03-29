@@ -1,14 +1,16 @@
 {
-  "name": "squad-zero-frontend",
+  "name": "neuranote-frontend",
   "private": true,
   "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "start": "vite",
     "build": "vite build",
     "preview": "vite preview",
     "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0"
   },
+  "proxy": "http://localhost:8000",
   "dependencies": {
     "@hookform/resolvers": "^3.3.4",
     "axios": "^1.6.5",

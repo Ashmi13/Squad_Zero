@@ -1,26 +1,14 @@
-# Logs
-logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
-
-# Frontend
-frontend/node_modules
-frontend/dist
-frontend/dist-ssr
-frontend/*.local
-.vite/
-.vite
-
-# Backend
-backend/venv
-backend/.venv
-backend/__pycache__
+# ===== PYTHON / BACKEND =====
+backend/venv/
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/*.py[cod]
 backend/*.pyc
+backend/*.pyo
 backend/.env
+backend/*.db
+backend/*.sqlite
 backend/documents/
 backend/check_*.py
 backend/debug_*.py
@@ -28,11 +16,71 @@ backend/fix_*.py
 backend/init_*.py
 backend/seed_*.py
 
-.env
 __pycache__/
 *.py[cod]
+*.pyc
+*.pyo
 
-# Scripts and misc
+# ===== NODE / FRONTEND =====
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+frontend/*.local
+.vite/
+
+# ===== BUILD / PRODUCTION =====
+/build
+/dist
+dist/
+dist-ssr/
+*.local
+
+# ===== ENVIRONMENT VARIABLES =====
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# ===== LOGS =====
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ===== IDE =====
+.vscode/
+.idea/
+*.swp
+*.swo
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*~
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ===== TEST / COVERAGE =====
+coverage/
+/test-files/*
+
+# ===== TYPESCRIPT =====
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+
+# ===== TEMP FILES =====
+*.tmp
+*.temp
+
+# ===== SCRIPTS & MISC (Sandavi M3) =====
 Squad_Zero_Sync/
-Squad_Zero_Sync
 run_servers.bat

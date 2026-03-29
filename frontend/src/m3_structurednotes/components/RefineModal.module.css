@@ -1,0 +1,129 @@
+.overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+    backdrop-filter: blur(2px);
+}
+
+.modal {
+    background-color: white;
+    width: 700px;
+    max-width: 90vw;
+    border-radius: 16px;
+    padding: 25px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+    display: flex;
+    flex-direction: column;
+}
+
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.header h3 {
+    font-size: 18px;
+    margin: 0;
+    color: #1B1D21;
+}
+
+.closeBtn {
+    font-size: 24px;
+    color: var(--secondary);
+    line-height: 1;
+    background: none;
+    border: none;
+    cursor: pointer;
+}
+
+.comparison {
+    display: flex;
+    align-items: stretch;
+    gap: 15px;
+    margin-bottom: 25px;
+    min-height: 200px;
+}
+
+.original,
+.refined {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.textBlock {
+    flex: 1;
+    background-color: #F9FAFB;
+    padding: 15px;
+    border-radius: 8px;
+    border: 1px solid #EAEAEA;
+    font-size: 14px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    overflow-y: auto;
+    max-height: 400px;
+}
+
+.refined .textBlock {
+    background-color: #F0F6FF;
+    border-color: #BFDBFE;
+    color: #1E3A8A;
+}
+
+.arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #9AA0A6;
+}
+
+h4 {
+    font-size: 12px;
+    text-transform: uppercase;
+    color: #5F6368;
+    margin: 0;
+}
+
+.footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+.discardBtn {
+    padding: 10px 20px;
+    color: #EF4444;
+    font-weight: 600;
+    background-color: #FEF2F2;
+    border: 1px solid #FECACA;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.applyBtn {
+    background-color: #2F6CF6;
+    color: white;
+    padding: 10px 24px;
+    border-radius: 8px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    border: none;
+    font-size: 14px;
+}

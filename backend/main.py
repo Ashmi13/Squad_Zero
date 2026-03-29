@@ -2,7 +2,6 @@
 import os
 import sys
 
-# Member 1's fix — ensures app/ subfolder is importable
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from fastapi import FastAPI
@@ -32,31 +31,29 @@ app = FastAPI(
 # CORS Middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],  # 5173 = Vite port
+    allow_origins=["http://localhost:3000", "http://localhost:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Exception handlers (Member 4)
+# Exception handlers
 app.add_exception_handler(RequestValidationError, validation_exception_handler)
 app.add_exception_handler(SQLAlchemyError, database_exception_handler)
 app.add_exception_handler(Exception, general_exception_handler)
 
-# ✅ Routers — add each member's router as files are ready
+# Routers
 from routes.health_routes import router as health_router
 from routes.quiz_routes import router as quiz_router
 from routes.history_routes import router as history_router
-# from routes.auth_routes import router as auth_router      # Member 1 — uncomment when ready
-# from routes.notes_routes import router as notes_router    # Member 2 — uncomment when ready
-# from routes.tasks_routes import router as tasks_router    # Member 5 — uncomment when ready
+# from routes.auth_routes import router as auth_router      # M1 - uncomment when ready
+# from routes.notes_routes import router as notes_router    # M2 - uncomment when ready
+# from routes.tasks_routes import router as tasks_router    # M5 - uncomment when ready
 
 app.include_router(health_router)
 app.include_router(quiz_router,    prefix="/api/quiz",    tags=["Quiz"])
 app.include_router(history_router, prefix="/api/history", tags=["History"])
-# app.include_router(auth_router,  prefix="/api/auth",    tags=["Auth"])
 
-# Member 1's health check (keep it — useful for quick testing)
 @app.get("/health")
 def health():
     return {"status": "ok"}

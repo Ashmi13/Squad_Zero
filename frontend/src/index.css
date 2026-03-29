@@ -19,16 +19,39 @@ code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
 }
 
-/* ===== CSS VARIABLES ===== */
+/* ===== TEAM CSS VARIABLES ===== */
 :root {
+  /* Team shared tokens */
   --nn-ink: #0b1020;
   --nn-ink-soft: #1b2340;
   --nn-accent: #4f46e5;
   --nn-cream: #f7f7fb;
+
+  /* Member 3 (Sandavi) - Structured Notes tokens */
+  --primary: #6C5DD3;
+  --secondary: #808191;
+  --bg-main: #F7F8FA;
+  --bg-sidebar: #FFFFFF;
+  --text-main: #1B1D21;
+  --white: #FFFFFF;
+  --gradient-storage: linear-gradient(135deg, #6C5DD3 0%, #8E84E3 100%);
+  --border-color: #E4E4E4;
 }
 
 .font-display {
   font-family: 'Playfair Display', 'Times New Roman', serif;
+}
+
+/* ===== MEMBER 3 BASE STYLES ===== */
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+}
+
+input {
+  font-family: inherit;
 }
 
 /* ===== CUSTOM SCROLLBAR ===== */

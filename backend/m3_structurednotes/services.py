@@ -1,0 +1,446 @@
+import os
+import json
+from PyPDF2 import PdfReader
+from pptx import Presentation
+from io import BytesIO
+# from langchain_huggingface import HuggingFaceEmbeddings
+# from langchain_groq import ChatGroq
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from dotenv import load_dotenv
+from .database import get_db_connection
+from psycopg2.extras import RealDictCursor
+import uuid
+import math
+import re
+from collections import Counter
+import json
+import numpy as np
+
+load_dotenv()
+
+class AIService:
+
+    def __init__(self):
+        # Use HuggingFace local embeddings (free)
+        self._embeddings = None
+        # Use Groq for LLM (free tier)
+        self._llm = None
+
+    @property
+    def embeddings(self):
+        if self._embeddings is None:
+            from langchain_huggingface import HuggingFaceEmbeddings
+            print("Loading HuggingFace Embeddings... (First run may take a few minutes)")
+            self._embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+        return self._embeddings
+
+    @property
+    def llm(self):
+        if self._llm is None:
+            from langchain_groq import ChatGroq
+            api_key = os.getenv("GROQ_API_KEY")
+            self._llm = ChatGroq(
+                groq_api_key=api_key, 
+                model_name="llama-3.1-8b-instant",
+                temperature=0
+            )
+        return self._llm
+
+    def extract_keywords_tfidf(self, text, top_n=10):
+        """
+        MANUAL ALGORITHM: Pure Python TF-IDF Keyword Extractor.
+        This calculates the Term Frequency (TF) and Inverse Document Frequency (IDF) 
+        without external libraries to satisfy academic manual algorithm requirements.
+        """
+        # Stopwords to ignore
+        stopwords = {"the", "is", "in", "and", "to", "of", "a", "for", "on", "with", "as", "by", "this", 
+                     "that", "it", "at", "from", "or", "an", "be", "are", "can", "will", "which"}
+        
+        # 1. Clean and tokenize text into words
+        words = re.findall(r'\b[a-z]{3,}\b', text.lower())
+        words = [w for w in words if w not in stopwords]
+        
+        if not words:
+            return []
+            
+        # 2. Treat paragraphs/sentences as 'documents' for IDF calculation
+        sentences = [s.strip() for s in text.lower().split('.') if len(s.strip()) > 10]
+        if not sentences:
+            sentences = [text.lower()]
+            
+        N = len(sentences)
+        
+        # 3. Calculate Term Frequency (TF) for the entire text
+        word_counts = Counter(words)
+        total_words = len(words)
+        
+        tfidf_scores = {}
+        for word, count in word_counts.items():
+            tf = count / total_words
+            
+            # 4. Calculate Inverse Document Frequency (IDF)
+            # Count how many sentences contain the word
+            doc_freq = sum(1 for sentence in sentences if word in sentence)
+            idf = math.log(N / (1 + doc_freq)) + 1  # Add 1 to avoid zero weights
+            
+            # 5. Final TF-IDF Score
+            tfidf_scores[word] = tf * idf
+            
+        # Sort words by score descending
+        sorted_keywords = sorted(tfidf_scores.items(), key=lambda item: item[1], reverse=True)
+        return [word for word, score in sorted_keywords[:top_n]]
+
+    def process_pdf(self, file_bytes, pdf_id, original_filename):
+        # Determine file type
+        is_pptx = original_filename.lower().endswith('.pptx')
+        extension = ".pptx" if is_pptx else ".pdf"
+
+        # 1. Save File to disk for viewing
+        save_dir = "documents"
+        os.makedirs(save_dir, exist_ok=True)
+        
+        safe_filename = f"{pdf_id}{extension}"
+        file_path = os.path.join(save_dir, safe_filename)
+        
+        with open(file_path, "wb") as f:
+            f.write(file_bytes)
+            
+        # 2. Extract text
+        full_text = ""
+        if is_pptx:
+            prs = Presentation(BytesIO(file_bytes))
+            for slide in prs.slides:
+                for shape in slide.shapes:
+                    if hasattr(shape, "text"):
+                        full_text += shape.text + " "
+                full_text += "\n"
+        else:
+            reader = PdfReader(BytesIO(file_bytes))
+            for page in reader.pages:
+                full_text += page.extract_text() or ""
+            
+        # 3. Chunk text for Vector Storage
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1000,
+            chunk_overlap=200,
+            length_function=len
+        )
+        chunks = text_splitter.split_text(full_text)
+        
+        # 4. Generate Embeddings and Save to Postgres (pgvector)
+        try:
+            conn = get_db_connection()
+            if conn:
+                cur = conn.cursor()
+                
+                # Check if document_chunks table exists (lightweight check/fallback)
+                # In production, schema migration handles this.
+                
+                # Generate embeddings in batch
+                embeddings = self.embeddings.embed_documents(chunks)
+                
+                for i, (chunk_text, embedding) in enumerate(zip(chunks, embeddings)):
+                    chunk_id = str(uuid.uuid4())
+                    cur.execute("""
+                        INSERT INTO document_chunks (id, pdf_id, chunk_index, content, embedding, metadata)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                    """, (
+                        chunk_id, 
+                        pdf_id, 
+                        i, 
+                        chunk_text, 
+                        str(embedding), # pgvector expects array/list as string representation or list
+                        json.dumps({"source": original_filename})
+                    ))
+                
+                conn.commit()
+                cur.close()
+                conn.close()
+                print(f"Stored {len(chunks)} chunks in Postgres (pgvector) for {pdf_id}")
+            else:
+                print("DB Connection failed, skipping vector storage.")
+                
+        except Exception as e:
+            print(f"Error storing vectors in Postgres: {e}")
+            if conn:
+                conn.rollback()
+        
+        # 5. Return result
+        return {
+            "status": "success",
+            "pdf_url": f"/documents/{safe_filename}",
+            "extracted_text": full_text
+        }
+
+    def save_note_to_db(self, user_id, pdf_id, title, content):
+        conn = get_db_connection()
+        if not conn:
+            print("Database connection failed")
+            return None
+        
+        try:
+            cur = conn.cursor()
+            note_id = str(uuid.uuid4())
+            
+            # Use pdf_id if provided (ensure column exists or handle gracefully)
+            cur.execute("""
+                INSERT INTO notes (note_id, user_id, title, content, created_date, updated_date, note_type, is_in_folder, has_embeddings)
+                VALUES (%s, %s, %s, %s, NOW(), NOW(), 'ai_generated', FALSE, TRUE)
+            """, (note_id, user_id, title, content))
+            
+            conn.commit()
+            cur.close()
+            conn.close()
+            print(f"Note saved to DB: {note_id}")
+            return note_id
+        except Exception as e:
+            print(f"Error saving to DB: {e}")
+            if conn:
+                conn.rollback()
+            return None
+
+        
+    def generate_note(self, pdf_id, user_id, instruction=None, full_text=None, language="English"):
+        # 1. Manual Algorithm: Extract Keywords from the full text
+        # If full text isn't passed, we'd normally pull it from DB, but for speed we assume it's passed or extract simple context
+        
+        # Retrieve ALL relevant chunks to maintain the lecture flow (not just top 5)
+        # We want a comprehensive note, so we fetch more chunks
+        context_text = ""
+        try:
+            conn = get_db_connection()
+            if conn:
+                cur = conn.cursor()
+                # Fetch chunks ordered by their original index to maintain lecture flow!
+                cur.execute("""
+                    SELECT content 
+                    FROM document_chunks 
+                    WHERE pdf_id = %s 
+                    ORDER BY chunk_index ASC
+                """, (pdf_id,))
+                
+                results = cur.fetchall()
+                context_chunks = [row[0] for row in results]
+                context_text = "\n\n".join(context_chunks)
+                
+                # Limit size to prevent Groq Free Tier API 'rate_limit_exceeded (TPM Limit 6000)' errors
+                MAX_API_CHARS = 14000  # roughly 3500 tokens
+                if len(context_text) > MAX_API_CHARS:
+                    print(f"Note: context truncated from {len(context_text)} to {MAX_API_CHARS} to avoid API limits.")
+                    context_text = context_text[:MAX_API_CHARS] + "\n...[Content truncated to fit free AI limits]"
+                    
+                cur.close()
+                conn.close()
+            else:
+                return "Database connection failed during retrieval."
+        except Exception as e:
+            print(f"Error retrieving vectors: {e}")
+            return f"Error exploring document: {str(e)}"
+
+        if not context_text:
+            return "No relevant content found in the document."
+            
+        # Run our manual TF-IDF Algorithm!
+        top_keywords = self.extract_keywords_tfidf(context_text, top_n=10)
+        keyword_str = ", ".join(top_keywords)
+        print(f"Manual Algorithm Extracted Keywords: {keyword_str}")
+            
+        # Create a highly structured prompt to Differentiate from normal ChatGPT
+        prompt = f"""
+        You are an expert, brilliant professor writing a highly structured, simple, and easy-to-understand study note.
+        You must write the note entirely in {language}.
+        
+        INSTRUCTIONS/GOALS:
+        1. Keep the exact flow of the lecture. Do not skip points. Explain every single point simply and clearly.
+        2. MANDATORY: The note MUST cover these mathematically extracted keywords: {keyword_str}.
+        3. Use formatting (Headers, Bullet points, Bolding).
+        4. MANDATORY: You MUST include at least one Mermaid.js diagram (a flowchart or mind map) that visualizes a core concept from the text. Wrap it in ```mermaid ... ``` codeblocks.
+        
+        Context (Entire Lecture Flow):
+        {context_text}
+        
+        Remember: Output beautiful markdown, simple explanations, and a Mermaid diagram. Note language: {language}.
+        """
+        
+        try:
+            response = self.llm.invoke(prompt)
+            return response.content
+        except Exception as e:
+            return f"Error generating note: {str(e)}"
+
+
+    def update_note(self, note_id: str, new_content: str):
+        """
+        Updates the content of an existing note in the database.
+        """
+        conn = get_db_connection()
+        if not conn:
+            return False
+            
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE notes SET content = %s, updated_date = NOW() WHERE note_id = %s",
+                (new_content, note_id)
+            )
+            rows_updated = cur.rowcount
+            conn.commit()
+            cur.close()
+            conn.close()
+            
+            if rows_updated == 0:
+                print(f"Warning: Attempted to update non-existent note {note_id}")
+                return False
+                
+            return True
+        except Exception as e:
+            print(f"Error updating note: {e}")
+            return False
+
+    def refine_text(self, pdf_id: str, selected_text: str, instruction: str):
+        """
+        Refines or explains a specific piece of text using the original PDF context.
+        """
+        # 1. Retrieve relevant context from the PDF
+        query_text = f"{selected_text} {instruction}"
+        query_embedding = self.embeddings.embed_query(query_text)
+        
+        context_text = ""
+        try:
+            conn = get_db_connection()
+            if conn:
+                cur = conn.cursor()
+                cur.execute("""
+                    SELECT content 
+                    FROM document_chunks 
+                    WHERE pdf_id = %s 
+                    ORDER BY embedding <=> %s 
+                    LIMIT 3
+                """, (pdf_id, str(query_embedding)))
+                
+                results = cur.fetchall()
+                context_chunks = [row[0] for row in results]
+                context_text = "\n\n".join(context_chunks)
+                cur.close()
+                conn.close()
+        except Exception as e:
+            print(f"Error retrieving context for refinement: {e}")
+            context_text = "" # Fallback to no context
+        
+        # 2. Prompt the LLM
+        prompt = f"""
+        You are an expert tutor. The user has selected a specific part of a note and asked for a modification or explanation.
+        
+        CONTEXT from the original document:
+        {context_text}
+        
+        USER SELECTED TEXT: "{selected_text}"
+        USER INSTRUCTION: "{instruction}"
+        
+        YOUR TASK:
+        Provide the requested refinement, explanation, or example based strictly on the provided CONTEXT. 
+        Do not make up information not present in the context.
+        If the instruction is to "rewrite", rewrite the selected text using the context.
+        If the instruction is to "give an example", provide a concrete example derived from the context.
+        Return ONLY the refined text or explanation.
+        """
+        
+        # 3. Generate Response
+        try:
+            response = self.llm.invoke(prompt)
+            return {"refined_content": response.content}
+        except Exception as e:
+            return {"error": str(e)}
+
+    # --- Folder Management ---
+    def create_folder(self, user_id, name):
+        conn = get_db_connection()
+        if not conn:
+            return None
+        
+        try:
+            cur = conn.cursor()
+            folder_id = str(uuid.uuid4())
+            cur.execute(
+                "INSERT INTO folders (id, user_id, name) VALUES (%s, %s, %s) RETURNING id",
+                (folder_id, user_id, name)
+            )
+            conn.commit()
+            cur.close()
+            conn.close()
+            return {"id": folder_id, "name": name}
+        except Exception as e:
+            print(f"Error creating folder: {e}")
+            return None
+
+    def get_all_folders(self, user_id):
+        conn = get_db_connection()
+        if not conn:
+            return []
+        
+        try:
+            cur = conn.cursor(cursor_factory=RealDictCursor) # Ensure dicts are returned
+            cur.execute("SELECT * FROM folders WHERE user_id = %s ORDER BY created_at DESC", (user_id,))
+            folders = cur.fetchall()
+            cur.close()
+            conn.close()
+            return folders
+        except Exception as e:
+            print(f"Error getting folders: {e}")
+            return []
+
+    def update_note_folder(self, note_id, folder_id):
+        conn = get_db_connection()
+        if not conn:
+            return False
+            
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE notes SET folder_id = %s WHERE note_id = %s",
+                (folder_id, note_id)
+            )
+            conn.commit()
+            cur.close()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"Error updating note folder: {e}")
+            return False
+
+    def get_all_notes(self, user_id, folder_id=None):
+        conn = get_db_connection()
+        if not conn:
+            print("DB Connection failed in get_all_notes")
+            return []
+        
+        try:
+            print(f"Fetching notes for user: {user_id}, folder: {folder_id}")
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            
+            query = """
+                SELECT note_id, title, created_date, note_type, is_in_folder, folder_id 
+                FROM notes 
+                WHERE user_id = %s
+            """
+            params = [user_id]
+            
+            if folder_id:
+                query += " AND folder_id = %s"
+                params.append(folder_id)
+                
+            query += " ORDER BY updated_date DESC"
+            
+            cur.execute(query, tuple(params))
+            notes = cur.fetchall()
+            cur.close()
+            conn.close()
+            print(f"Found {len(notes)} notes")
+            return notes
+        except Exception as e:
+            print(f"Error getting notes: {e}")
+            if conn:
+                conn.close()
+            return []
+
+ai_service = AIService()

@@ -7,13 +7,13 @@ load_dotenv()
 class Settings:
     """Application settings and configuration"""
     
-    # Database
+    # Database — reads from .env, falls back to local default
     DATABASE_URL: str = os.getenv(
-        "DATABASE_URL", 
+        "DATABASE_URL",
         "postgresql://postgres:neuranote123@localhost:5432/neuranote_db"
     )
     
-    # OpenAI
+    # OpenAI — reads from .env
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
     
     # App Settings
@@ -21,11 +21,15 @@ class Settings:
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = os.getenv("DEBUG", "False").lower() == "true"
     
-    # CORS Origins
+    # CORS Origins — includes all common dev ports
     CORS_ORIGINS: list = [
         "http://localhost:3000",
         "http://localhost:3001",
+        "http://localhost:5173",   # Vite default
+        "http://localhost:5174",   # Vite alternate
         "http://127.0.0.1:3000",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:5174",
     ]
     
     # File Upload Settings

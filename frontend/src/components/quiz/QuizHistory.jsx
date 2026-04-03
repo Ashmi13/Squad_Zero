@@ -13,20 +13,24 @@ const QuizHistory = ({ userId, onBack }) => {
   const [totalCount, setTotalCount] = useState(0);
 
   useEffect(() => {
+    // Guard: never fetch with an invalid userId
+    const uid = parseInt(userId, 10);
+    if (!uid || isNaN(uid)) return;
     if (activeTab === 'history') {
       fetchHistory();
     } else {
       fetchAnalytics();
     }
-  }, [activeTab, pagination.offset]);
+  }, [activeTab, pagination.offset, userId]);
 
   const fetchHistory = async () => {
+    const uid = parseInt(userId, 10) || 1;
     setLoading(true);
     setError(null);
     
     try {
       const response = await fetch(
-        `http://localhost:8000/api/quizzes/history/${userId}?limit=${pagination.limit}&offset=${pagination.offset}`
+        `http://localhost:8000/api/quizzes/history/${uid}?limit=${pagination.limit}&offset=${pagination.offset}`
       );
       
       if (!response.ok) {
@@ -44,12 +48,13 @@ const QuizHistory = ({ userId, onBack }) => {
   };
 
   const fetchAnalytics = async () => {
+    const uid = parseInt(userId, 10) || 1;
     setLoading(true);
     setError(null);
     
     try {
       const response = await fetch(
-        `http://localhost:8000/api/quizzes/analytics/${userId}`
+        `http://localhost:8000/api/quizzes/analytics/${uid}`
       );
       
       if (!response.ok) {
@@ -68,7 +73,7 @@ const QuizHistory = ({ userId, onBack }) => {
   const handleViewDetails = async (attemptId) => {
     try {
       const response = await fetch(
-        `http://localhost:8000/api/quizzes/attempt/${attemptId}/details?user_id=${userId}`
+        `http://localhost:8000/api/quizzes/attempt/${attemptId}/details?user_id=${parseInt(userId,10)||1}`
       );
       
       if (!response.ok) {
@@ -89,7 +94,7 @@ const QuizHistory = ({ userId, onBack }) => {
     
     try {
       const response = await fetch(
-        `http://localhost:8000/api/quizzes/history/${attemptId}?user_id=${userId}`,
+        `http://localhost:8000/api/quizzes/history/${attemptId}?user_id=${parseInt(userId,10)||1}`,
         { method: 'DELETE' }
       );
       

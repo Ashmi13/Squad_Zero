@@ -1,4 +1,5 @@
 # backend/routes/history_routes.py
+import sys, os; _r = os.path.dirname(os.path.dirname(os.path.abspath(__file__))); sys.path.insert(0, _r) if _r not in sys.path else None
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from database import get_db

@@ -12,8 +12,8 @@ frontend/node_modules
 frontend/dist
 frontend/dist-ssr
 frontend/*.local
-.vite/
 .vite
+.vite/
 
 # Backend
 backend/venv
@@ -21,6 +21,7 @@ backend/.venv
 backend/__pycache__
 backend/*.pyc
 backend/.env
+backend/documents
 backend/documents/
 backend/check_*.py
 backend/debug_*.py

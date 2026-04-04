@@ -1,4 +1,33 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ===== GLOBAL RESET ===== */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Manrope', 'Segoe UI', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
+}
+
+/* ===== TEAM CSS VARIABLES ===== */
 :root {
+  /* Team shared tokens */
+  --nn-ink: #0b1020;
+  --nn-ink-soft: #1b2340;
+  --nn-accent: #4f46e5;
+  --nn-cream: #f7f7fb;
+
+  /* Member 3 (Sandavi) - Structured Notes tokens */
   --primary: #6C5DD3;
   --secondary: #808191;
   --bg-main: #F7F8FA;
@@ -7,22 +36,13 @@
   --white: #FFFFFF;
   --gradient-storage: linear-gradient(135deg, #6C5DD3 0%, #8E84E3 100%);
   --border-color: #E4E4E4;
-  --font-family: 'Inter', sans-serif;
 }
 
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
+.font-display {
+  font-family: 'Playfair Display', 'Times New Roman', serif;
 }
 
-body {
-  font-family: var(--font-family);
-  background-color: var(--bg-main);
-  color: var(--text-main);
-  -webkit-font-smoothing: antialiased;
-}
-
+/* ===== MEMBER 3 BASE STYLES ===== */
 button {
   font-family: inherit;
   cursor: pointer;
@@ -32,4 +52,39 @@ button {
 
 input {
   font-family: inherit;
+}
+
+/* ===== CUSTOM SCROLLBAR ===== */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: #f5f5f5; }
+::-webkit-scrollbar-thumb { background: #d4d4d4; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #a3a3a3; }
+
+/* ===== BACKGROUND PATTERN ===== */
+.bg-grid-pattern {
+  background-image:
+    linear-gradient(to right, rgba(0, 0, 0, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.05) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+/* ===== ANIMATIONS ===== */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.3s ease-in-out;
+}
+
+/* ===== ACCESSIBILITY ===== */
+*:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+}
+
+/* ===== PRINT ===== */
+@media print {
+  body { background: white; }
 }

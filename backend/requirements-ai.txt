@@ -1,0 +1,27 @@
+# Install ONLY if you work on AI/Notes features (Members 3 & 4)
+# pip install -r requirements-ai.txt
+
+# ===== AI / LANGCHAIN =====
+langchain-openai
+langchain-community
+langchain-core
+langchain-text-splitters
+langchain-groq
+langchain-huggingface
+openai
+tiktoken
+sentence-transformers
+chromadb
+
+# ===== DOCUMENT PROCESSING (Member 3) =====
+PyPDF2
+python-pptx
+python-docx
+openpyxl
+reportlab
+
+# ===== SCHEDULING =====
+APScheduler
+
+# ===== MONGODB (if needed) =====
+pymongo

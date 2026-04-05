@@ -31,7 +31,11 @@ export function LoginForm() {
   const [isSuccess, setIsSuccess] = useState(false);
 
   const handleGoogleSignIn = () => {
-    window.location.href = `${config.apiBaseUrl}${config.oauth.googleAuthUrl}`;
+    // We rely on the Vite proxy for /api, so we must go to current origin + proxy path
+    // Force the browser to treat this as a fresh external navigation
+    const url = `${window.location.origin}${config.oauth.googleAuthUrl}`;
+    console.log('Redirecting to Google login through proxy:', url);
+    window.location.assign(url);
   };
 
   const onSubmit = async (data) => {

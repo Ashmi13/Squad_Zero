@@ -1,8 +1,8 @@
 // Environment configuration
 export const config = {
-  apiBaseUrl: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000',
+  apiBaseUrl: import.meta.env.VITE_API_BASE_URL || '',
   oauth: {
-    googleAuthUrl: '/api/v1/auth/google',
+    googleAuthUrl: '/api/v1/auth/google-login',
     githubAuthUrl: '/api/v1/auth/github',
   },
   endpoints: {

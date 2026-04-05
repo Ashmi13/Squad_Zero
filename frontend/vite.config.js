@@ -25,7 +25,7 @@ export default defineConfig({
       '/notes':         'http://127.0.0.1:8000',
 
       '/api': {
-        target: 'http://localhost:8000',
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
     },

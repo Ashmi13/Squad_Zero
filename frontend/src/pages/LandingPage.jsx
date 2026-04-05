@@ -62,10 +62,10 @@ export default function LandingPage() {
             </div>
 
             <Link
-              to="/signup"
+              to="/login"
               className="absolute inset-x-8 bottom-8 rounded-xl bg-slate-200/90 px-6 py-3 text-center text-sm font-semibold text-slate-800 transition hover:bg-white"
             >
-              Get Started - Sign Up
+              Get Started - Sign In
               <span className="block text-xs font-medium text-slate-500">Free</span>
             </Link>
           </div>

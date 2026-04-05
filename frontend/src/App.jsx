@@ -6,6 +6,8 @@ import LandingPage from '@/pages/LandingPage';
 import SignInPage from '@/pages/SignInPage';
 import SignUpPage from '@/pages/SignUpPage';
 import OAuthCallback from '@/pages/OAuthCallback';
+// ===== MEMBER 2 (Ashmitha) - File Manager =====
+import FileManagerPage from '@/pages/FileManagerPage';
 
 // ===== SHARED DASHBOARD =====
 import Dashboard from '@/pages/Dashboard';
@@ -35,6 +37,9 @@ function App() {
         <Route path="/login"          element={<SignInPage />} />
         <Route path="/signup"         element={<SignUpPage />} />
         <Route path="/oauth/callback" element={<OAuthCallback />} />
+
+        {/* Member 2 - File Manager */}
+        <Route path="/files" element={<FileManagerPage />} />           
 
         {/* Shared Dashboard */}
         <Route path="/dashboard"      element={<Dashboard />} />

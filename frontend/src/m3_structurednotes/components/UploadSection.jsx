@@ -87,7 +87,7 @@ const UploadSection = () => {
                     isPptx: uploadResult.pdf_url.toLowerCase().endsWith('.pptx') || selectedFiles.some(f => f.name.toLowerCase().endsWith('.pptx'))
                 }));
 
-                navigate(`/editor/${noteId}`);
+                navigate(`/notes/editor/${noteId}`);
             }
 
         } catch (error) {

@@ -33,8 +33,12 @@ def create_app() -> FastAPI:
         allowed_hosts=["localhost", "127.0.0.1"]
     )
     
-    # Include routers
+    # Include Core Team Routers
     app.include_router(v1_router)
+
+    # Include Member 3 Router (Smart Note Management)
+    from m3_structurednotes.router import router as m3_router
+    app.include_router(m3_router)
     
     # Root health endpoint
     @app.get("/")

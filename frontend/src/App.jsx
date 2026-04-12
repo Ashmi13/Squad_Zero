@@ -5,6 +5,11 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import LandingPage from '@/pages/LandingPage';
 import SignInPage from '@/pages/SignInPage';
 import SignUpPage from '@/pages/SignUpPage';
+import VerificationPage from '@/pages/VerificationPage';
+import ForgotPassword from '@/pages/ForgotPassword';
+import ResetPassword from '@/pages/ResetPassword';
+import ChangePassword from '@/pages/ChangePassword';
+import AccountVerification from '@/pages/AccountVerification';
 import OAuthCallback from '@/pages/OAuthCallback';
 
 // ===== SHARED DASHBOARD =====
@@ -34,6 +39,11 @@ function App() {
         <Route path="/"               element={<LandingPage />} />
         <Route path="/login"          element={<SignInPage />} />
         <Route path="/signup"         element={<SignUpPage />} />
+        <Route path="/verify-email"   element={<VerificationPage />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/reset-password"  element={<ResetPassword />} />
+        <Route path="/change-password" element={<ChangePassword />} />
+        <Route path="/account-verified" element={<AccountVerification />} />
         <Route path="/oauth/callback" element={<OAuthCallback />} />
 
         {/* Shared Dashboard */}

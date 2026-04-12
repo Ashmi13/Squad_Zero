@@ -31,5 +31,5 @@ export default defineConfig({
     },
   },
 
-  envDir: '../', // Root .env — DO NOT REMOVE
+  // Deleted envDir: '../' to search in frontend root instead
 });

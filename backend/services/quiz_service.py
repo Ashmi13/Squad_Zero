@@ -26,12 +26,13 @@ class QuizService:
     # ── Generate ──────────────────────────────────────────────────────────────
 
     async def generate_quiz(self, files, num_questions, difficulty, time_limit,
-                            question_type, user_id, note_id=None, source_content=None):
+                            question_type, user_id, note_id=None, source_content=None,
+                            content_focus='both'):
         try:
             text = source_content if source_content else await self.file_processor.process_files(files)
 
             questions_data = await self.ai_service.generate_questions(
-                text, num_questions, difficulty, question_type)
+                text, num_questions, difficulty, question_type, content_focus)
 
             quiz = Quiz(
                 user_id=user_id, note_id=note_id,
@@ -51,7 +52,9 @@ class QuizService:
                     question_text=q_data['text'],
                     difficulty=difficulty,
                     question_type=q_data['type'],
-                    code_snippet=q_data.get('code_snippet'))
+                    code_snippet=q_data.get('code_snippet'),
+                    # Store AI sample answer for short answer scoring
+                    expected_answer=q_data.get('correct_answer', '') if q_data['type'] == 'short_answer' else None)
                 self.db.add(question)
                 self.db.commit()
                 self.db.refresh(question)
@@ -137,11 +140,39 @@ class QuizService:
                     else:
                         is_correct = False
                 else:
+                    # Short answer — score using AI comparison
                     user_answer_text = user_answer or ""
-                    if not user_answer or user_answer.strip() == "":
+                    expected = question.expected_answer or ""
+                    correct_answer_text = expected
+
+                    if not user_answer or not user_answer.strip():
                         is_correct = False
+                        correct_answer_text = expected
+                    elif expected:
+                        # Use AI to score — wrapped so failures never block submit
+                        try:
+                            scoring = await self.ai_service.score_short_answer(
+                                question_text=question.question_text,
+                                expected_answer=expected,
+                                user_answer=user_answer
+                            )
+                            score_val = scoring["score"]
+                            is_correct = scoring["is_correct"]
+                            correct_count += score_val
+                            correct_answer_text = f"{expected}\n\n💬 Feedback: {scoring['feedback']}"
+                        except Exception as score_err:
+                            print(f"⚠️  Short answer scoring error (non-fatal): {score_err}")
+                            u_words = set(user_answer.lower().split())
+                            e_words = set(expected.lower().split())
+                            stop = {'the','a','an','is','are','was','were','of','in','on','to','and','or'}
+                            keywords = e_words - stop
+                            score_val = min(1.0, len(keywords & u_words) / len(keywords)) if keywords else 0.5
+                            is_correct = score_val >= 0.5
+                            correct_count += score_val
+                            correct_answer_text = expected
                     else:
-                        is_correct = None   # short answer: needs review
+                        # No expected answer stored — partial credit
+                        is_correct = None
                         correct_count += 0.5
 
                 detailed_results.append({
@@ -192,6 +223,9 @@ class QuizService:
             raise
         except Exception as e:
             self.db.rollback()
+            import traceback
+            print(f"❌ submit_quiz error: {e}")
+            print(traceback.format_exc())
             raise HTTPException(status_code=500, detail=str(e))
 
     # ── History ───────────────────────────────────────────────────────────────
@@ -314,6 +348,7 @@ class QuizService:
                     is_correct = bool(user_answer and user_answer == correct_answer)
                 else:
                     user_answer_text = user_answer or ""
+                    correct_answer_text = question.expected_answer or ""
                     is_correct = None if user_answer else False
 
                 detailed_results.append({

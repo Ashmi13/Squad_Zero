@@ -17,6 +17,7 @@ async def generate_quiz(
     difficulty: str = Form(...),
     time_limit: int = Form(...),
     question_type: str = Form(...),
+    content_focus: str = Form(default='both'),
     user_id: int = Form(...),
     note_id: int = Form(None),
     source_content: str = Form(None),
@@ -30,6 +31,7 @@ async def generate_quiz(
         difficulty=difficulty,
         time_limit=time_limit,
         question_type=question_type,
+        content_focus=content_focus,
         user_id=user_id,
         note_id=note_id,
         source_content=source_content

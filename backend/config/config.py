@@ -13,8 +13,12 @@ class Settings:
         "postgresql://postgres:neuranote123@localhost:5432/neuranote_db"
     )
     
-    # OpenAI — reads from .env
+    # OpenAI (legacy)
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+
+    # OpenRouter — used for Nvidia Nemotron via OpenRouter
+    # Falls back to OPENAI_API_KEY if OPENROUTER_API_KEY not set (they use the same sk-or-v1 format)
+    OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY", "")
     
     # App Settings
     APP_NAME: str = "NeuraNote Quiz API"

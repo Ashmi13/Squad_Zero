@@ -34,8 +34,15 @@ class AuthService:
         """
         try:
             # Create user in Supabase Auth
+            # Adding specific redirect URL for email verification
             auth_response = self.db.auth.sign_up(
-                {"email": email, "password": password}
+                {
+                    "email": email, 
+                    "password": password,
+                    "options": {
+                        "email_redirect_to": "http://localhost:5173/account-verified"
+                    }
+                }
             )
             
             if not auth_response.user:

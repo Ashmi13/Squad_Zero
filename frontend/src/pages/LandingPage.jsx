@@ -38,7 +38,7 @@ export default function LandingPage() {
 
           <div className="mt-12 flex items-center gap-3 text-slate-500">
             <Mail size={18} />
-            <span className="text-sm">Neuro Team</span>
+            <span className="text-sm">Neura Team</span>
           </div>
         </div>
 

@@ -56,13 +56,13 @@ def create_app() -> FastAPI:
     @app.on_event("startup")
     async def startup_event():
         """Run on application startup"""
-        print(f"🚀 Starting {settings.app_name}")
+        print(f"[*] Starting {settings.app_name}")
         print(f"Environment: {settings.environment}")
     
     @app.on_event("shutdown")
     async def shutdown_event():
         """Run on application shutdown"""
-        print(f"🛑 Shutting down {settings.app_name}")
+        print(f"[X] Shutting down {settings.app_name}")
     
     return app
 

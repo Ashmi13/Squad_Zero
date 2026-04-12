@@ -2,6 +2,7 @@
 """Application configuration using pydantic-settings"""
 from typing import List, Optional
 from pathlib import Path
+import os
 from pydantic_settings import BaseSettings
 from pydantic import Field
 
@@ -55,6 +56,12 @@ class Settings(BaseSettings):
     password_reset_token_expire_minutes: int = Field(
         default=60, env="PASSWORD_RESET_TOKEN_EXPIRE_MINUTES"
     )
+
+    # OpenAI (legacy)
+    OPENAI_API_KEY: str = Field(default=os.getenv("OPENAI_API_KEY", ""), env="OPENAI_API_KEY")
+
+    # OpenRouter — used for Nvidia Nemotron via OpenRouter
+    OPENROUTER_API_KEY: str = Field(default=os.getenv("OPENROUTER_API_KEY", ""), env="OPENROUTER_API_KEY")
 
     class Config:
         env_file = str(Path(__file__).parent.parent.parent / ".env")

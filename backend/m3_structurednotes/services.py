@@ -29,19 +29,27 @@ class AIService:
     @property
     def embeddings(self):
         if self._embeddings is None:
-            from langchain_openai import OpenAIEmbeddings
-            print("Loading OpenAI Embeddings...")
-            self._embeddings = OpenAIEmbeddings(api_key=os.getenv("OPENAI_API_KEY"))
+            # OpenRouter does not provide free robust text-embedding models reliably.
+            # We revert to local HuggingFace to keep document processing functional and free.
+            from langchain_huggingface import HuggingFaceEmbeddings
+            print("Loading HuggingFace Embeddings for Document Vectorization...")
+            self._embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
         return self._embeddings
 
     @property
     def llm(self):
         if self._llm is None:
             from langchain_openai import ChatOpenAI
-            api_key = os.getenv("OPENAI_API_KEY")
+            
+            # Use OpenRouter as standardized by Team Leader
+            api_key = os.getenv("OPENROUTER_API_KEY")
+            if not api_key:
+                print("WARNING: OPENROUTER_API_KEY is completely missing from .env!")
+                
             self._llm = ChatOpenAI(
                 api_key=api_key, 
-                model="gpt-4o-mini",
+                base_url="https://openrouter.ai/api/v1",
+                model="openai/gpt-oss-20b:free",
                 temperature=0
             )
         return self._llm

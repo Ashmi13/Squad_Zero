@@ -2,7 +2,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
+import mermaid from 'mermaid';
 import {
     Share2, Search, ZoomIn, ZoomOut, ChevronLeft, ChevronRight,
     Bold, Italic, Underline, List, Link as LinkIcon, Mic,
@@ -19,6 +21,29 @@ import { generateNote, refineText, updateNote, createNote } from '../api';
 // Set to TRUE for full AI features (Final)
 // Set to FALSE for manual-only mode (Interim Demo)
 const ENABLE_AI = false;
+
+// --- MERMAID RENDERER ---
+const Mermaid = ({ chart }) => {
+    useEffect(() => {
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'default',
+            securityLevel: 'loose',
+            fontFamily: 'Inter, sans-serif',
+        });
+        
+        // Timeout ensures the DOM is ready before Mermaid tries to render SVG
+        setTimeout(() => {
+            mermaid.contentLoaded();
+        }, 100);
+    }, [chart]);
+
+    return (
+        <div className="mermaid" style={{ display: 'flex', justifyContent: 'center', margin: '20px 0', border: '1px solid #f1f3f5', borderRadius: '12px', padding: '20px', backgroundColor: '#fafbfc' }}>
+            {chart}
+        </div>
+    );
+};
 
 const NoteEditor = () => {
     const { noteId } = useParams();
@@ -304,7 +329,19 @@ const NoteEditor = () => {
                     pointerEvents: 'none'
                 }}
             >
-                <ReactMarkdown rehypePlugins={[rehypeRaw]}>
+                <ReactMarkdown 
+                    remarkPlugins={[remarkGfm]} 
+                    rehypePlugins={[rehypeRaw]}
+                    components={{
+                        code({node, inline, className, children, ...props}) {
+                            const match = /language-(\w+)/.exec(className || '')
+                            if (!inline && match && match[1] === 'mermaid') {
+                                return <Mermaid chart={String(children).replace(/\n$/, '')} />
+                            }
+                            return <code className={className} {...props}>{children}</code>
+                        }
+                    }}
+                >
                     {content}
                 </ReactMarkdown>
             </div>
@@ -397,7 +434,19 @@ const NoteEditor = () => {
                                         fontSize: `${zoomLevel / 100 * 15}px`,
                                         borderRight: '1px solid #EAEAEA'
                                     }}>
-                                        <ReactMarkdown rehypePlugins={[rehypeRaw]}>
+                                        <ReactMarkdown 
+                                            remarkPlugins={[remarkGfm]} 
+                                            rehypePlugins={[rehypeRaw]}
+                                            components={{
+                                                code({node, inline, className, children, ...props}) {
+                                                    const match = /language-(\w+)/.exec(className || '')
+                                                    if (!inline && match && match[1] === 'mermaid') {
+                                                        return <Mermaid chart={String(children).replace(/\n$/, '')} />
+                                                    }
+                                                    return <code className={className} {...props}>{children}</code>
+                                                }
+                                            }}
+                                        >
                                             {content || "Start typing in the editor to see the preview..."}
                                         </ReactMarkdown>
                                     </div>

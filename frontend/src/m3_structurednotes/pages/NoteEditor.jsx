@@ -5,6 +5,9 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import mermaid from 'mermaid';
+import ReactQuill from 'react-quill-new';
+import 'react-quill-new/dist/quill.snow.css';
+import { marked } from 'marked';
 import {
     Share2, Search, ZoomIn, ZoomOut, ChevronLeft, ChevronRight,
     Bold, Italic, Underline, List, Link as LinkIcon, Mic,
@@ -14,7 +17,7 @@ import styles from './NoteEditor.module.css';
 import SaveModal from '../components/SaveModal';
 import RefineModal from '../components/RefineModal';
 import Sidebar from '../../components/Sidebar';
-import { generateNote, refineText, updateNote, createNote } from '../api';
+import { generateNote, refineText, updateNote, createNote, summarizePrompts } from '../api';
 
 
 // --- CONFIGURATION ---
@@ -72,19 +75,25 @@ const NoteEditor = () => {
     // Resizable split screen
     const [leftPanelWidth, setLeftPanelWidth] = useState(50); // percentage
     const [isResizing, setIsResizing] = useState(false);
+    const [selectedLanguage, setSelectedLanguage] = useState("English");
+    const [searchText, setSearchText] = useState('');
 
     const chatInputRef = useRef(null);
-    const editorRef = useRef(null); // Ref for the textarea
-    const highlighterRef = useRef(null); // Ref for highlighter background
+    const quillRef = useRef(null); // Ref for ReactQuill
 
-    const [leftView, setLeftView] = useState('preview'); // 'pdf' | 'preview'
+    const [rightView, setRightView] = useState('pdf'); // 'pdf' | 'preview'
     const [isPptx, setIsPptx] = useState(false);
 
     useEffect(() => {
         const savedNote = localStorage.getItem('currentNote');
         if (savedNote) {
             const parsed = JSON.parse(savedNote);
-            setContent(parsed.content);
+            let loadedContent = parsed.content;
+            if (loadedContent && !loadedContent.includes('<p>') && !loadedContent.includes('<h1>')) {
+                // Parse markdown into HTML for the rich text editor
+                loadedContent = marked.parse(loadedContent);
+            }
+            setContent(loadedContent);
             setPdfId(parsed.pdfId);
             setPdfUrl(parsed.pdfUrl || ''); // Load URL
             setIsPptx(parsed.isPptx || (parsed.pdfUrl && parsed.pdfUrl.toLowerCase().endsWith('.pptx')));
@@ -97,21 +106,10 @@ const NoteEditor = () => {
         }
     }, [noteId]);
 
-    // Auto-resize textarea to fit content (ensures page-like feel and correct highlighting)
-    useEffect(() => {
-        const textarea = editorRef.current;
-        if (textarea) {
-            textarea.style.height = '0'; // Reset
-            const newHeight = Math.max(textarea.scrollHeight, 1056); // Min A4 height
-            textarea.style.height = `${newHeight}px`;
-
-            // Sync the page wrapper height if needed (CSS usually handles it)
-            const page = textarea.parentElement;
-            if (page) {
-                page.style.height = `${newHeight}px`;
-            }
-        }
-    }, [content]);
+    // Custom toolbar modules for Quill to disable default toolbar
+    const modules = {
+        toolbar: false,
+    };
 
     // Resizing Logic
     const startResizing = (e) => {
@@ -151,60 +149,38 @@ const NoteEditor = () => {
     }, [isResizing]);
 
     // --- Toolbar Functions ---
-    const handleToolbarAction = (action, value = null) => {
-        const textarea = editorRef.current;
-        if (!textarea) return;
-
-        const start = textarea.selectionStart;
-        const end = textarea.selectionEnd;
-        const selectedText = content.substring(start, end);
-        let newText = content;
-        let newCursorPos = end;
-
-        const insertFormat = (prefix, suffix) => {
-            newText = content.substring(0, start) + prefix + selectedText + suffix + content.substring(end);
-            newCursorPos = start + prefix.length + selectedText.length + suffix.length;
-            if (selectedText.length === 0) {
-                newCursorPos = start + prefix.length; // Place cursor inside if no selection
-            }
-        };
-
+    const handleToolbarAction = (action, value) => {
+        if (!quillRef.current) return;
+        const editor = quillRef.current.getEditor();
+        
         switch (action) {
-            case 'bold': insertFormat('<strong>', '</strong>'); break;
-            case 'italic': insertFormat('<em>', '</em>'); break;
-            case 'underline':
-                insertFormat('<u>', '</u>');
-                break;
-            case 'list':
-                if (selectedText.length > 0) {
-                    const lines = selectedText.split('\n');
-                    const listed = lines.map(line => `- ${line}`).join('\n');
-                    newText = content.substring(0, start) + listed + content.substring(end);
-                    newCursorPos = start + listed.length;
+            case 'bold': editor.format('bold', true); break;
+            case 'italic': editor.format('italic', true); break;
+            case 'underline': editor.format('underline', true); break;
+            case 'highlight': editor.format('background', value === 'transparent' ? false : value || 'yellow'); break;
+            case 'list': editor.format('list', 'bullet'); break;
+            case 'link': 
+                const range = editor.getSelection();
+                if (range) {
+                    const url = prompt('Enter link URL:');
+                    if(url) editor.format('link', url); 
                 } else {
-                    newText = content.substring(0, start) + '\n- ' + content.substring(end);
-                    newCursorPos = start + 3;
+                    alert('Select text first to add a link');
                 }
-                break;
-            case 'link':
-                insertFormat('[', '](url)');
-                if (selectedText.length === 0) newCursorPos -= 1;
                 break;
             default: break;
         }
 
-        setContent(newText);
-
-        localStorage.setItem('currentNote', JSON.stringify({
-            content: newText,
-            pdfId,
-            noteId: currentNoteId
-        }));
-
+        // Delay to allow quill to update its internal HTML before saving sync
         setTimeout(() => {
-            textarea.focus();
-            textarea.setSelectionRange(newCursorPos, newCursorPos);
-        }, 0);
+            const newText = editor.root.innerHTML;
+            setContent(newText);
+            localStorage.setItem('currentNote', JSON.stringify({
+                content: newText,
+                pdfId,
+                noteId: currentNoteId
+            }));
+        }, 100);
     };
 
     const handleExport = () => {
@@ -231,13 +207,10 @@ const NoteEditor = () => {
         document.body.appendChild(script);
     };
 
-    const handleEditorSelect = (e) => {
-        const textarea = e.target;
-        const start = textarea.selectionStart;
-        const end = textarea.selectionEnd;
-        if (start !== end) {
-            const selectedText = content.substring(start, end);
-            setTempSelection({ text: selectedText, start, end });
+    const handleQuillChangeSelection = (range, source, editor) => {
+        if (range && range.length > 0) {
+            const selectedText = editor.getText(range.index, range.length);
+            setTempSelection({ text: selectedText, start: range.index, length: range.length, range });
         } else {
             setTempSelection(null);
         }
@@ -258,14 +231,50 @@ const NoteEditor = () => {
     };
 
     const lockSelection = () => {
-        console.log("Locking Selection:", tempSelection);
+        if (!quillRef.current || !tempSelection) return;
         setSelection(tempSelection);
         setContextMenu(null);
+        
+        // Apply visual highlight to the selection natively using Quill formatting
+        const editor = quillRef.current.getEditor();
+        editor.formatText(tempSelection.start, tempSelection.length, 'background', '#FFF176');
     };
 
     const clearSelection = () => {
+        if (selection && quillRef.current) {
+            const editor = quillRef.current.getEditor();
+            // Remove highlighting
+            editor.formatText(selection.start, selection.length, 'background', false);
+        }
         setSelection(null);
         setTempSelection(null);
+    };
+
+    const handleSearch = () => {
+        if (!quillRef.current || !searchText.trim()) return;
+        const editor = quillRef.current.getEditor();
+        const text = editor.getText().toLowerCase();
+        
+        let query = searchText.toLowerCase();
+        let startIndex = 0;
+        
+        // If there's an existing selection, start searching *after* it
+        if (selection && selection.length > 0) {
+            startIndex = selection.start + selection.length;
+        }
+
+        let index = text.indexOf(query, startIndex);
+        
+        // Wrap around if not found
+        if (index === -1 && startIndex > 0) {
+            index = text.indexOf(query, 0);
+        }
+
+        if (index !== -1) {
+            editor.setSelection(index, query.length);
+        } else {
+            alert("No matches found in document.");
+        }
     };
 
     const handleChatSubmit = async () => {
@@ -275,9 +284,11 @@ const NoteEditor = () => {
         try {
             if (selection) {
                 const result = await refineText(pdfId, selection.text, chatInput);
+                const refinedStr = result.refined_text?.refined_content || result.refined_content || "Error: Failed to synthesize.";
                 setRefinementResult({
                     original: selection.text,
-                    refined: result.refined_content, // Extract string from object
+                    refined: refinedStr,
+                    instruction: chatInput,
                     isFullNote: false
                 });
             }
@@ -292,13 +303,39 @@ const NoteEditor = () => {
 
     /* handleScroll removed as we're switching to a unified page wrapper structure */
 
-    const applyRefinement = (refinedText) => {
-        if (!selection || !editorRef.current) return;
+    const applyRefinement = async (finalRefinedText, history = []) => {
+        if (!selection || !quillRef.current) return;
 
-        const before = content.substring(0, selection.start);
-        const after = content.substring(selection.end);
-        const newContent = before + refinedText + after;
+        // Snap current selection before clearing so the modal forces shut instantly!
+        const currentSelection = { ...selection };
+        setRefinementResult(null); // Closes Modal!
+        clearSelection();
 
+        let metaTopic = refinementResult?.instruction || 'Refined Update';
+        if (history && history.length > 0) {
+            const prompts = history.map(h => h.prompt);
+            try {
+                // Instantly generate a highly readable Topic Title via AI instead of chaining all prompts!
+                const summaryResponse = await summarizePrompts(prompts, currentSelection.text);
+                metaTopic = summaryResponse.topic;
+            } catch (e) {
+                metaTopic = prompts.join(" \u2794 "); // fallback just in case
+            }
+        }
+
+        let combinedHtml = `
+            <p><strong class="ql-size-large" style="color: #2F6CF6;">✨ Refinement (${metaTopic})</strong></p>
+            ${marked.parse(finalRefinedText)}
+            <p><br></p>
+        `;
+
+        const editor = quillRef.current.getEditor();
+        
+        // Remove old text and insert refined HTML using the snapped selection
+        editor.deleteText(currentSelection.start, currentSelection.length);
+        editor.clipboard.dangerouslyPasteHTML(currentSelection.start, combinedHtml);
+
+        const newContent = editor.root.innerHTML;
         setContent(newContent);
         setRefinementResult(null);
         clearSelection();
@@ -329,21 +366,11 @@ const NoteEditor = () => {
                     pointerEvents: 'none'
                 }}
             >
-                <ReactMarkdown 
-                    remarkPlugins={[remarkGfm]} 
-                    rehypePlugins={[rehypeRaw]}
-                    components={{
-                        code({node, inline, className, children, ...props}) {
-                            const match = /language-(\w+)/.exec(className || '')
-                            if (!inline && match && match[1] === 'mermaid') {
-                                return <Mermaid chart={String(children).replace(/\n$/, '')} />
-                            }
-                            return <code className={className} {...props}>{children}</code>
-                        }
-                    }}
-                >
-                    {content}
-                </ReactMarkdown>
+                <div 
+                    className="ql-editor"
+                    style={{ padding: 0, overflow: 'visible', color: 'black' }}
+                    dangerouslySetInnerHTML={{ __html: content }} 
+                />
             </div>
 
             <Sidebar onSelectFolder={null} selectedFolderId={null} />
@@ -354,21 +381,6 @@ const NoteEditor = () => {
                         <div className={styles.brand}>
                             <div className={styles.logoBox}>N</div>
                             <span>NeuraNote</span>
-
-                            <div className={styles.viewToggleGroup}>
-                                <button
-                                    className={`${styles.viewToggleBtn} ${leftView === 'pdf' ? styles.active : ''}`}
-                                    onClick={() => setLeftView('pdf')}
-                                >
-                                    {isPptx ? 'PowerPoint Source' : 'PDF Source'}
-                                </button>
-                                <button
-                                    className={`${styles.viewToggleBtn} ${leftView === 'preview' ? styles.active : ''}`}
-                                    onClick={() => setLeftView('preview')}
-                                >
-                                    Live Preview
-                                </button>
-                            </div>
                         </div>
 
                         <div className={styles.headerActions}>
@@ -396,9 +408,110 @@ const NoteEditor = () => {
                     </div>
 
                     <div className={`${styles.mainArea} ${isResizing ? styles.isResizing : ''}`}>
-                        <div className={styles.leftPanel} style={{ flex: `0 0 ${leftPanelWidth}%` }}>
+                        {/* EDITOR PANEL (NOW LEFT) */}
+                        <div className={styles.leftPanel} style={{ width: `${leftPanelWidth}%`, flexShrink: 0, background: '#F8F9FA' }}>
+                            <div className={styles.editorToolbar}>
+                                <div className={styles.formatGroup}>
+                                    <button className={styles.formatBtn} onMouseDown={(e) => { e.preventDefault(); handleToolbarAction('bold'); }} title="Bold"><Bold size={18} /></button>
+                                    <button className={styles.formatBtn} onMouseDown={(e) => { e.preventDefault(); handleToolbarAction('italic'); }} title="Italic"><Italic size={18} /></button>
+                                    <button className={styles.formatBtn} onMouseDown={(e) => { e.preventDefault(); handleToolbarAction('underline'); }} title="Underline"><Underline size={18} /></button>
+                                    
+                                    <div className={styles.spacingWrapper} title="Highlight Color">
+                                        <Highlighter size={16} className={styles.spacingIcon} />
+                                        <select
+                                            className={styles.spacingSelect}
+                                            onChange={(e) => {
+                                                handleToolbarAction('highlight', e.target.value);
+                                                e.target.value = '';
+                                            }}
+                                        >
+                                            <option value="">Highlight...</option>
+                                            <option value="#FFF176">Yellow</option>
+                                            <option value="#A5D6A7">Green</option>
+                                            <option value="#90CAF9">Blue</option>
+                                            <option value="#F48FB1">Pink</option>
+                                            <option value="#FFCC80">Orange</option>
+                                            <option value="transparent">Clear</option>
+                                        </select>
+                                    </div>
+
+                                    <div className={styles.divider}></div>
+                                    <button className={styles.formatBtn} onMouseDown={(e) => { e.preventDefault(); handleToolbarAction('list'); }} title="List"><List size={18} /></button>
+                                    <button className={styles.formatBtn} onMouseDown={(e) => { e.preventDefault(); handleToolbarAction('link'); }} title="Link"><LinkIcon size={18} /></button>
+
+                                    <div className={styles.divider}></div>
+                                    <div className={styles.spacingWrapper} title="Line Spacing">
+                                        <ArrowUpDownIcon size={16} className={styles.spacingIcon} />
+                                        <select
+                                            className={styles.spacingSelect}
+                                            value={lineHeight}
+                                            onChange={(e) => setLineHeight(e.target.value)}
+                                        >
+                                            <option value="1.0">1.0</option>
+                                            <option value="1.15">1.15</option>
+                                            <option value="1.5">1.5</option>
+                                            <option value="2.0">2.0</option>
+                                            <option value="2.5">2.5</option>
+                                        </select>
+                                    </div>
+                                    <div style={{ marginLeft: "10px", display: "flex", alignItems: "center", background: "white", borderRadius: "6px", border: "1px solid #EAEAEA", padding: "4px 8px" }}>
+                                        <input 
+                                            type="text" 
+                                            placeholder="Find text..." 
+                                            value={searchText}
+                                            onChange={(e) => setSearchText(e.target.value)}
+                                            onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+                                            style={{ border: 'none', outline: 'none', fontSize: '13px', width: '130px', background: "transparent" }}
+                                        />
+                                        <div onClick={handleSearch} style={{ cursor: "pointer", color: "#8E9297", display: "flex", alignItems:"center"}}>
+                                             <Search size={14} />
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className={styles.editorContainer}>
+                                <div className={styles.editorPage} style={{ lineHeight: lineHeight }} onContextMenu={handleContextMenu}>
+                                    <ReactQuill 
+                                        ref={quillRef}
+                                        theme="snow"
+                                        modules={modules}
+                                        value={content}
+                                        onChange={setContent}
+                                        onChangeSelection={handleQuillChangeSelection}
+                                        className={styles.editorQuill}
+                                        placeholder="Start typing your note here..."
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Divider Line */}
+                        <div
+                            className={`${styles.resizer} ${isResizing ? styles.isResizing : ''}`}
+                            onMouseDown={startResizing}
+                        />
+
+                        {/* PDF / PREVIEW PANEL (NOW RIGHT) */}
+                        <div className={styles.rightPanel} style={{ flex: 1, pointerEvents: isResizing ? 'none' : 'auto' }}>
+                            <div className={styles.pdfToolbar}>
+                                <div className={styles.viewToggleGroup} style={{ marginLeft: 0 }}>
+                                    <button
+                                        className={`${styles.viewToggleBtn} ${rightView === 'pdf' ? styles.active : ''}`}
+                                        onClick={() => setRightView('pdf')}
+                                    >
+                                        {isPptx ? 'PowerPoint Source' : 'PDF Source'}
+                                    </button>
+                                    <button
+                                        className={`${styles.viewToggleBtn} ${rightView === 'preview' ? styles.active : ''}`}
+                                        onClick={() => setRightView('preview')}
+                                    >
+                                        Live Preview
+                                    </button>
+                                </div>
+                            </div>
                             <div className={styles.pdfContent}>
-                                {leftView === 'pdf' ? (
+                                {rightView === 'pdf' ? (
                                     <div className={styles.markdownWrapper} style={{ height: '100%' }}>
                                         {pdfUrl ? (
                                             isPptx ? (
@@ -432,23 +545,13 @@ const NoteEditor = () => {
                                         padding: '40px 50px',
                                         backgroundColor: 'white',
                                         fontSize: `${zoomLevel / 100 * 15}px`,
-                                        borderRight: '1px solid #EAEAEA'
+                                        borderLeft: '1px solid #EAEAEA'
                                     }}>
-                                        <ReactMarkdown 
-                                            remarkPlugins={[remarkGfm]} 
-                                            rehypePlugins={[rehypeRaw]}
-                                            components={{
-                                                code({node, inline, className, children, ...props}) {
-                                                    const match = /language-(\w+)/.exec(className || '')
-                                                    if (!inline && match && match[1] === 'mermaid') {
-                                                        return <Mermaid chart={String(children).replace(/\n$/, '')} />
-                                                    }
-                                                    return <code className={className} {...props}>{children}</code>
-                                                }
-                                            }}
-                                        >
-                                            {content || "Start typing in the editor to see the preview..."}
-                                        </ReactMarkdown>
+                                        <div 
+                                            className="ql-editor" 
+                                            style={{ padding: 0, overflow: 'visible', minHeight: 'auto' }}
+                                            dangerouslySetInnerHTML={{ __html: content || "Start typing in the editor to see the preview..." }} 
+                                        />
                                     </div>
                                 )}
 
@@ -481,76 +584,6 @@ const NoteEditor = () => {
                                         </div>
                                     </div>
                                 )}
-                            </div>
-                        </div>
-
-                        {/* Divider Line */}
-                        <div
-                            className={`${styles.resizer} ${isResizing ? styles.isResizing : ''}`}
-                            onMouseDown={startResizing}
-                        />
-
-                        <div className={styles.rightPanel} style={{ flex: `0 0 ${100 - leftPanelWidth}%` }}>
-                            <div className={styles.editorToolbar}>
-                                <div className={styles.formatGroup}>
-                                    <button className={styles.formatBtn} onMouseDown={(e) => { e.preventDefault(); handleToolbarAction('bold'); }} title="Bold"><Bold size={18} /></button>
-                                    <button className={styles.formatBtn} onMouseDown={(e) => { e.preventDefault(); handleToolbarAction('italic'); }} title="Italic"><Italic size={18} /></button>
-                                    <button className={styles.formatBtn} onMouseDown={(e) => { e.preventDefault(); handleToolbarAction('underline'); }} title="Underline"><Underline size={18} /></button>
-
-                                    <div className={styles.divider}></div>
-                                    <button className={styles.formatBtn} onMouseDown={(e) => { e.preventDefault(); handleToolbarAction('list'); }} title="List"><List size={18} /></button>
-                                    <button className={styles.formatBtn} onMouseDown={(e) => { e.preventDefault(); handleToolbarAction('link'); }} title="Link"><LinkIcon size={18} /></button>
-
-                                    <div className={styles.divider}></div>
-                                    <div className={styles.spacingWrapper} title="Line Spacing">
-                                        <ArrowUpDownIcon size={16} className={styles.spacingIcon} />
-                                        <select
-                                            className={styles.spacingSelect}
-                                            value={lineHeight}
-                                            onChange={(e) => setLineHeight(e.target.value)}
-                                        >
-                                            <option value="1.0">1.0</option>
-                                            <option value="1.15">1.15</option>
-                                            <option value="1.5">1.5</option>
-                                            <option value="2.0">2.0</option>
-                                            <option value="2.5">2.5</option>
-                                        </select>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className={styles.editorContainer}>
-                                <div className={styles.editorPage} style={{ lineHeight: lineHeight }}>
-                                    {/* Background Highlighter Layer - Now perfectly synced by being in the same flow */}
-                                    <div
-                                        ref={highlighterRef}
-                                        className={styles.editorHighlighter}
-                                        style={{ lineHeight: lineHeight }}
-                                    >
-                                        {selection ? (
-                                            <>
-                                                {content.substring(0, selection.start)}
-                                                <span className={styles.taggedHighlight}>
-                                                    {content.substring(selection.start, selection.end)}
-                                                </span>
-                                                {content.substring(selection.end)}
-                                            </>
-                                        ) : (
-                                            null
-                                        )}
-                                    </div>
-
-                                    <textarea
-                                        ref={editorRef}
-                                        className={styles.editorInput}
-                                        style={{ lineHeight: lineHeight }}
-                                        value={content}
-                                        onChange={(e) => setContent(e.target.value)}
-                                        onSelect={handleEditorSelect}
-                                        onContextMenu={handleContextMenu}
-                                        placeholder="Start typing your note here..."
-                                    />
-                                </div>
                             </div>
                         </div>
                     </div>
@@ -606,9 +639,12 @@ const NoteEditor = () => {
                 {refinementResult && (
                     <RefineModal
                         originalText={refinementResult.isFullNote ? "Full Note" : refinementResult.original}
-                        refinedText={refinementResult.refined}
+                        initialRefinedText={refinementResult.refined}
+                        currentInstruction={refinementResult.instruction}
+                        pdfId={pdfId}
+                        refineTextApi={refineText}
                         onClose={() => setRefinementResult(null)}
-                        onApply={applyRefinement}
+                        onApply={(finalRefinedText, history) => applyRefinement(finalRefinedText, history)}
                     />
                 )}
             </div>

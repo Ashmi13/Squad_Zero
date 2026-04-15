@@ -20,6 +20,10 @@ class RefineRequest(BaseModel):
     selected_text: str
     instruction: str
 
+class PromptsRequest(BaseModel):
+    prompts: List[str]
+    original_text: Optional[str] = None
+
 class FolderRequest(BaseModel):
     user_id: str
     name: str
@@ -69,6 +73,11 @@ async def generate_note(req: NoteRequest):
 async def refine_text(req: RefineRequest):
     result = services.refine_text(req.pdf_id, req.selected_text, req.instruction)
     return {"refined_text": result}
+
+@router.post("/summarize-prompts")
+async def summarize_prompts(req: PromptsRequest):
+    topic = services.summarize_prompts(req.prompts, req.original_text)
+    return {"topic": topic}
 
 # --- Database Routes (Forwarding to Database functions if needed or Mock for now) ---
 # Assuming database.py exists in m3_structurednotes

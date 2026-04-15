@@ -40,6 +40,12 @@ def create_app() -> FastAPI:
     from m3_structurednotes.router import router as m3_router
     app.include_router(m3_router)
     
+    # Mount documents folder for PDF serving
+    import os
+    from fastapi.staticfiles import StaticFiles
+    os.makedirs("documents", exist_ok=True)
+    app.mount("/documents", StaticFiles(directory="documents"), name="documents")
+    
     # Root health endpoint
     @app.get("/")
     async def root():

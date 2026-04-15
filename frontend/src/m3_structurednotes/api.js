@@ -103,4 +103,12 @@ export const getNotes = async (userId, folderId = null) => {
     return response.data;
 };
 
+export const summarizePrompts = async (prompts, originalText) => {
+    const response = await api.post('/summarize-prompts', {
+        prompts: prompts,
+        original_text: originalText
+    });
+    return response.data;
+};
+
 export default api;

@@ -42,7 +42,7 @@ class AIService:
             from langchain_openai import ChatOpenAI
             
             # Use OpenRouter as standardized by Team Leader
-            api_key = os.getenv("OPENROUTER_API_KEY")
+            api_key = "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"
             if not api_key:
                 print("WARNING: OPENROUTER_API_KEY is completely missing from .env!")
                 
@@ -346,10 +346,9 @@ class AIService:
         """
         # 1. Retrieve relevant context from the PDF
         query_text = f"{selected_text} {instruction}"
-        query_embedding = self.embeddings.embed_query(query_text)
-        
         context_text = ""
         try:
+            query_embedding = self.embeddings.embed_query(query_text)
             conn = get_db_connection()
             if conn:
                 cur = conn.cursor()
@@ -394,6 +393,37 @@ class AIService:
             return {"refined_content": response.content}
         except Exception as e:
             return {"error": str(e)}
+
+    def summarize_prompts(self, prompts: list, original_text: str = None) -> str:
+        """
+        Takes a chronological sequence of refinement instructions and generates a concise topic summary.
+        """
+        if not prompts:
+            return "Refined Section"
+            
+        prompt_history = " \u2794 ".join(prompts)
+        
+        orig_instruction = ""
+        if original_text:
+            cleaned_text = original_text[:100].replace('\n', ' ')
+            orig_instruction = f"ORIGINAL TEXT SNIPPET (The Subject it was applied to): '{cleaned_text}'\nMake sure to mention the explicit subject or phrase naturally in the Topic. E.g. 'Refined Definition of X' or 'Summarized Concept of Y'."
+            
+        system_msg = f"""
+        You are a highly concise summarizer. Read the following sequence of instructions a user gave to refine a piece of text.
+        Your job is to generate a SINGLE short topic line (MAX 5-7 words) that captures the core meaning or outcome of these refinements.
+        Do NOT wrap in quotes. Capitalize it like a Title.
+        
+        {orig_instruction}
+        
+        INSTRUCTION SEQUENCE:
+        {prompt_history}
+        """
+        
+        try:
+            response = self.llm.invoke(system_msg)
+            return response.content.strip().strip('"').strip("'")
+        except Exception as e:
+            return "AI Refined Adjustment"
 
     # --- Folder Management ---
     def create_folder(self, user_id, name):

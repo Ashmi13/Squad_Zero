@@ -17,8 +17,17 @@ const getFileNames = (folderName) => {
   return (files[folderName] || []).map(f => f.name);
 };
 
-const FolderPanel = ({ selectedFolder, onSelectFolder }) => {
-  const [folders, setFolders] = useState(initialFolders);
+const FolderPanel = ({ selectedFolder, onSelectFolder, files, onFilesUpdate, onFolderDelete }) => {
+ const [folders, setFolders] = useState(() => {
+  const saved = localStorage.getItem('neuranote_folders');
+  return saved ? JSON.parse(saved) : initialFolders;
+});
+
+// Listen for folder changes
+React.useEffect(() => {
+  const saved = localStorage.getItem('neuranote_folders');
+  setFolders(saved ? JSON.parse(saved) : []);
+}, []);
   const [expanded, setExpanded] = useState({});
   const [showInput, setShowInput] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
@@ -27,14 +36,17 @@ const FolderPanel = ({ selectedFolder, onSelectFolder }) => {
     setExpanded(prev => ({ ...prev, [id]: !prev[id] }));
   };
 
-  const addFolder = () => {
-    if (!newFolderName.trim()) return;
-    setFolders(prev => [...prev, {
-      id: Date.now(), name: newFolderName, count: 0, subfolders: []
-    }]);
-    setNewFolderName('');
-    setShowInput(false);
+ const addFolder = () => {
+  if (!newFolderName.trim()) return;
+  const newFolder = {
+    id: Date.now(), name: newFolderName, count: 0, subfolders: []
   };
+  const updatedFolders = [...folders, newFolder];
+  setFolders(updatedFolders);
+  localStorage.setItem('neuranote_folders', JSON.stringify(updatedFolders));
+  setNewFolderName('');
+  setShowInput(false);
+};
 
   return (
     <div style={{

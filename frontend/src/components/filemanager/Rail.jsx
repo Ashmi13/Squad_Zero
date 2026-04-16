@@ -1,18 +1,12 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Home, FolderOpen, BrainCircuit, CheckSquare, Edit3, Settings } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import SettingsPanel from './SettingsPanel';
 
-const Rail = () => {
+const Rail = ({ activeView, setActiveView }) => {
   const navigate = useNavigate();
   const location = useLocation();
-
-  const icons = [
-    { icon: Home,        path: '/dashboard' },
-    { icon: FolderOpen,  path: '/files' },
-    { icon: BrainCircuit,path: '/notes' },
-    { icon: CheckSquare, path: '/tasks' },
-    { icon: Edit3,       path: '/quiz' },
-  ];
+  const [showSettings, setShowSettings] = useState(false);
 
   return (
     <div style={{
@@ -38,29 +32,73 @@ const Rail = () => {
         N
       </div>
 
-      {/* Nav Icons */}
-      {icons.map(({ icon: Icon, path }) => (
-        <div
-          key={path}
-          onClick={() => navigate(path)}
-          style={{
-            width: '44px', height: '44px',
-            borderRadius: '12px',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            cursor: 'pointer',
-            backgroundColor: location.pathname === path ? '#6C5DD3' : 'transparent',
-            color: location.pathname === path ? 'white' : '#888',
-            transition: 'all 0.2s'
-          }}
-        >
-          <Icon size={22} strokeWidth={1.5} />
-        </div>
-      ))}
+      {/* Home icon */}
+      <div
+       onClick={() => { navigate('/files'); setActiveView('home'); }}
+        style={{
+          width: '44px', height: '44px', borderRadius: '12px',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          cursor: 'pointer',
+          backgroundColor: activeView === 'home' ? '#6C5DD3' : 'transparent',
+          color: activeView === 'home' ? 'white' : '#888',
+          transition: 'all 0.2s'
+        }}
+      >
+        <Home size={22} strokeWidth={1.5} />
+      </div>
 
-      {/* Settings at bottom */}
-      <div style={{ marginTop: 'auto', marginBottom: '20px', color: '#888', cursor: 'pointer' }}>
+      {/* Folder icon */}
+      <div
+        onClick={() => { navigate('/files'); setActiveView('files'); }}
+        style={{
+          width: '44px', height: '44px', borderRadius: '12px',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          cursor: 'pointer',
+          backgroundColor: activeView === 'files' ? '#6C5DD3' : 'transparent',
+          color: activeView === 'files' ? 'white' : '#888',
+          transition: 'all 0.2s'
+        }}
+      >
+        <FolderOpen size={22} strokeWidth={1.5} />
+      </div>
+
+      {/* Other nav icons */}
+     {[
+  { icon: BrainCircuit, path: '/notes', view: 'notes' },
+  { icon: CheckSquare, path: '/tasks', view: 'tasks' },
+  { icon: Edit3, path: '/quiz', view: 'quiz' },
+].map(({ icon: Icon, path, view }) => (
+  <div
+    key={path}
+    onClick={() => { navigate(path); setActiveView(view); }}
+    style={{
+      width: '44px', height: '44px', borderRadius: '12px',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      cursor: 'pointer',
+      backgroundColor: activeView === view ? '#6C5DD3' : 'transparent',
+      color: activeView === view ? 'white' : '#888',
+      transition: 'all 0.2s'
+    }}
+  >
+    <Icon size={22} strokeWidth={1.5} />
+  </div>
+))}
+
+      {/* Settings icon */}
+      <div
+        onClick={() => setShowSettings(true)}
+        style={{
+          marginTop: 'auto', marginBottom: '20px', color: '#888',
+          cursor: 'pointer', width: '44px', height: '44px',
+          borderRadius: '12px', display: 'flex',
+          alignItems: 'center', justifyContent: 'center',
+        }}
+      >
         <Settings size={22} strokeWidth={1.5} />
       </div>
+
+      {/* Settings Panel */}
+      {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
 
     </div>
   );

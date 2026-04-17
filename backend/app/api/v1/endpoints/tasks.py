@@ -1,0 +1,140 @@
+"""Task endpoints for Member 5"""
+from fastapi import APIRouter, Depends, HTTPException
+from app.api.deps import get_current_user
+from app.db.supabase import get_supabase
+from app.schemas.tasks import TaskCreate, TaskUpdate
+from typing import List
+from datetime import datetime, timezone
+
+router = APIRouter(prefix="/tasks", tags=["Tasks"])
+
+
+@router.get("/", response_model=List[dict])
+async def get_tasks(
+    category: str = None,
+    status: str = None,
+    current_user: dict = Depends(get_current_user)
+):
+    supabase = get_supabase().service_client
+    user_id = current_user.get("sub")
+
+    query = supabase.table("tasks").select("*").eq("user_id", user_id)
+
+    if category:
+        query = query.eq("category", category)
+    if status:
+        query = query.eq("status", status)
+
+    response = query.order("created_at", desc=True).execute()
+    return response.data or []
+
+
+@router.post("/", response_model=dict)
+async def create_task(
+    task: TaskCreate,
+    current_user: dict = Depends(get_current_user)
+):
+    supabase = get_supabase().service_client
+    user_id = current_user.get("sub")
+
+    task_data = {
+        "user_id": user_id,
+        "title": task.title,
+        "description": task.description,
+        "status": task.status or "todo",
+        "priority": task.priority or "medium",
+        "category": task.category or "personal",
+        "due_date": task.due_date.isoformat() if task.due_date else None,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    response = supabase.table("tasks").insert(task_data).execute()
+
+    if not response.data:
+        raise HTTPException(status_code=400, detail="Failed to create task")
+    return response.data[0]
+
+
+@router.patch("/{task_id}", response_model=dict)
+async def update_task(
+    task_id: str,
+    task: TaskUpdate,
+    current_user: dict = Depends(get_current_user)
+):
+    supabase = get_supabase().service_client
+    user_id = current_user.get("sub")
+
+    update_data = {k: v for k, v in task.dict().items() if v is not None}
+    update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    if "due_date" in update_data and update_data["due_date"]:
+        update_data["due_date"] = update_data["due_date"].isoformat()
+
+    response = (
+        supabase.table("tasks")
+        .update(update_data)
+        .eq("id", task_id)
+        .eq("user_id", user_id)
+        .execute()
+    )
+
+    if not response.data:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return response.data[0]
+
+
+@router.delete("/{task_id}")
+async def delete_task(
+    task_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    supabase = get_supabase().service_client
+    user_id = current_user.get("sub")
+
+    response = (
+        supabase.table("tasks")
+        .delete()
+        .eq("id", task_id)
+        .eq("user_id", user_id)
+        .execute()
+    )
+
+    if not response.data:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return {"message": "Task deleted successfully"}
+
+
+@router.patch("/{task_id}/toggle")
+async def toggle_task(
+    task_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    supabase = get_supabase().service_client
+    user_id = current_user.get("sub")
+
+    current = (
+        supabase.table("tasks")
+        .select("status")
+        .eq("id", task_id)
+        .eq("user_id", user_id)
+        .execute()
+    )
+
+    if not current.data:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    new_status = "done" if current.data[0]["status"] != "done" else "todo"
+
+    response = (
+        supabase.table("tasks")
+        .update({
+            "status": new_status,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        })
+        .eq("id", task_id)
+        .eq("user_id", user_id)
+        .execute()
+    )
+
+    return response.data[0]

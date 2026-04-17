@@ -24,6 +24,10 @@ export default function Dashboard() {
     navigate('/');
   };
 
+  const handleChangePassword = () => {
+    navigate('/change-password');
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-50">
@@ -51,13 +55,22 @@ export default function Dashboard() {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 py-12 sm:px-6 lg:px-8">
         {/* Welcome Section */}
-        <div className="bg-white rounded-lg shadow-lg p-8 mb-8">
-          <h2 className="text-4xl font-bold text-gray-900 mb-2">
-            Welcome back, {user?.full_name || user?.email}! 👋
-          </h2>
-          <p className="text-gray-600 text-lg">
-            You&apos;re successfully logged in to SquadZero Authentication System
-          </p>
+        <div className="bg-white rounded-lg shadow-lg p-8 mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+          <div>
+            <h2 className="text-4xl font-bold text-gray-900 mb-2">
+              Welcome back, {user?.full_name || user?.email}! 👋
+            </h2>
+            <p className="text-gray-600 text-lg">
+              You&apos;re successfully logged in to SquadZero Authentication System
+            </p>
+          </div>
+          <button
+            onClick={handleChangePassword}
+            className="flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition shadow-md hover:shadow-lg font-medium"
+          >
+            <Lock size={18} />
+            Change Password
+          </button>
         </div>
 
         {/* User Profile Card */}

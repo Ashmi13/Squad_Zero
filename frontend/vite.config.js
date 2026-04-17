@@ -18,18 +18,13 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/upload':        'http://127.0.0.1:8000',
-      '/generate-note': 'http://127.0.0.1:8000',
-      '/refine-text':   'http://127.0.0.1:8000',
-      '/folders':       'http://127.0.0.1:8000',
-      '/notes':         'http://127.0.0.1:8000',
 
       '/api': {
-        target: 'http://localhost:8000',
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
     },
   },
 
-  envDir: '../', // Root .env — DO NOT REMOVE
+  // Deleted envDir: '../' to search in frontend root instead
 });

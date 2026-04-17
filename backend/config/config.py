@@ -7,33 +7,25 @@ load_dotenv()
 class Settings:
     """Application settings and configuration"""
     
-    # Database — reads from .env, falls back to local default
+    # Database
     DATABASE_URL: str = os.getenv(
-        "DATABASE_URL",
+        "DATABASE_URL", 
         "postgresql://postgres:neuranote123@localhost:5432/neuranote_db"
     )
     
-    # OpenAI (legacy)
+    # OpenAI
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
-
-    # OpenRouter — used for Nvidia Nemotron via OpenRouter
-    # Falls back to OPENAI_API_KEY if OPENROUTER_API_KEY not set (they use the same sk-or-v1 format)
-    OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY", "")
     
     # App Settings
     APP_NAME: str = "NeuraNote Quiz API"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = os.getenv("DEBUG", "False").lower() == "true"
     
-    # CORS Origins — includes all common dev ports
+    # CORS Origins
     CORS_ORIGINS: list = [
         "http://localhost:3000",
         "http://localhost:3001",
-        "http://localhost:5173",   # Vite default
-        "http://localhost:5174",   # Vite alternate
         "http://127.0.0.1:3000",
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:5174",
     ]
     
     # File Upload Settings

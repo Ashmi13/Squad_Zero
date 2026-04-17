@@ -1,3 +1,4 @@
+
 # SquadZero Backend API
 
 Production-grade FastAPI backend with Supabase authentication, PostgreSQL database, HttpOnly cookie sessions, and AWS S3 file storage.

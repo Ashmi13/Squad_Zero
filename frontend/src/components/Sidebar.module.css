@@ -1,0 +1,189 @@
+.sidebarContainer {
+    display: flex;
+    height: 100vh;
+    position: fixed;
+    left: 0;
+    top: 0;
+    z-index: 100;
+    background-color: white;
+    border-right: 1px solid var(--border-color);
+}
+
+/* --- Icon Rail (Left) --- */
+.iconRail {
+    width: 70px;
+    height: 100%;
+    background-color: #F7F7F7;
+    /* Light grey rail background */
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px 0;
+    border-right: 1px solid #E0E0E0;
+}
+
+.railLogo {
+    margin-bottom: 40px;
+}
+
+.railActions {
+    display: flex;
+    flex-direction: column;
+    gap: 30px;
+    flex: 1;
+}
+
+.railItem {
+    color: #8E92BC;
+    cursor: pointer;
+    padding: 10px;
+    border-radius: 12px;
+    transition: all 0.2s;
+}
+
+.railItem:hover,
+.activeRail {
+    color: #6C5DD3;
+    /* Primary Purple */
+    background-color: rgba(108, 93, 211, 0.1);
+}
+
+.railFooter {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    align-items: center;
+}
+
+.avatar img {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 2px solid white;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+}
+
+.railIcon {
+    color: #8E92BC;
+    cursor: pointer;
+}
+
+/* --- Nav Panel (Right) --- */
+.navPanel {
+    width: 250px;
+    height: 100%;
+    background-color: white;
+    padding: 25px;
+    display: flex;
+    flex-direction: column;
+}
+
+.panelHeader {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 25px;
+}
+
+.panelHeader h3 {
+    font-size: 16px;
+    font-weight: 700;
+    color: #1B1D21;
+}
+
+.addBtn {
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    background-color: #F0F0F0;
+    border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: #666;
+}
+
+.fileTree {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.nodeLabel {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 0;
+    cursor: pointer;
+    color: #5A5E6D;
+    font-size: 14px;
+    font-weight: 500;
+    border-radius: 6px;
+}
+
+.nodeLabel:hover {
+    background-color: #F9F9F9;
+}
+
+.folderIcon {
+    font-size: 16px;
+}
+
+.fileNode {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 0;
+    cursor: pointer;
+    color: #5A5E6D;
+    font-size: 13px;
+}
+
+.fileNode:hover {
+    color: #6C5DD3;
+}
+
+.fileIcon {
+    font-size: 12px;
+}
+
+/* Storage Widget in Nav Panel */
+.storageWidget {
+    background: #F8F9FD;
+    padding: 15px;
+    border-radius: 12px;
+    margin-top: 20px;
+}
+
+.storageText {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 10px;
+    font-size: 13px;
+    color: #5A5E6D;
+}
+
+.storageBar {
+    height: 6px;
+    background-color: #E0E0E0;
+    border-radius: 3px;
+    margin-bottom: 10px;
+    overflow: hidden;
+}
+
+.storageFill {
+    background-color: #6C5DD3;
+    height: 100%;
+    border-radius: 3px;
+}
+
+.upgradeBtn {
+    text-align: center;
+    font-size: 12px;
+    font-weight: 600;
+    color: #6C5DD3;
+    cursor: pointer;
+}

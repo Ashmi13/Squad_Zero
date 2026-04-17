@@ -1,0 +1,544 @@
+.container {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background-color: white;
+    font-family: 'Inter', sans-serif;
+}
+
+.header {
+    height: 60px;
+    border-bottom: 1px solid #EAEAEA;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 25px;
+    background-color: white;
+}
+
+.brand {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    font-weight: 700;
+    font-size: 18px;
+    color: #1B1D21;
+}
+
+.viewToggleGroup {
+    display: flex;
+    background-color: #F1F3F4;
+    padding: 3px;
+    border-radius: 8px;
+    margin-left: 10px;
+}
+
+.viewToggleBtn {
+    border: none;
+    background: transparent;
+    padding: 5px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #5F6368;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+}
+
+.viewToggleBtn:hover {
+    color: #1B1D21;
+}
+
+.viewToggleBtn.active {
+    background-color: white;
+    color: #1B1D21;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.logoBox {
+    width: 28px;
+    height: 28px;
+    background-color: #2F6CF6;
+    color: white;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    font-weight: 800;
+}
+
+.headerActions {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+}
+
+.headerSetting {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #5F6368;
+    cursor: pointer;
+}
+
+.avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 1px solid #EAEAEA;
+}
+
+.mainArea {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+    position: relative;
+}
+
+.mainArea.isResizing {
+    user-select: none;
+    cursor: col-resize;
+}
+
+.resizer {
+    width: 6px;
+    cursor: col-resize;
+    background-color: transparent;
+    transition: background-color 0.2s;
+    z-index: 100;
+    position: relative;
+}
+
+.resizer:hover,
+.resizer.isResizing {
+    background-color: #2F6CF6;
+}
+
+/* Add a pseudo-element for a larger hit area */
+.resizer::after {
+    content: '';
+    position: absolute;
+    left: -2px;
+    right: -2px;
+    top: 0;
+    bottom: 0;
+}
+
+/* LEFT PANEL */
+.leftPanel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background-color: #FAFAFA;
+    border-right: 1px solid #EAEAEA;
+    position: relative;
+}
+
+.pdfToolbar {
+    height: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 25px;
+    border-bottom: 1px solid #EAEAEA;
+    background-color: white;
+}
+
+.pdfContent {
+    flex: 1;
+    overflow: hidden;
+    padding: 0;
+    position: relative;
+    margin: 0 auto;
+    width: 100%;
+}
+
+.pdfFrame {
+    width: 100%;
+    height: 100%;
+    border: none;
+}
+
+.markdownWrapper {
+    font-size: 15px;
+    line-height: 1.7;
+    color: #333;
+}
+
+/* UI BUTTONS & ACTIONS */
+.actionGroup {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.textBtn {
+    font-size: 14px;
+    font-weight: 600;
+    color: #1B1D21;
+    background: none;
+    border: none;
+    cursor: pointer;
+}
+
+.primaryBtn {
+    background-color: #2F6CF6;
+    color: white;
+    padding: 8px 24px;
+    border-radius: 20px;
+    font-weight: 600;
+    font-size: 14px;
+    border: none;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.primaryBtn:hover {
+    background-color: #1a56db;
+}
+
+.statusIndicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: #5F6368;
+    background-color: #F8F9FA;
+    padding: 6px 12px;
+    border-radius: 6px;
+}
+
+/* ZOOM CONTROLS */
+.zoomControls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.zoomLevel {
+    font-size: 13px;
+    font-weight: 600;
+    color: #5F6368;
+    min-width: 40px;
+    text-align: center;
+}
+
+.iconBtn {
+    color: #5F6368;
+    cursor: pointer;
+    background: none;
+    border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 5px;
+    border-radius: 4px;
+    transition: background-color 0.2s;
+}
+
+.iconBtn:hover {
+    background-color: #F1F3F4;
+    color: #1B1D21;
+}
+
+/* SELECTION INDICATOR */
+.selectionIndicator {
+    position: absolute;
+    bottom: 80px;
+    left: 40px;
+    right: 100px;
+    background-color: #FFF9C4;
+    border: 1px solid #FBC02D;
+    padding: 8px 15px;
+    border-radius: 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    color: #455A64;
+    z-index: 20;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
+}
+
+.selectionLabel {
+    font-weight: 700;
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+    color: #F57F17;
+}
+
+.selectionText {
+    font-style: italic;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 300px;
+}
+
+.clearSelectionBtn {
+    margin-left: auto;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: #F57F17;
+    display: flex;
+    align-items: center;
+}
+
+/* Context Menu */
+.contextMenu {
+    position: absolute;
+    background-color: white;
+    box-shadow: 0 5px 20px rgba(0, 0, 0, 0.15);
+    border-radius: 8px;
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    width: 200px;
+    z-index: 1000;
+    border: 1px solid #EAEAEA;
+}
+
+.contextMenu button {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border: none;
+    background: none;
+    color: #1B1D21;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    border-radius: 4px;
+    text-align: left;
+}
+
+.contextMenu button:hover {
+    background-color: #F5F5F5;
+}
+
+/* Bottom Bar */
+.bottomBarContainer {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: white;
+    padding: 20px 30px;
+    border-top: 1px solid #EAEAEA;
+    z-index: 30;
+}
+
+.bottomBar {
+    display: flex;
+    gap: 15px;
+}
+
+.inputWrapper {
+    flex: 1;
+    background-color: white;
+    border: 1px solid #E0E0E0;
+    border-radius: 30px;
+    padding: 10px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.inputWrapper input {
+    flex: 1;
+    border: none;
+    outline: none;
+    font-size: 14px;
+    background: transparent;
+}
+
+.sendBtn {
+    background-color: #2F6CF6;
+    color: white;
+    border: none;
+    padding: 0 24px;
+    border-radius: 30px;
+    font-weight: 600;
+    font-size: 14px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 80px;
+}
+
+/* RIGHT PANEL (Editor Container) */
+.rightPanel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background-color: #F8F9FA;
+    border-left: 1px solid #E0E0E0;
+    position: relative;
+    overflow: hidden;
+}
+
+.editorToolbar {
+    height: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 40px;
+    border-bottom: 1px solid #E0E0E0;
+    background-color: white;
+    z-index: 10;
+}
+
+.formatGroup {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.formatBtn {
+    color: #5F6368;
+    cursor: pointer;
+    background: none;
+    border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 5px;
+    border-radius: 4px;
+}
+
+.formatBtn:hover {
+    background-color: #F1F3F4;
+    color: #1B1D21;
+}
+
+.divider {
+    width: 1px;
+    height: 20px;
+    background-color: #E0E0E0;
+}
+
+.spacingWrapper {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background-color: #F1F3F4;
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.spacingSelect {
+    border: none;
+    background: transparent;
+    font-size: 13px;
+    font-weight: 500;
+    color: #1B1D21;
+    outline: none;
+}
+
+/* EDITOR PAGE ARCHITECTURE */
+.editorContainer {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    overflow: auto;
+    /* Handle both vertical and horizontal scroll */
+    position: relative;
+    background-color: #F8F9FA;
+}
+
+.editorPage {
+    position: relative;
+    width: 816px;
+    flex-shrink: 0;
+    /* Don't let the page squish */
+    min-height: 1056px;
+    margin: 40px auto;
+    /* This centers horizontally safely and allows scrolling left */
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.24);
+    background-color: white;
+}
+
+/* CRITICAL: SYNCHRONIZE TYPOGRAPHY AND LAYOUT */
+.editorHighlighter,
+.editorInput {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+
+    padding: 96px;
+    /* 1 inch margins */
+    margin: 0;
+    border: none;
+    background: none;
+
+    font-family: 'Inter', sans-serif !important;
+    font-size: 11pt !important;
+    white-space: pre-wrap !important;
+    word-wrap: break-word !important;
+    box-sizing: border-box !important;
+    text-align: left !important;
+    letter-spacing: normal !important;
+    word-spacing: normal !important;
+
+    outline: none;
+    resize: none;
+}
+
+.editorHighlighter {
+    color: transparent !important;
+    z-index: 1;
+    pointer-events: none;
+}
+
+.editorInput {
+    color: #333;
+    background-color: transparent !important;
+    z-index: 2;
+    caret-color: #333;
+    overflow: hidden;
+}
+
+.taggedHighlight {
+    background-color: #FFF176 !important;
+    border-bottom: 2px solid #FBC02D;
+    color: transparent !important;
+    border-radius: 2px;
+    display: inline;
+}
+
+.emptyState {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: #9AA0A6;
+    font-size: 14px;
+    text-align: center;
+    padding: 20px;
+}
+
+.spin {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}

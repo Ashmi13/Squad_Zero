@@ -29,19 +29,27 @@ class AIService:
     @property
     def embeddings(self):
         if self._embeddings is None:
+            # OpenRouter does not provide free robust text-embedding models reliably.
+            # We revert to local HuggingFace to keep document processing functional and free.
             from langchain_huggingface import HuggingFaceEmbeddings
-            print("Loading HuggingFace Embeddings... (First run may take a few minutes)")
+            print("Loading HuggingFace Embeddings for Document Vectorization...")
             self._embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
         return self._embeddings
 
     @property
     def llm(self):
         if self._llm is None:
-            from langchain_groq import ChatGroq
-            api_key = os.getenv("GROQ_API_KEY")
-            self._llm = ChatGroq(
-                groq_api_key=api_key, 
-                model_name="llama-3.1-8b-instant",
+            from langchain_openai import ChatOpenAI
+            
+            # Use OpenRouter as standardized by Team Leader
+            api_key = os.getenv("OPENROUTER_API_KEY")
+            if not api_key:
+                print("WARNING: OPENROUTER_API_KEY is completely missing from .env!")
+                
+            self._llm = ChatOpenAI(
+                api_key=api_key, 
+                base_url="https://openrouter.ai/api/v1",
+                model="openai/gpt-oss-20b:free",
                 temperature=0
             )
         return self._llm
@@ -221,7 +229,17 @@ class AIService:
                 
                 results = cur.fetchall()
                 context_chunks = [row[0] for row in results]
-                context_text = "\n\n".join(context_chunks)
+                
+                # --- NEW: Semantic Synthesizer Outline Builder ---
+                # A manual Python algorithm that maps the chronological document chunks 
+                # into strict "Knowledge Modules" to force the AI to Synthesize instead of Summarize.
+                context_text = ""
+                module_counter = 1
+                for i, chunk in enumerate(context_chunks):
+                    if i % 3 == 0:  # Create a distinct structural boundary every 3 chunks
+                        context_text += f"\n\n=== [KNOWLEDGE MODULE {module_counter}] ===\n"
+                        module_counter += 1
+                    context_text += f"{chunk}\n"
                 
                 # Limit size to prevent Groq Free Tier API 'rate_limit_exceeded (TPM Limit 6000)' errors
                 MAX_API_CHARS = 14000  # roughly 3500 tokens
@@ -232,7 +250,32 @@ class AIService:
                 cur.close()
                 conn.close()
             else:
-                return "Database connection failed during retrieval."
+                # [OFFLINE FALLBACK]: Temporarily bypass database if not connected
+                print(f"Bypassing DB: Manually parsing documents/{pdf_id}.pdf")
+                from PyPDF2 import PdfReader
+                try:
+                    pdf = PdfReader(f"documents/{pdf_id}.pdf")
+                    fallback_text = ""
+                    for page in pdf.pages:
+                        fallback_text += page.extract_text()
+                        
+                    # Build simple synthetic chunks
+                    from langchain_text_splitters import RecursiveCharacterTextSplitter
+                    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+                    context_chunks = splitter.split_text(fallback_text)
+                    
+                    context_text = ""
+                    module_counter = 1
+                    for i, chunk in enumerate(context_chunks):
+                        if i % 3 == 0:
+                            context_text += f"\n\n=== [KNOWLEDGE MODULE {module_counter}] ===\n"
+                            module_counter += 1
+                        context_text += f"{chunk}\n"
+                        
+                    if len(context_text) > 14000:
+                        context_text = context_text[:14000] + "\n...[Content truncated]"
+                except Exception as e:
+                    return f"Offline Fallback Error: {str(e)}"
         except Exception as e:
             print(f"Error retrieving vectors: {e}")
             return f"Error exploring document: {str(e)}"
@@ -247,19 +290,19 @@ class AIService:
             
         # Create a highly structured prompt to Differentiate from normal ChatGPT
         prompt = f"""
-        You are an expert, brilliant professor writing a highly structured, simple, and easy-to-understand study note.
+        You are an expert Semantic Synthesizer and professor writing a highly structured, fully-connected study note.
         You must write the note entirely in {language}.
         
-        INSTRUCTIONS/GOALS:
-        1. Keep the exact flow of the lecture. Do not skip points. Explain every single point simply and clearly.
-        2. MANDATORY: The note MUST cover these mathematically extracted keywords: {keyword_str}.
-        3. Use formatting (Headers, Bullet points, Bolding).
-        4. MANDATORY: You MUST include at least one Mermaid.js diagram (a flowchart or mind map) that visualizes a core concept from the text. Wrap it in ```mermaid ... ``` codeblocks.
+        SYNTHESIS INSTRUCTIONS:
+        1. Keep the exact flow of the lecture by strictly following the [KNOWLEDGE MODULE] boundaries provided in the Context.
+        2. MANDATORY KEYWORDS: The note MUST explicitly cover and bold these mathematically extracted anchor concepts: {keyword_str}.
+        3. SYNTHESIS PROTOCOL: Do not just summarize! For every Knowledge Module, explicitly build a structural connection explaining how the facts in Module N relate logically to Module N-1.
+        4. MANDATORY VISUAL: You MUST include at least one Mermaid.js diagram (timeline, flowchart, or concept map) that physically maps how the Knowledge Modules connect to each other based on the text. Wrap it in ```mermaid ... ``` codeblocks.
         
-        Context (Entire Lecture Flow):
+        Context (Structurally Mapped Document Sequence):
         {context_text}
         
-        Remember: Output beautiful markdown, simple explanations, and a Mermaid diagram. Note language: {language}.
+        Remember: Output beautiful markdown with logical transitions between every module. Note language: {language}.
         """
         
         try:

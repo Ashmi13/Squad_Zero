@@ -33,8 +33,12 @@ def create_app() -> FastAPI:
         allowed_hosts=["localhost", "127.0.0.1"]
     )
     
-    # Include routers
+    # Include Core Team Routers
     app.include_router(v1_router)
+
+    # Include Member 3 Router (Smart Note Management)
+    from m3_structurednotes.router import router as m3_router
+    app.include_router(m3_router)
     
     # Root health endpoint
     @app.get("/")
@@ -52,13 +56,13 @@ def create_app() -> FastAPI:
     @app.on_event("startup")
     async def startup_event():
         """Run on application startup"""
-        print(f"🚀 Starting {settings.app_name}")
+        print(f"[*] Starting {settings.app_name}")
         print(f"Environment: {settings.environment}")
     
     @app.on_event("shutdown")
     async def shutdown_event():
         """Run on application shutdown"""
-        print(f"🛑 Shutting down {settings.app_name}")
+        print(f"[X] Shutting down {settings.app_name}")
     
     return app
 

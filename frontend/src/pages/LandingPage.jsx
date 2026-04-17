@@ -38,7 +38,7 @@ export default function LandingPage() {
 
           <div className="mt-12 flex items-center gap-3 text-slate-500">
             <Mail size={18} />
-            <span className="text-sm">Neuro Team</span>
+            <span className="text-sm">Neura Team</span>
           </div>
         </div>
 
@@ -62,10 +62,10 @@ export default function LandingPage() {
             </div>
 
             <Link
-              to="/signup"
+              to="/login"
               className="absolute inset-x-8 bottom-8 rounded-xl bg-slate-200/90 px-6 py-3 text-center text-sm font-semibold text-slate-800 transition hover:bg-white"
             >
-              Get Started - Sign Up
+              Get Started - Sign In
               <span className="block text-xs font-medium text-slate-500">Free</span>
             </Link>
           </div>

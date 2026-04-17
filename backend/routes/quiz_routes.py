@@ -1,5 +1,4 @@
 # backend/routes/quiz_routes.py
-import sys, os; _r = os.path.dirname(os.path.dirname(os.path.abspath(__file__))); sys.path.insert(0, _r) if _r not in sys.path else None
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
@@ -17,7 +16,6 @@ async def generate_quiz(
     difficulty: str = Form(...),
     time_limit: int = Form(...),
     question_type: str = Form(...),
-    content_focus: str = Form(default='both'),
     user_id: int = Form(...),
     note_id: int = Form(None),
     source_content: str = Form(None),
@@ -31,7 +29,6 @@ async def generate_quiz(
         difficulty=difficulty,
         time_limit=time_limit,
         question_type=question_type,
-        content_focus=content_focus,
         user_id=user_id,
         note_id=note_id,
         source_content=source_content

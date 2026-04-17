@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useForm } from 'react-hook-form';
+import { Link } from 'react-router-dom';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Mail, Lock, AlertCircle, CheckCircle } from 'lucide-react';
 import { z } from 'zod';
@@ -31,7 +32,11 @@ export function LoginForm() {
   const [isSuccess, setIsSuccess] = useState(false);
 
   const handleGoogleSignIn = () => {
-    window.location.href = `${config.apiBaseUrl}${config.oauth.googleAuthUrl}`;
+    // We rely on the Vite proxy for /api, so we must go to current origin + proxy path
+    // Force the browser to treat this as a fresh external navigation
+    const url = `${window.location.origin}${config.oauth.googleAuthUrl}`;
+    console.log('Redirecting to Google login through proxy:', url);
+    window.location.assign(url);
   };
 
   const onSubmit = async (data) => {
@@ -106,9 +111,9 @@ export function LoginForm() {
             <input type="checkbox" className="h-4 w-4 rounded border-slate-300" />
             Remember me
           </label>
-          <a href="#" className="text-indigo-600 hover:text-indigo-700">
+          <Link to="/forgot-password" title="Forgot Password" className="text-indigo-600 hover:text-indigo-700">
             Forgot Password
-          </a>
+          </Link>
         </div>
 
         <Button

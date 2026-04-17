@@ -45,6 +45,11 @@ dist-ssr/
 .env.development.local
 .env.test.local
 .env.production.local
+backend/.env
+frontend/.env
+node_modules/
+venv/
+__pycache__/
 
 
 # ===== LOGS =====

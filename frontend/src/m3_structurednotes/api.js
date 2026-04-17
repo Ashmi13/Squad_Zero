@@ -42,7 +42,7 @@ export const generateNote = async (pdfId, userId, instruction, language = "Engli
         instruction: instruction,
         language: language
     });
-    return response.data;
+    return response.data.content;
 };
 
 export const refineText = async (pdfId, selectedText, instruction) => {

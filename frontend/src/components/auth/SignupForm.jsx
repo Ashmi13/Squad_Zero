@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useForm } from 'react-hook-form';
+import { useNavigate } from 'react-router-dom';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Mail, Lock, User, AlertCircle, CheckCircle } from 'lucide-react';
 import { z } from 'zod';
@@ -33,6 +34,8 @@ export function SignupForm() {
     mode: 'onBlur',
   });
 
+  const navigate = useNavigate();
+
   const [isLoading, setIsLoading] = useState(false);
   const [isError, setIsError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -55,7 +58,7 @@ export function SignupForm() {
 
       setIsSuccess(true);
       setTimeout(() => {
-        window.location.href = '/dashboard';
+        navigate('/verify-email', { state: { email: data.email } });
       }, 1000);
     } catch (error) {
       setIsError(true);

@@ -15,6 +15,7 @@ backend/debug_*.py
 backend/fix_*.py
 backend/init_*.py
 backend/seed_*.py
+backend/dump.sql
 
 __pycache__/
 *.py[cod]

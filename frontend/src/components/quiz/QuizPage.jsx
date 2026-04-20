@@ -26,7 +26,7 @@ const QuizPage = ({ noteId, userId }) => {
   const closeDialog = () => setDialog({ isOpen: false });
 
   const [config, setConfig] = useState({
-    numQuestions: 10,
+    numQuestions: 5,
     difficulty: 'easy',
     timeLimit: 30,
     questionType: 'mixed',
@@ -1022,6 +1022,10 @@ const QuizPage = ({ noteId, userId }) => {
           <button className="action-btn secondary" onClick={handleDownloadPDF}>
             <Download size={20} />
             Download as PDF
+          </button>
+          <button className="action-btn secondary" onClick={() => setShowHistory(true)}>
+            <BarChart3 size={20} />
+            History & Analytics
           </button>
           <button className="action-btn secondary" onClick={handleRestart}>
             <Sparkles size={20} />

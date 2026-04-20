@@ -7,7 +7,12 @@ import re
 
 class AIService:
     """Service for AI-powered question generation"""
-    
+
+    # Primary model — free tier on OpenRouter
+    MODEL = "openai/gpt-oss-20b:free"
+    # Fallback model if primary fails
+    FALLBACK_MODEL = "qwen/qwen-2.5-7b-instruct:free"
+
     def __init__(self):
         self.llm = ChatOpenAI(
             model=settings.AI_MODEL,
@@ -80,13 +85,11 @@ Rules:
     def _parse_response(self, response: str, question_type: str):
         """Parse AI response into structured question list"""
         try:
-            # Strip markdown code fences if present
             cleaned = response.strip()
             cleaned = re.sub(r'^```(?:json)?\s*', '', cleaned)
             cleaned = re.sub(r'\s*```$', '', cleaned)
             cleaned = cleaned.strip()
 
-            # Find the JSON array
             start = cleaned.find('[')
             end = cleaned.rfind(']') + 1
             if start == -1 or end == 0:
@@ -100,11 +103,9 @@ Rules:
             for i, q in enumerate(raw_questions):
                 q_type = q.get('type', 'multiple_choice')
 
-                # Normalise type
                 if q_type not in ('multiple_choice', 'short_answer'):
                     q_type = 'multiple_choice'
 
-                # Override if forced
                 if question_type == 'mcq':
                     q_type = 'multiple_choice'
                 elif question_type == 'short_answer':
@@ -130,7 +131,6 @@ Rules:
                             'text': opt.get('text', f'Option {letter}'),
                             'is_correct': bool(opt.get('is_correct', False))
                         })
-                    # Safety: if no correct answer marked, mark first as correct
                     if options and not has_correct:
                         options[0]['is_correct'] = True
                     parsed['options'] = options

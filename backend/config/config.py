@@ -10,11 +10,18 @@ class Settings:
     # Database
     DATABASE_URL: str = os.getenv(
         "DATABASE_URL", 
-        "postgresql://postgres:neuranote123@localhost:5432/neuranote_db"
+        "postgresql://postgres.iatjbhvtcvnsbitpbfim:YOURPASSWORD@aws-1-ap-south-1.pooler.supabase.com:5432/postgres"
     )
     
     # OpenAI
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+<<<<<<< HEAD
+=======
+
+    # OpenRouter — used for openai/gpt-oss-20b:free via OpenRouter
+    # Falls back to OPENAI_API_KEY if OPENROUTER_API_KEY not set (they use the same sk-or-v1 format)
+    OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY", "")
+>>>>>>> a9d16f6fc (Connected local DB with Supabase)
     
     # App Settings
     APP_NAME: str = "NeuraNote Quiz API"
@@ -43,7 +50,7 @@ class Settings:
     MAX_TIME_LIMIT: int = 180
     
     # AI Settings
-    AI_MODEL: str = "gpt-3.5-turbo"
-    AI_TEMPERATURE: float = 0.7
+    AI_MODEL: str = "openai/gpt-oss-20b:free"
+    AI_TEMPERATURE: float = 0.5
 
 settings = Settings()

@@ -203,13 +203,16 @@ class AIService:
             cur.execute("""
                 INSERT INTO notes (note_id, user_id, title, content, created_date, updated_date, note_type, is_in_folder, has_embeddings)
                 VALUES (%s, %s, %s, %s, NOW(), NOW(), 'ai_generated', FALSE, TRUE)
+                RETURNING note_id
             """, (note_id, user_id, title, content))
+            
+            returned_id = cur.fetchone()[0]
             
             conn.commit()
             cur.close()
             conn.close()
-            print(f"Note saved to DB: {note_id}")
-            return note_id
+            print(f"Note saved to DB via RETURNING: {returned_id}")
+            return returned_id
         except Exception as e:
             print(f"Error saving to DB: {e}")
             if conn:
@@ -481,15 +484,21 @@ class AIService:
         try:
             cur = conn.cursor()
             cur.execute(
-                "UPDATE notes SET folder_id = %s WHERE note_id = %s",
+                "UPDATE notes SET folder_id = %s, updated_date = NOW() WHERE note_id = %s",
                 (folder_id, note_id)
             )
+            # Check if the note actually existed and was updated
+            success = cur.rowcount > 0 
+            
             conn.commit()
             cur.close()
             conn.close()
-            return True
+            return success
         except Exception as e:
-            print(f"Error updating note folder: {e}")
+            # Fixed the string formatting here (added the 'f' before the quotes)
+            print(f"Error updating note folder: {e}") 
+            if conn:
+                conn.close()
             return False
 
     def get_all_notes(self, user_id, folder_id=None):

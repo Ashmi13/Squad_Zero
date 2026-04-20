@@ -69,13 +69,25 @@ const RefineModal = ({ originalText, initialRefinedText, onClose, onApply, pdfId
                     </div>
                 </div>
 
-                <div className={styles.footer}>
-                    <button className={styles.discardBtn} onClick={onClose}>
+                <div className={styles.footer} style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+                    <button className={styles.discardBtn} onClick={onClose} style={{ padding: '8px 16px', borderRadius: '6px', border: '1px solid #ff4d4f', color: '#ff4d4f', background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}>
                         <X size={16} /> Discard
                     </button>
-                    <button className={styles.applyBtn} onClick={() => onApply(currentRefined, history)}>
-                        <Check size={16} /> Replace Original
-                    </button>
+                    <div style={{ display: 'flex', gap: '12px' }}>
+                        <button 
+                            onClick={() => onApply(currentRefined, history, 'insert')}
+                            style={{ padding: '8px 16px', borderRadius: '6px', border: '1px solid #1B1D21', color: '#1B1D21', background: 'transparent', cursor: 'pointer', fontWeight: 500 }}
+                        >
+                            Insert Below (Boxed)
+                        </button>
+                        <button 
+                            className={styles.applyBtn} 
+                            onClick={() => onApply(currentRefined, history, 'replace')}
+                            style={{ padding: '8px 16px', borderRadius: '6px', border: 'none', color: 'white', background: '#2F6CF6', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 500 }}
+                        >
+                            <Check size={16} /> Replace Original
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>

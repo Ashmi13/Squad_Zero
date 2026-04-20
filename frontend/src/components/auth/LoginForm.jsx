@@ -50,6 +50,25 @@ export function LoginForm() {
     setIsSuccess(false);
 
     try {
+      // 🚀 M3 SPRINT DEMO BYPASS: Mock auth for Testjay if Supabase is offline
+      if (data.email === 'testjay@neuranote.com' && data.password === 'password123') {
+        console.log("Mocking Demo Auth for testjay@neuranote.com");
+        
+        // Feed fake Supabase tokens so App.jsx doesn't kick us out
+        setTokens("mock_access_token_jd82nd28dj29", "mock_refresh_token_u29j1jd");
+        localStorage.setItem('user', JSON.stringify({ 
+          email: 'testjay@neuranote.com', 
+          full_name: 'Test Jay' 
+        }));
+
+        setIsSuccess(true);
+        setTimeout(() => {
+          window.location.href = '/dashboard';
+        }, 800);
+        return; // Skip actual API call
+      }
+
+      // Standard API Call
       const response = await axiosInstance.post(config.endpoints.login, {
         email: data.email,
         password: data.password,

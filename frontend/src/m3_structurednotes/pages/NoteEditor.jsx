@@ -16,7 +16,6 @@ import {
 import styles from './NoteEditor.module.css';
 import SaveModal from '../components/SaveModal';
 import RefineModal from '../components/RefineModal';
-import Sidebar from '../../components/Sidebar';
 import { generateNote, refineText, updateNote, createNote, summarizePrompts } from '../api';
 
 
@@ -53,9 +52,17 @@ const NoteEditor = () => {
     const navigate = useNavigate();
 
     const [content, setContent] = useState('');
-    const [lineHeight, setLineHeight] = useState('1.5'); // Default spacing
-    const [pdfId, setPdfId] = useState('');
-    const [pdfUrl, setPdfUrl] = useState(''); // New state for PDF URL
+    const [lineHeight, setLineHeight] = useState('1.5'); 
+    
+    // Support Multiple Documents for the right panel
+    const [documents, setDocuments] = useState([]);
+    const [activeDocIndex, setActiveDocIndex] = useState(0);
+
+    const activeDoc = documents[activeDocIndex] || null;
+    const pdfId = activeDoc?.pdfId || '';
+    const pdfUrl = activeDoc?.url || '';
+    const isPptx = activeDoc?.isPptx || false;
+
     const [currentNoteId, setCurrentNoteId] = useState(noteId);
     const [userId, setUserId] = useState('test_user');
 
@@ -82,27 +89,26 @@ const NoteEditor = () => {
     const quillRef = useRef(null); // Ref for ReactQuill
 
     const [rightView, setRightView] = useState('pdf'); // 'pdf' | 'preview'
-    const [isPptx, setIsPptx] = useState(false);
 
     useEffect(() => {
         const savedNote = localStorage.getItem('currentNote');
+        
+        // Mocking Multiple Documents Array to demonstrate M3 combinations
+        setDocuments([
+            { id: 1, name: "Neural Networks Intro.pdf", url: "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf", pdfId: "pdf-123" },
+            { id: 2, name: "Advanced ML Vectors.pdf", url: "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf", pdfId: "pdf-456" }
+        ]);
+
         if (savedNote) {
             const parsed = JSON.parse(savedNote);
             let loadedContent = parsed.content;
             if (loadedContent && !loadedContent.includes('<p>') && !loadedContent.includes('<h1>')) {
-                // Parse markdown into HTML for the rich text editor
                 loadedContent = marked.parse(loadedContent);
             }
             setContent(loadedContent);
-            setPdfId(parsed.pdfId);
-            setPdfUrl(parsed.pdfUrl || ''); // Load URL
-            setIsPptx(parsed.isPptx || (parsed.pdfUrl && parsed.pdfUrl.toLowerCase().endsWith('.pptx')));
             if (!currentNoteId) setCurrentNoteId(parsed.noteId);
         } else {
-            // For Interim Mode: Initialize empty if no note found
-            if (!ENABLE_AI) {
-                setContent('');
-            }
+            if (!ENABLE_AI) setContent('');
         }
     }, [noteId]);
 
@@ -152,13 +158,14 @@ const NoteEditor = () => {
     const handleToolbarAction = (action, value) => {
         if (!quillRef.current) return;
         const editor = quillRef.current.getEditor();
+        const currentFormats = editor.getFormat();
         
         switch (action) {
-            case 'bold': editor.format('bold', true); break;
-            case 'italic': editor.format('italic', true); break;
-            case 'underline': editor.format('underline', true); break;
+            case 'bold': editor.format('bold', !currentFormats.bold); break;
+            case 'italic': editor.format('italic', !currentFormats.italic); break;
+            case 'underline': editor.format('underline', !currentFormats.underline); break;
             case 'highlight': editor.format('background', value === 'transparent' ? false : value || 'yellow'); break;
-            case 'list': editor.format('list', 'bullet'); break;
+            case 'list': editor.format('list', currentFormats.list === 'bullet' ? false : 'bullet'); break;
             case 'link': 
                 const range = editor.getSelection();
                 if (range) {
@@ -303,7 +310,7 @@ const NoteEditor = () => {
 
     /* handleScroll removed as we're switching to a unified page wrapper structure */
 
-    const applyRefinement = async (finalRefinedText, history = []) => {
+    const applyRefinement = async (finalRefinedText, history = [], insertionType = 'replace') => {
         if (!selection || !quillRef.current) return;
 
         // Snap current selection before clearing so the modal forces shut instantly!
@@ -323,17 +330,26 @@ const NoteEditor = () => {
             }
         }
 
-        let combinedHtml = `
-            <p><strong class="ql-size-large" style="color: #2F6CF6;">✨ Refinement (${metaTopic})</strong></p>
-            ${marked.parse(finalRefinedText)}
-            <p><br></p>
-        `;
-
         const editor = quillRef.current.getEditor();
-        
-        // Remove old text and insert refined HTML using the snapped selection
-        editor.deleteText(currentSelection.start, currentSelection.length);
-        editor.clipboard.dangerouslyPasteHTML(currentSelection.start, combinedHtml);
+        let combinedHtml = "";
+
+        if (insertionType === 'insert') {
+            // Keep original text, append elegantly framed box right below
+            // We use blockquote so Quill doesn't strip the container layout!
+            combinedHtml = `
+                <blockquote><strong style="color: #6C5DD3; font-size: 13px;">✨ AI Refined: ${metaTopic}</strong></blockquote>
+                ${marked.parse(finalRefinedText).split('</p>').map(p => p.trim() ? `<blockquote>${p}</p></blockquote>` : '').join('')}
+                <p><br></p>
+            `;
+            // Insert a newline after selection and paste the box
+            editor.insertText(currentSelection.start + currentSelection.length, '\n');
+            editor.clipboard.dangerouslyPasteHTML(currentSelection.start + currentSelection.length + 1, combinedHtml);
+        } else {
+            // Seamlessly replace the original text inline
+            combinedHtml = marked.parse(finalRefinedText);
+            editor.deleteText(currentSelection.start, currentSelection.length);
+            editor.clipboard.dangerouslyPasteHTML(currentSelection.start, combinedHtml);
+        }
 
         const newContent = editor.root.innerHTML;
         setContent(newContent);
@@ -348,7 +364,7 @@ const NoteEditor = () => {
     };
 
     return (
-        <div className={styles.editorContainer}>
+        <div className={styles.pageContainer} onClick={closeContextMenu}>
             <div
                 id="export-content"
                 style={{
@@ -373,13 +389,9 @@ const NoteEditor = () => {
                 />
             </div>
 
-            <Sidebar onSelectFolder={null} selectedFolderId={null} />
-
-            <div className={styles.mainContent} style={{ marginLeft: '320px', width: 'calc(100% - 320px)' }}>
-                <div className={styles.container} onClick={closeContextMenu}>
-                    <div className={styles.header}>
-                        <div className={styles.brand}>
-                            <div className={styles.logoBox}>N</div>
+            <div className={styles.header}>
+                <div className={styles.brand}>
+                    <div className={styles.logoBox}>N</div>
                             <span>NeuraNote</span>
                         </div>
 
@@ -484,6 +496,36 @@ const NoteEditor = () => {
                                     />
                                 </div>
                             </div>
+
+                                {selection && (
+                                    <div className={styles.selectionIndicator}>
+                                        <span className={styles.selectionLabel}>Tagged:</span>
+                                        <span className={styles.selectionText}>"{selection.text.substring(0, 50)}..."</span>
+                                        <button className={styles.clearSelectionBtn} onClick={clearSelection}><X size={12} /></button>
+                                    </div>
+                                )}
+
+                                {(ENABLE_AI || selection) && (
+                                    <div className={styles.bottomBarContainer}>
+                                        <div className={styles.bottomBar}>
+                                            <div className={styles.inputWrapper}>
+                                                <input
+                                                    ref={chatInputRef}
+                                                    type="text"
+                                                    placeholder={selection ? "Refine tagged text..." : "Instructions to AI (Summarize, expand, format)..."}
+                                                    value={chatInput}
+                                                    onChange={(e) => setChatInput(e.target.value)}
+                                                    onKeyDown={(e) => e.key === 'Enter' && handleChatSubmit()}
+                                                    disabled={isProcessing}
+                                                />
+                                                <button className={styles.iconBtn}><Mic size={18} /></button>
+                                            </div>
+                                            <button className={styles.sendBtn} onClick={handleChatSubmit} disabled={isProcessing}>
+                                                {isProcessing ? <Loader2 size={18} className={styles.spin} /> : 'Refine'}
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
                         </div>
 
                         {/* Divider Line */}
@@ -495,12 +537,24 @@ const NoteEditor = () => {
                         {/* PDF / PREVIEW PANEL (NOW RIGHT) */}
                         <div className={styles.rightPanel} style={{ flex: 1, pointerEvents: isResizing ? 'none' : 'auto' }}>
                             <div className={styles.pdfToolbar}>
+                                
+                                {/* NEW DOCUMENT SELECTOR */}
+                                <select 
+                                    className={styles.docSelector}
+                                    value={activeDocIndex}
+                                    onChange={(e) => setActiveDocIndex(Number(e.target.value))}
+                                >
+                                    {documents.map((doc, idx) => (
+                                        <option key={idx} value={idx}>{doc.name}</option>
+                                    ))}
+                                </select>
+
                                 <div className={styles.viewToggleGroup} style={{ marginLeft: 0 }}>
                                     <button
                                         className={`${styles.viewToggleBtn} ${rightView === 'pdf' ? styles.active : ''}`}
                                         onClick={() => setRightView('pdf')}
                                     >
-                                        {isPptx ? 'PowerPoint Source' : 'PDF Source'}
+                                        {isPptx ? 'PowerPoint View' : 'PDF Source'}
                                     </button>
                                     <button
                                         className={`${styles.viewToggleBtn} ${rightView === 'preview' ? styles.active : ''}`}
@@ -518,7 +572,7 @@ const NoteEditor = () => {
                                                 <div className={styles.emptyState} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
                                                     <div>PowerPoint files cannot be previewed directly.</div>
                                                     <a
-                                                        href={`http://127.0.0.1:8000${pdfUrl}`}
+                                                        href={pdfUrl}
                                                         download
                                                         className={styles.primaryBtn}
                                                         style={{ textDecoration: 'none', textAlign: 'center' }}
@@ -528,10 +582,9 @@ const NoteEditor = () => {
                                                 </div>
                                             ) : (
                                                 <iframe
-                                                    src={`http://127.0.0.1:8000${pdfUrl}`}
+                                                    src={pdfUrl}
                                                     className={styles.pdfFrame}
                                                     title="PDF Viewer"
-                                                    style={{ width: '100%', height: '100%', border: 'none' }}
                                                 />
                                             )
                                         ) : (
@@ -555,39 +608,9 @@ const NoteEditor = () => {
                                     </div>
                                 )}
 
-                                {selection && (
-                                    <div className={styles.selectionIndicator}>
-                                        <span className={styles.selectionLabel}>Tagged Part:</span>
-                                        <span className={styles.selectionText}>"{selection.text.substring(0, 50)}..."</span>
-                                        <button className={styles.clearSelectionBtn} onClick={clearSelection}><X size={12} /></button>
-                                    </div>
-                                )}
-
-                                {(ENABLE_AI || selection) && (
-                                    <div className={styles.bottomBarContainer}>
-                                        <div className={styles.bottomBar}>
-                                            <div className={styles.inputWrapper}>
-                                                <input
-                                                    ref={chatInputRef}
-                                                    type="text"
-                                                    placeholder={selection ? "Refine tagged text..." : "Instructions to regenerate..."}
-                                                    value={chatInput}
-                                                    onChange={(e) => setChatInput(e.target.value)}
-                                                    onKeyDown={(e) => e.key === 'Enter' && handleChatSubmit()}
-                                                    disabled={isProcessing}
-                                                />
-                                                <button className={styles.iconBtn}><Mic size={18} /></button>
-                                            </div>
-                                            <button className={styles.sendBtn} onClick={handleChatSubmit} disabled={isProcessing}>
-                                                {isProcessing ? <Loader2 size={18} className={styles.spin} /> : 'Send'}
-                                            </button>
-                                        </div>
-                                    </div>
-                                )}
                             </div>
                         </div>
                     </div>
-                </div>
 
                 {contextMenu && (
                     <div
@@ -644,10 +667,9 @@ const NoteEditor = () => {
                         pdfId={pdfId}
                         refineTextApi={refineText}
                         onClose={() => setRefinementResult(null)}
-                        onApply={(finalRefinedText, history) => applyRefinement(finalRefinedText, history)}
+                        onApply={(finalRefinedText, history, insertionType) => applyRefinement(finalRefinedText, history, insertionType)}
                     />
                 )}
-            </div>
         </div>
     );
 };

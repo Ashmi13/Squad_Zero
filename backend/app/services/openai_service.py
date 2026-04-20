@@ -4,7 +4,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+api_key = os.getenv("OPENAI_API_KEY")
+print(f"DEBUG: API Key loaded: {api_key[:10] if api_key else 'NOT FOUND'}...")
+
+client = OpenAI(api_key=api_key)
 
 def generate_summary(text: str, style: str = "default") -> str:
     """
@@ -27,6 +30,7 @@ def generate_summary(text: str, style: str = "default") -> str:
     style_instruction = style_prompts.get(style, style_prompts["default"])
     
     try:
+        print(f"DEBUG: Calling OpenAI with text length: {len(text)}")
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
@@ -43,9 +47,11 @@ def generate_summary(text: str, style: str = "default") -> str:
             temperature=0.7
         )
         
+        print(f"DEBUG: Summary generated successfully")
         return response.choices[0].message.content
     
     except Exception as e:
+        print(f"DEBUG: OpenAI Error: {type(e).__name__}: {str(e)}")
         raise ValueError(f"Error generating summary: {str(e)}")
 
 
@@ -74,6 +80,7 @@ User's question: {question}
 Provide a clear, educational answer."""
     
     try:
+        print(f"DEBUG: Calling OpenAI for Q&A")
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
@@ -90,7 +97,9 @@ Provide a clear, educational answer."""
             temperature=0.7
         )
         
+        print(f"DEBUG: Answer generated successfully")
         return response.choices[0].message.content
     
     except Exception as e:
+        print(f"DEBUG: OpenAI Error: {type(e).__name__}: {str(e)}")
         raise ValueError(f"Error answering question: {str(e)}")

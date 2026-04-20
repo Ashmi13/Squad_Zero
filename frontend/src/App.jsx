@@ -11,7 +11,8 @@ import OAuthCallback from '@/pages/OAuthCallback';
 import Dashboard from '@/pages/Dashboard';
 
 // ===== MEMBER 3 (Sandavi) - Structured Notes =====
-import M3Dashboard from './m3_structurednotes/pages/Dashboard';
+// Dashboard is mem 2's part, removing M3 dashboard route
+// import M3Dashboard from './m3_structurednotes/pages/Dashboard';
 import NoteEditor from './m3_structurednotes/pages/NoteEditor';
 
 // ===== MEMBER 4 - Quiz =====
@@ -40,7 +41,7 @@ function App() {
         <Route path="/dashboard"      element={<Dashboard />} />
 
         {/* Member 3 - Structured Notes */}
-        <Route path="/notes"                element={<M3Dashboard />} />
+        {/* <Route path="/notes"                element={<M3Dashboard />} /> */}
         <Route path="/notes/editor/:noteId" element={<NoteEditor />} />
 
         {/* Member 4 - Quiz */}

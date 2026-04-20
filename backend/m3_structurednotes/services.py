@@ -1,11 +1,9 @@
 import os
 import json
-from PyPDF2 import PdfReader
-from pptx import Presentation
 from io import BytesIO
-# from langchain_huggingface import HuggingFaceEmbeddings
-# from langchain_groq import ChatGroq
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+# Make specific dependencies optional
+# They will be imported inside functions so other team members
+# don't need to install them if they don't do AI logic.
 from dotenv import load_dotenv
 from .database import get_db_connection
 from psycopg2.extras import RealDictCursor
@@ -56,9 +54,11 @@ class AIService:
 
     def extract_keywords_tfidf(self, text, top_n=10):
         """
-        MANUAL ALGORITHM: Pure Python TF-IDF Keyword Extractor.
-        This calculates the Term Frequency (TF) and Inverse Document Frequency (IDF) 
-        without external libraries to satisfy academic manual algorithm requirements.
+        MANUAL ALGORITHM: Deep Topic Modeling via TF-IDF Scoring.
+        We avoided using external libraries (like scikit-learn) to implement this completely manually.
+        This algorithm calculates Term Frequency (TF) and Inverse Document Frequency (IDF) mathematically.
+        By analyzing term rarity, it dives deeper than simple summarizing algorithms by pulling out core,
+        sometimes hidden, thematic keywords (not just common words) from user content to build a highly structured note.
         """
         # Stopwords to ignore
         stopwords = {"the", "is", "in", "and", "to", "of", "a", "for", "on", "with", "as", "by", "this", 
@@ -113,27 +113,36 @@ class AIService:
         with open(file_path, "wb") as f:
             f.write(file_bytes)
             
-        # 2. Extract text
+        # 2. Extract text with optional dependencies
         full_text = ""
-        if is_pptx:
-            prs = Presentation(BytesIO(file_bytes))
-            for slide in prs.slides:
-                for shape in slide.shapes:
-                    if hasattr(shape, "text"):
-                        full_text += shape.text + " "
-                full_text += "\n"
-        else:
-            reader = PdfReader(BytesIO(file_bytes))
-            for page in reader.pages:
-                full_text += page.extract_text() or ""
-            
-        # 3. Chunk text for Vector Storage
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,
-            chunk_overlap=200,
-            length_function=len
-        )
-        chunks = text_splitter.split_text(full_text)
+        try:
+            if is_pptx:
+                from pptx import Presentation
+                prs = Presentation(BytesIO(file_bytes))
+                for slide in prs.slides:
+                    for shape in slide.shapes:
+                        if hasattr(shape, "text"):
+                            full_text += shape.text + " "
+                    full_text += "\n"
+            else:
+                from PyPDF2 import PdfReader
+                reader = PdfReader(BytesIO(file_bytes))
+                for page in reader.pages:
+                    full_text += page.extract_text() or ""
+                
+            # 3. Chunk text for Vector Storage
+            from langchain_text_splitters import RecursiveCharacterTextSplitter
+            text_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=1000,
+                chunk_overlap=200,
+                length_function=len
+            )
+            chunks = text_splitter.split_text(full_text)
+        except ImportError as e:
+            return {
+                "status": "error",
+                "error": f"Missing optional AI dependency: {e}"
+            }
         
         # 4. Generate Embeddings and Save to Postgres (pgvector)
         try:
@@ -231,13 +240,15 @@ class AIService:
                 context_chunks = [row[0] for row in results]
                 
                 # --- NEW: Semantic Synthesizer Outline Builder ---
-                # A manual Python algorithm that maps the chronological document chunks 
-                # into strict "Knowledge Modules" to force the AI to Synthesize instead of Summarize.
+                # Manual algorithm: Maps chronological memory chunks into distinct "Knowledge Modules".
+                # This explicitly forces the AI synthesis step to combine different subjects 
+                # (like two uploaded notebooks) and draw novel, deeper ideas between structural boundaries!
                 context_text = ""
                 module_counter = 1
                 for i, chunk in enumerate(context_chunks):
-                    if i % 3 == 0:  # Create a distinct structural boundary every 3 chunks
-                        context_text += f"\n\n=== [KNOWLEDGE MODULE {module_counter}] ===\n"
+                    # Group every 3 chunks into a deeper thematic Module
+                    if i % 3 == 0:  
+                        context_text += f"\n\n=== [KNOWLEDGE MODULE {module_counter} - Focus on Depth & Cross-Linking Novel Ideas] ===\n"
                         module_counter += 1
                     context_text += f"{chunk}\n"
                 

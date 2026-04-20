@@ -23,6 +23,11 @@ export function LoginForm() {
   } = useForm({
     resolver: zodResolver(loginSchema),
     mode: 'onBlur',
+    // Pre-filling test credentials as per sprint planning
+    defaultValues: {
+      email: 'testjay@neuranote.com',
+      password: 'password123'
+    }
   });
 
   const [isLoading, setIsLoading] = useState(false);
@@ -65,7 +70,15 @@ export function LoginForm() {
   return (
     <div>
       <h2 className="font-display text-3xl text-slate-900 mb-2">Welcome Back</h2>
-      <p className="text-slate-500 mb-8">Sign in to your account</p>
+      <p className="text-slate-500 mb-4">Sign in to your account</p>
+      
+      {/* Admin / Test Credentials Notice */}
+      <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg flex items-center gap-3">
+        <AlertCircle className="text-blue-600" size={20} />
+        <p className="text-blue-800 text-sm">
+          <strong>Test Account:</strong> testjay@neuranote.com / password123
+        </p>
+      </div>
 
       {isSuccess && (
         <div className="mb-6 p-4 bg-emerald-50 border border-emerald-200 rounded-lg flex items-center gap-3">

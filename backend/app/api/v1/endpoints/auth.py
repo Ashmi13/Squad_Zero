@@ -2,7 +2,7 @@
 from fastapi import APIRouter, HTTPException, Response, Depends, Request
 from fastapi.responses import RedirectResponse
 from fastapi.security import HTTPBearer
-from supabase import Client
+from typing import Any
 from datetime import timedelta
 import httpx
 import json
@@ -40,7 +40,7 @@ security = HTTPBearer(auto_error=False)
 async def signup(
     request: SignupRequest,
     response: Response,
-    supabase_client: Client = Depends(get_supabase_service_client),
+    supabase_client: Any = Depends(get_supabase_service_client),
 ):
     """Sign up a new user"""
     try:
@@ -93,7 +93,7 @@ async def signup(
 async def signin(
     request: SigninRequest,
     response: Response,
-    supabase_client: Client = Depends(get_supabase_client),
+    supabase_client: Any = Depends(get_supabase_client),
 ):
     """Sign in with email and password"""
     try:
@@ -230,7 +230,7 @@ async def google_login():
 async def google_callback(
     code: str, 
     response: Response,
-    supabase_client: Client = Depends(get_supabase_service_client)
+    supabase_client: Any = Depends(get_supabase_service_client)
 ):
     """Handle Google OAuth callback, exchange code for token, and log in user"""
     if not settings.google_client_id or not settings.google_client_secret:
@@ -302,7 +302,7 @@ async def google_callback(
 @router.post("/request-password-reset")
 async def request_password_reset(
     request: PasswordResetRequest,
-    supabase_client: Client = Depends(get_supabase_service_client),
+    supabase_client: Any = Depends(get_supabase_service_client),
 ):
     """Request a password reset for email"""
     try:
@@ -334,7 +334,7 @@ async def request_password_reset(
 @router.post("/confirm-password-reset")
 async def confirm_password_reset(
     request: PasswordResetConfirm,
-    supabase_client: Client = Depends(get_supabase_client),
+    supabase_client: Any = Depends(get_supabase_client),
 ):
     """Confirm password reset using Supabase update_user"""
     try:

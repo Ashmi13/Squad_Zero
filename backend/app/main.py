@@ -5,7 +5,6 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from app.core.config import settings
 from app.api.v1.router import router as v1_router
 
-
 def create_app() -> FastAPI:
     """Create and configure FastAPI application"""
     
@@ -34,7 +33,7 @@ def create_app() -> FastAPI:
     )
     
     # Include routers
-    app.include_router(v1_router)
+    app.include_router(v1_router)  # ← UNCOMMENTED
     
     # Root health endpoint
     @app.get("/")

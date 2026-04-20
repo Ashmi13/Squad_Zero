@@ -45,6 +45,11 @@ dist-ssr/
 .env.development.local
 .env.test.local
 .env.production.local
+backend/.env
+frontend/.env
+node_modules/
+venv/
+__pycache__/
 
 
 # ===== LOGS =====
@@ -96,4 +101,4 @@ frontend/package-lock.json
 
 # ===== SCRIPTS & MISC (Sandavi M3) =====
 Squad_Zero_Sync/
-run_servers.bat
+run_servers.batbackend/.env

@@ -20,11 +20,11 @@ export default defineConfig({
     proxy: {
 
       '/api': {
-        target: 'http://localhost:8000',
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
     },
   },
 
-  envDir: '../', // Root .env — DO NOT REMOVE
+  // Deleted envDir: '../' to search in frontend root instead
 });

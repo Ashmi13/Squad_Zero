@@ -17,6 +17,7 @@
     "@hookform/resolvers": "^3.3.4",
     "@mui/icons-material": "^7.3.9",
     "@mui/material": "^7.3.9",
+    "@supabase/supabase-js": "^2.103.0",
     "axios": "^1.13.5",
     "lucide-react": "^0.564.0",
     "marked": "^18.0.0",

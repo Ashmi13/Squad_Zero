@@ -16,7 +16,7 @@ class Settings(BaseSettings):
 
     # Server
     api_version: str = Field(default="v1", env="API_VERSION")
-    backend_url: str = Field(default="http://localhost:8000", env="BACKEND_URL")
+    backend_url: str = Field(default="http://127.0.0.1:8000", env="BACKEND_URL")
 
     # Supabase — Optional so backend starts without keys in dev
     supabase_url: Optional[str] = Field(default=None, env="SUPABASE_URL")
@@ -38,13 +38,21 @@ class Settings(BaseSettings):
 
     # CORS
     cors_origins: str = Field(
-        default="http://localhost:3000,http://localhost:5173",
+        default="http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174,http://localhost:5175,http://127.0.0.1:5175",
         env="CORS_ORIGINS"
     )
     allow_credentials: bool = Field(default=True, env="ALLOW_CREDENTIALS")
 
     # Admin
     admin_email: str = Field(default="admin@university.com", env="ADMIN_EMAIL")
+
+    # Google OAuth
+    google_client_id: Optional[str] = Field(default=None, env="GOOGLE_CLIENT_ID")
+    google_client_secret: Optional[str] = Field(default=None, env="GOOGLE_CLIENT_SECRET")
+    google_redirect_uri: str = Field(
+        default="http://127.0.0.1:8000/api/v1/auth/google/callback", 
+        env="GOOGLE_REDIRECT_URI"
+    )
 
     # AWS S3 — Optional so backend starts without keys in dev
     aws_s3_bucket: Optional[str] = Field(default=None, env="AWS_S3_BUCKET")

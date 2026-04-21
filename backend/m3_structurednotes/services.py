@@ -145,6 +145,7 @@ class AIService:
             }
         
         # 4. Generate Embeddings and Save to Postgres (pgvector)
+        conn = None
         try:
             conn = get_db_connection()
             if conn:

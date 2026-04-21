@@ -9,12 +9,16 @@ def get_db_connection():
     """
     db_url = settings.DATABASE_URL
     
-    # Handle sslmode requirement for cloud databases
-    if "neon.tech" in db_url or "supabase" in db_url:
-        conn = psycopg2.connect(db_url, sslmode='require')
-    else:
-        conn = psycopg2.connect(db_url)
-        
-    return conn
+    try:
+        # Handle sslmode requirement for cloud databases
+        if "neon.tech" in db_url or "supabase" in db_url:
+            conn = psycopg2.connect(db_url, sslmode='require')
+        else:
+            conn = psycopg2.connect(db_url)
+            
+        return conn
+    except Exception as e:
+        print(f"Database connection blocked (likely pending correct password): {e}")
+        return None
 
 

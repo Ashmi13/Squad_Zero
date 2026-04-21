@@ -92,12 +92,6 @@ const NoteEditor = () => {
 
     useEffect(() => {
         const savedNote = localStorage.getItem('currentNote');
-        
-        // Mocking Multiple Documents Array to demonstrate M3 combinations
-        setDocuments([
-            { id: 1, name: "Neural Networks Intro.pdf", url: "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf", pdfId: "pdf-123" },
-            { id: 2, name: "Advanced ML Vectors.pdf", url: "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf", pdfId: "pdf-456" }
-        ]);
 
         if (savedNote) {
             const parsed = JSON.parse(savedNote);
@@ -107,8 +101,25 @@ const NoteEditor = () => {
             }
             setContent(loadedContent);
             if (!currentNoteId) setCurrentNoteId(parsed.noteId);
+
+            // Construct the real absolute URL to the backend's static file server
+            const absolutePdfUrl = parsed.pdfUrl?.startsWith('/')
+                ? `http://127.0.0.1:8000${parsed.pdfUrl}`
+                : parsed.pdfUrl;
+
+            // Load the actual uploaded document into the viewer instead of w3.org mock
+            setDocuments([
+                { id: 1, name: parsed.filename || "Uploaded Document.pdf", url: absolutePdfUrl, pdfId: parsed.pdfId },
+                { id: 2, name: "Neural Networks Intro (Mock).pdf", url: "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf", pdfId: "mock-123" },
+                { id: 3, name: "Advanced ML Vectors (Mock).pdf", url: "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf", pdfId: "mock-456" }
+            ]);
         } else {
             if (!ENABLE_AI) setContent('');
+            // Fallback mocks if navigating directly without a real upload
+            setDocuments([
+                { id: 1, name: "Neural Networks Intro.pdf", url: "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf", pdfId: "pdf-123" },
+                { id: 2, name: "Advanced ML Vectors.pdf", url: "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf", pdfId: "pdf-456" }
+            ]);
         }
     }, [noteId]);
 

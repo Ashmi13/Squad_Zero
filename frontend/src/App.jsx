@@ -20,8 +20,8 @@ import Rail from '@/components/filemanager/Rail';
 import Dashboard from '@/pages/Dashboard';
 
 // ===== MEMBER 3 (Sandavi) - Structured Notes =====
-// Dashboard is mem 2's part, removing M3 dashboard route
-// import M3Dashboard from './m3_structurednotes/pages/Dashboard';
+// Temporarily restoring M3 dashboard route for testing material upload
+import M3Dashboard from './m3_structurednotes/pages/Dashboard';
 import NoteEditor from './m3_structurednotes/pages/NoteEditor';
 
 // ===== MEMBER 4 - Quiz =====
@@ -88,7 +88,7 @@ const AppLayout = () => {
           <Route path="/dashboard" element={<Dashboard />} />
 
           {/* Member 3 - Structured Notes */}
-          {/* <Route path="/notes"                element={<M3Dashboard />} /> */}
+          <Route path="/notes"                element={<M3Dashboard />} />
           <Route path="/notes/editor/:noteId" element={<NoteEditor />} />
 
           {/* Member 4 - Quiz */}

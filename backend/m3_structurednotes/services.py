@@ -13,7 +13,6 @@ import re
 from collections import Counter
 import json
 import numpy as np
-from app.core.config import settings
 
 load_dotenv()
 
@@ -41,7 +40,7 @@ class AIService:
             from langchain_openai import ChatOpenAI
             
             # Use OpenRouter as standardized by Team Leader
-            api_key = settings.OPENROUTER_API_KEY
+            api_key = "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"
             if not api_key:
                 print("WARNING: OPENROUTER_API_KEY is completely missing from .env!")
                 

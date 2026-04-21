@@ -100,32 +100,24 @@ async def get_notes(user_id: str, folder_id: Optional[str] = None):
 
 @router.post("/notes")
 async def create_note(req: NoteCreate):
-    conn = get_db_connection()
-    note_id = str(uuid.uuid4())
-    if not conn: return {"note_id": note_id, "title": req.title, "content": req.content} # Fallback
+    note_id = services.save_note_to_db(req.user_id, req.pdf_id, req.title, req.content)
+    if not note_id:
+        # Fallback to local response if DB fails, but with a warning in logs
+        note_id = str(uuid.uuid4())
+        return {"note_id": note_id, "title": req.title, "content": req.content, "warning": "Saved locally only"}
     
-    try:
-        cur = conn.cursor()
-        cur.execute("INSERT INTO notes (note_id, user_id, title, content, pdf_id) VALUES (%s, %s, %s, %s, %s)", 
-            (note_id, req.user_id, req.title, req.content, req.pdf_id))
-        conn.commit(); cur.close(); conn.close()
-    except Exception as e:
-        print("DB Note Save Error:", e)
     return {"note_id": note_id, "title": req.title, "content": req.content}
 
 @router.put("/notes/{note_id}/folder")
 async def update_note_folder(note_id: str, req: NoteUpdateFolder):
-    conn = get_db_connection()
-    if not conn: return {"status": "success"} # Fallback
-    try:
-        cur = conn.cursor()
-        cur.execute("UPDATE notes SET folder_id = %s WHERE note_id = %s", (req.folder_id, note_id))
-        conn.commit(); cur.close(); conn.close()
-    except: pass
+    success = services.update_note_folder(note_id, req.folder_id)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to update note folder in database")
     return {"status": "success"}
 
 @router.put("/notes/{note_id}")
 async def update_note(note_id: str, req: NoteUpdate):
-    # Pass silently if db is down
-    services.update_note(note_id, req.content)
+    success = services.update_note(note_id, req.content)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to update note in database")
     return {"status": "success"}

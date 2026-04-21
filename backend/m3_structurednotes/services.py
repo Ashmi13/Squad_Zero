@@ -202,7 +202,7 @@ class AIService:
             
             # Use pdf_id if provided (ensure column exists or handle gracefully)
             cur.execute("""
-                INSERT INTO notes (note_id, user_id, title, content, created_date, updated_date, note_type, is_in_folder, has_embeddings)
+                INSERT INTO notes (note_id, user_id, title, content, created_at, updated_at, note_type, is_in_folder, has_embeddings)
                 VALUES (%s, %s, %s, %s, NOW(), NOW(), 'ai_generated', FALSE, TRUE)
                 RETURNING note_id
             """, (note_id, user_id, title, content))
@@ -338,7 +338,7 @@ class AIService:
         try:
             cur = conn.cursor()
             cur.execute(
-                "UPDATE notes SET content = %s, updated_date = NOW() WHERE note_id = %s",
+                "UPDATE notes SET content = %s, updated_at = NOW() WHERE note_id = %s",
                 (new_content, note_id)
             )
             rows_updated = cur.rowcount
@@ -485,7 +485,7 @@ class AIService:
         try:
             cur = conn.cursor()
             cur.execute(
-                "UPDATE notes SET folder_id = %s, updated_date = NOW() WHERE note_id = %s",
+                "UPDATE notes SET folder_id = %s, updated_at = NOW() WHERE note_id = %s",
                 (folder_id, note_id)
             )
             # Check if the note actually existed and was updated
@@ -513,7 +513,7 @@ class AIService:
             cur = conn.cursor(cursor_factory=RealDictCursor)
             
             query = """
-                SELECT note_id, title, created_date, note_type, is_in_folder, folder_id 
+                SELECT note_id, title, created_at, note_type, is_in_folder, folder_id 
                 FROM notes 
                 WHERE user_id = %s
             """
@@ -523,7 +523,7 @@ class AIService:
                 query += " AND folder_id = %s"
                 params.append(folder_id)
                 
-            query += " ORDER BY updated_date DESC"
+            query += " ORDER BY updated_at DESC"
             
             cur.execute(query, tuple(params))
             notes = cur.fetchall()

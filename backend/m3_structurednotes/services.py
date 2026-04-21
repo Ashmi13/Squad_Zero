@@ -48,7 +48,7 @@ class AIService:
             self._llm = ChatOpenAI(
                 api_key=api_key, 
                 base_url="https://openrouter.ai/api/v1",
-                model="openai/gpt-oss-20b:free",
+                model="google/gemini-3.1-flash-lite-preview",
                 temperature=0
             )
         return self._llm

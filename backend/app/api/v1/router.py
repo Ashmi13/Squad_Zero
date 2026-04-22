@@ -1,6 +1,6 @@
 """FastAPI v1 API router"""
 from fastapi import APIRouter
-from app.api.v1.endpoints import auth, user, tasks
+from app.api.v1.endpoints import auth, user, tasks, admin
 
 router = APIRouter(prefix="/api/v1")
 
@@ -14,6 +14,9 @@ router.include_router(auth.router)
 
 # User endpoints (M1)
 router.include_router(user.router)
+
+# Admin endpoints
+router.include_router(admin.router)
 
 # Tasks endpoints (M5)
 router.include_router(tasks.router)

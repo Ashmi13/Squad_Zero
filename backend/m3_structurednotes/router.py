@@ -22,17 +22,31 @@ async def upload_pdf(files: List[UploadFile] = File(...)):
     file_id = str(uuid.uuid4())
     
     try:
-        # Process only the first file for testing
-        file = files[0]
-        file_bytes = await file.read()
+        all_text = ""
+        all_images = []
+        first_pdf_url = ""
         
-        # We process manually via AIService
-        result = services.process_pdf(file_bytes, file_id, file.filename)
-        if result and result.get("status") == "success":
-            # Match the variable name the frontend expects
-            return {"pdf_id": file_id, "filename": file.filename, "pdf_url": result.get("pdf_url")}
+        for file in files:
+            file_bytes = await file.read()
+            # Process each file
+            res = services.process_pdf(file_bytes, file_id, file.filename)
+            if res and res.get("status") == "success":
+                all_text += f"\n--- Source: {file.filename} ---\n"
+                all_text += res.get("extracted_text", "")
+                all_images.extend(res.get("extracted_images", []))
+                if not first_pdf_url:
+                    first_pdf_url = res.get("pdf_url")
+            
+        if all_text:
+            return {
+                "pdf_id": file_id, 
+                "filename": files[0].filename if len(files) == 1 else "Combined Notebook", 
+                "pdf_url": first_pdf_url,
+                "extracted_images": all_images,
+                "combined_text": all_text
+            }
         else:
-            raise HTTPException(status_code=500, detail="Failed to process PDFs")
+            raise HTTPException(status_code=500, detail="Failed to process uploaded files")
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -40,7 +54,12 @@ async def upload_pdf(files: List[UploadFile] = File(...)):
 
 @router.post("/generate-note")
 async def generate_note(req: NoteRequest):
-    result = services.generate_note(req.pdf_id, req.user_id, req.instruction, language=req.language)
+    extracted_images = getattr(req, 'extracted_images', None) or []
+    result = services.generate_note(
+        req.pdf_id, req.user_id, req.instruction,
+        language=req.language,
+        extracted_images=extracted_images
+    )
     return {"content": result}
 
 @router.post("/refine-text")

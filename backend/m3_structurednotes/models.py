@@ -6,6 +6,7 @@ class NoteRequest(BaseModel):
     user_id: str
     instruction: Optional[str] = None
     language: str = "English"
+    extracted_images: Optional[List[dict]] = []
 
 class RefineRequest(BaseModel):
     pdf_id: str

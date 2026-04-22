@@ -39,15 +39,16 @@ class AIService:
         if self._llm is None:
             from langchain_openai import ChatOpenAI
             
-            # Use OpenRouter as standardized by Team Leader
-            api_key = "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"
-            if not api_key:
-                print("WARNING: OPENROUTER_API_KEY is completely missing from .env!")
-                
+            # Use OpenRouter - dynamically read from environment
+            api_key = os.getenv("OPENROUTER_API_KEY")
+            model_name = os.getenv("OPENROUTER_MODEL", "liquid/lfm-2.5-1.2b-instruct:free")
+            
+            print(f"[*] Initializing AIService with model: {model_name}")
+            
             self._llm = ChatOpenAI(
                 api_key=api_key, 
                 base_url="https://openrouter.ai/api/v1",
-                model="openai/gpt-oss-20b:free",
+                model=model_name,
                 temperature=0
             )
         return self._llm
@@ -124,12 +125,53 @@ class AIService:
                         if hasattr(shape, "text"):
                             full_text += shape.text + " "
                     full_text += "\n"
+            elif original_filename.lower().endswith(('.md', '.txt')):
+                full_text = file_bytes.decode('utf-8', errors='ignore')
             else:
                 from PyPDF2 import PdfReader
                 reader = PdfReader(BytesIO(file_bytes))
                 for page in reader.pages:
                     full_text += page.extract_text() or ""
-                
+
+            # 2b. Extract Images as Contextual Assets (PDF only)
+            extracted_images = []
+            if not is_pptx:
+                try:
+                    import fitz  # PyMuPDF
+                    images_dir = "images"
+                    os.makedirs(images_dir, exist_ok=True)
+                    doc = fitz.open(stream=file_bytes, filetype="pdf")
+                    img_count = 0
+                    for page_num, page in enumerate(doc):
+                        image_list = page.get_images(full=True)
+                        for img_index, img in enumerate(image_list):
+                            if img_count >= 10:  # max 10 images per doc
+                                break
+                            xref = img[0]
+                            base_image = doc.extract_image(xref)
+                            image_bytes = base_image["image"]
+                            image_ext = base_image["ext"]
+                            # Only save meaningful images (skip tiny icons < 5KB)
+                            if len(image_bytes) < 5000:
+                                continue
+                            img_filename = f"{pdf_id}_p{page_num}_i{img_index}.{image_ext}"
+                            img_path = os.path.join(images_dir, img_filename)
+                            with open(img_path, "wb") as img_file:
+                                img_file.write(image_bytes)
+                            extracted_images.append({
+                                "filename": img_filename,
+                                "page": page_num + 1,
+                                "url": f"/images/{img_filename}"
+                            })
+                            img_count += 1
+                    doc.close()
+                    if extracted_images:
+                        print(f"Extracted {len(extracted_images)} contextual images from {original_filename}")
+                except ImportError:
+                    print("PyMuPDF not installed - skipping image extraction. Run: pip install pymupdf")
+                except Exception as img_err:
+                    print(f"Image extraction warning: {img_err}")
+
             # 3. Chunk text for Vector Storage
             from langchain_text_splitters import RecursiveCharacterTextSplitter
             text_splitter = RecursiveCharacterTextSplitter(
@@ -159,15 +201,17 @@ class AIService:
                 
                 for i, (chunk_text, embedding) in enumerate(zip(chunks, embeddings)):
                     chunk_id = str(uuid.uuid4())
+                    # Convert to pgvector format: "[0.1, 0.2, ...]"
+                    embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
                     cur.execute("""
                         INSERT INTO document_chunks (id, pdf_id, chunk_index, content, embedding, metadata)
-                        VALUES (%s, %s, %s, %s, %s, %s)
+                        VALUES (%s, %s, %s, %s, %s::vector, %s)
                     """, (
                         chunk_id, 
                         pdf_id, 
                         i, 
                         chunk_text, 
-                        str(embedding), # pgvector expects array/list as string representation or list
+                        embedding_str,  # proper pgvector format
                         json.dumps({"source": original_filename})
                     ))
                 
@@ -187,7 +231,8 @@ class AIService:
         return {
             "status": "success",
             "pdf_url": f"/documents/{safe_filename}",
-            "extracted_text": full_text
+            "extracted_text": full_text,
+            "extracted_images": extracted_images  # Contextual Assets for AI embedding
         }
 
     def save_note_to_db(self, user_id, pdf_id, title, content):
@@ -221,7 +266,7 @@ class AIService:
             return None
 
         
-    def generate_note(self, pdf_id, user_id, instruction=None, full_text=None, language="English"):
+    def generate_note(self, pdf_id, user_id, instruction=None, full_text=None, language="English", extracted_images=None):
         # 1. Manual Algorithm: Extract Keywords from the full text
         # If full text isn't passed, we'd normally pull it from DB, but for speed we assume it's passed or extract simple context
         
@@ -256,11 +301,14 @@ class AIService:
                         module_counter += 1
                     context_text += f"{chunk}\n"
                 
-                # Limit size to prevent Groq Free Tier API 'rate_limit_exceeded (TPM Limit 6000)' errors
-                MAX_API_CHARS = 14000  # roughly 3500 tokens
+                # For presentations: keep ALL content (no truncation)
+                # Allow up to 50000 chars to include full 20+ slide presentations
+                MAX_API_CHARS = 50000
                 if len(context_text) > MAX_API_CHARS:
-                    print(f"Note: context truncated from {len(context_text)} to {MAX_API_CHARS} to avoid API limits.")
-                    context_text = context_text[:MAX_API_CHARS] + "\n...[Content truncated to fit free AI limits]"
+                    print(f"Note: Presentation is very large ({len(context_text)} chars). Processing all available content...")
+                    # Still include all content - the AI model can handle it
+                else:
+                    print(f"Context prepared: {len(context_text)} characters from full presentation")
                     
                 cur.close()
                 conn.close()
@@ -303,28 +351,70 @@ class AIService:
         keyword_str = ", ".join(top_keywords)
         print(f"Manual Algorithm Extracted Keywords: {keyword_str}")
             
-        # Create a highly structured prompt to Differentiate from normal ChatGPT
-        prompt = f"""
-        You are an expert Semantic Synthesizer and professor writing a highly structured, fully-connected study note.
-        You must write the note entirely in {language}.
-        
-        SYNTHESIS INSTRUCTIONS:
-        1. Keep the exact flow of the lecture by strictly following the [KNOWLEDGE MODULE] boundaries provided in the Context.
-        2. MANDATORY KEYWORDS: The note MUST explicitly cover and bold these mathematically extracted anchor concepts: {keyword_str}.
-        3. SYNTHESIS PROTOCOL: Do not just summarize! For every Knowledge Module, explicitly build a structural connection explaining how the facts in Module N relate logically to Module N-1.
-        4. MANDATORY VISUAL: You MUST include at least one Mermaid.js diagram (timeline, flowchart, or concept map) that physically maps how the Knowledge Modules connect to each other based on the text. Wrap it in ```mermaid ... ``` codeblocks.
-        
-        Context (Structurally Mapped Document Sequence):
-        {context_text}
-        
-        Remember: Output beautiful markdown with logical transitions between every module. Note language: {language}.
+        # Build image context for the AI
+        image_instruction = ""
+        if extracted_images:
+            backend_base = "http://127.0.0.1:8000"
+            image_lines = []
+            for img in extracted_images:
+                full_url = backend_base + img['url']
+                image_lines.append(f"- Page {img['page']}: ![Contextual Image]({full_url})")
+            image_context = "\n".join(image_lines)
+            image_instruction = f"""
+        5. CONTEXTUAL ASSETS (MANDATORY): The following images were extracted directly from the document.
+           You MUST embed each image into the most semantically relevant Knowledge Module using this exact Markdown syntax:
+           ![Descriptive Caption](image_url)
+           Each image should appear ONCE, placed naturally inside the module where it best supports the text.
+           Available images:
+{image_context}
         """
+
+        # Create a comprehensive prompt for FULL presentation notes
+        prompt = f"""
+You are a professional note-taking expert creating COMPREHENSIVE study notes from a presentation.
+
+CRITICAL RULES - MUST FOLLOW:
+1. Include ALL content from the presentation - do NOT summarize or compress
+2. Follow the presentation slide order exactly
+3. Preserve all key points from every single slide
+4. Format with clean white-background friendly Markdown
+
+FORMATTING:
+- # Title (only one H1 at the start)
+- ## Section headings (for each major topic - follow slide order)
+- ### Sub-headings (for sub-topics within sections)
+- **bold** for key terms ONLY
+- Use - for bullet points (only for lists)
+- Use paragraphs for explanations (NOT everything as bullets)
+- NO Mermaid diagrams unless there's an actual flowchart
+- NO code blocks unless showing actual code
+
+STRUCTURE:
+1. # Clear Topic Title
+2. ## First Major Topic (from initial slides)
+3. ## Second Major Topic (next group of slides)
+... continue for ALL topics ...
+4. ## Key Takeaways (main learnings from entire presentation)
+
+IMPORTANT NOTES:
+- This is from a multi-slide presentation - include ALL content
+- Organize points in the order they appear in slides
+- Use bullet points ONLY for lists
+- Use regular paragraphs for explanations and details
+- Keep text readable with proper spacing
+- Do NOT create a summary - create COMPLETE NOTES
+
+PRESENTATION CONTENT:
+{context_text}
+
+Create comprehensive study notes now. Start directly with # title. Include everything."""
         
         try:
             response = self.llm.invoke(prompt)
             return response.content
         except Exception as e:
             return f"Error generating note: {str(e)}"
+
 
 
     def update_note(self, note_id: str, new_content: str):
@@ -363,17 +453,30 @@ class AIService:
         query_text = f"{selected_text} {instruction}"
         context_text = ""
         try:
-            query_embedding = self.embeddings.embed_query(query_text)
             conn = get_db_connection()
             if conn:
                 cur = conn.cursor()
-                cur.execute("""
-                    SELECT content 
-                    FROM document_chunks 
-                    WHERE pdf_id = %s 
-                    ORDER BY embedding <=> %s 
-                    LIMIT 3
-                """, (pdf_id, str(query_embedding)))
+                try:
+                    # Try semantic vector search first
+                    query_embedding = self.embeddings.embed_query(query_text)
+                    embedding_str = "[" + ",".join(str(x) for x in query_embedding) + "]"
+                    cur.execute("""
+                        SELECT content 
+                        FROM document_chunks 
+                        WHERE pdf_id = %s 
+                        ORDER BY embedding <=> %s::vector 
+                        LIMIT 3
+                    """, (pdf_id, embedding_str))
+                except Exception as vec_err:
+                    print(f"Vector search failed, falling back to sequential chunks: {vec_err}")
+                    # Fallback: just get the first 3 chunks in order
+                    cur.execute("""
+                        SELECT content 
+                        FROM document_chunks 
+                        WHERE pdf_id = %s 
+                        ORDER BY chunk_index ASC
+                        LIMIT 3
+                    """, (pdf_id,))
                 
                 results = cur.fetchall()
                 context_chunks = [row[0] for row in results]
@@ -382,7 +485,7 @@ class AIService:
                 conn.close()
         except Exception as e:
             print(f"Error retrieving context for refinement: {e}")
-            context_text = "" # Fallback to no context
+            context_text = ""  # Fallback to no context
         
         # 2. Prompt the LLM
         prompt = f"""
@@ -411,7 +514,8 @@ class AIService:
 
     def summarize_prompts(self, prompts: list, original_text: str = None) -> str:
         """
-        Takes a chronological sequence of refinement instructions and generates a concise topic summary.
+        Takes a chronological sequence of refinement instructions and generates a topic title
+        plus a brief description of the overall idea behind the refinement journey.
         """
         if not prompts:
             return "Refined Section"
@@ -420,25 +524,40 @@ class AIService:
         
         orig_instruction = ""
         if original_text:
-            cleaned_text = original_text[:100].replace('\n', ' ')
-            orig_instruction = f"ORIGINAL TEXT SNIPPET (The Subject it was applied to): '{cleaned_text}'\nMake sure to mention the explicit subject or phrase naturally in the Topic. E.g. 'Refined Definition of X' or 'Summarized Concept of Y'."
+            cleaned_text = original_text[:120].replace('\n', ' ')
+            orig_instruction = f"ORIGINAL TEXT SNIPPET (what the user was working on): '{cleaned_text}'"
             
         system_msg = f"""
-        You are a highly concise summarizer. Read the following sequence of instructions a user gave to refine a piece of text.
-        Your job is to generate a SINGLE short topic line (MAX 5-7 words) that captures the core meaning or outcome of these refinements.
-        Do NOT wrap in quotes. Capitalize it like a Title.
-        
+        You are a study note assistant. A student refined a piece of text through multiple AI iterations.
+        Analyze the journey and produce TWO things, exactly in this format:
+
+        TITLE: <A short, clear 4-6 word title capturing the core topic (capitalize like a Title)>
+        DESCRIPTION: <ONE sentence (max 20 words) explaining the overall idea or key insight explored across all the refinement steps>
+
         {orig_instruction}
-        
-        INSTRUCTION SEQUENCE:
+
+        REFINEMENT SEQUENCE (what the student asked AI to do step by step):
         {prompt_history}
+
+        Respond ONLY with the TITLE and DESCRIPTION lines. Nothing else.
         """
         
         try:
             response = self.llm.invoke(system_msg)
-            return response.content.strip().strip('"').strip("'")
+            raw = response.content.strip()
+            # Parse the two lines
+            title = "AI Refined Section"
+            description = ""
+            for line in raw.split('\n'):
+                if line.strip().startswith('TITLE:'):
+                    title = line.replace('TITLE:', '').strip().strip('"').strip("'")
+                elif line.strip().startswith('DESCRIPTION:'):
+                    description = line.replace('DESCRIPTION:', '').strip().strip('"').strip("'")
+            # Return combined so frontend can split on '||'
+            return f"{title}||{description}"
         except Exception as e:
-            return "AI Refined Adjustment"
+            return "AI Refined Adjustment||"
+
 
     # --- Folder Management ---
     def create_folder(self, user_id, name):

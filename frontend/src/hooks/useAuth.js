@@ -1,51 +1,51 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getAccessToken, clearTokens, decodeToken } from '@/utils/tokenStorage';
 
-/**
- * Custom Authentication Hook
- * Provides authentication state and methods throughout the application
- */
+//Provide authentication state and methods
+
 export const useAuth = () => {
   const [user, setUser] = useState(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
-  /**
-   * Initialize authentication state from stored token
-   */
+  //Initialize authentication state from stored token
   useEffect(() => {
     const initAuth = () => {
-      const token = getAccessToken();
+      try {
+        const token = getAccessToken();
 
-      if (token) {
-        const decoded = decodeToken(token);
+        if (token) {
+          const decoded = decodeToken(token);
 
-        if (decoded) {
-          // Check if token is expired
-          const currentTime = Date.now() / 1000;
-          if (decoded.exp && decoded.exp > currentTime) {
-            setUser({
-              id: decoded.sub,
-              email: decoded.email,
-              fullName: decoded.full_name,
-            });
-            setIsAuthenticated(true);
-          } else {
-            // Token expired, clear storage
-            clearTokens();
+          if (decoded) {
+            const currentTime = Date.now() / 1000;
+            if (decoded.exp && decoded.exp > currentTime) {
+              setUser({
+                id: decoded.sub,
+                email: decoded.email,
+                fullName: decoded.full_name,
+              });
+              setIsAuthenticated(true);
+            } else {
+              // Token expired — clear and fall to unauthenticated state
+              clearTokens();
+            }
           }
         }
+      } catch (err) {
+        // Error reading/decoding the token — treat as logged out
+        console.warn('Auth init error (non-fatal):', err);
+        clearTokens();
+      } finally {
+        // always unblock UI
+        setIsLoading(false);
       }
-
-      setIsLoading(false);
     };
 
     initAuth();
   }, []);
 
-  /**
-   * Logout function
-   */
+  //Logout function
   const logout = useCallback(() => {
     clearTokens();
     setUser(null);
@@ -53,9 +53,7 @@ export const useAuth = () => {
     window.location.href = '/login';
   }, []);
 
-  /**
-   * Check if user is authenticated
-   */
+  //Check if user is authenticated
   const checkAuth = useCallback(() => {
     return !!getAccessToken();
   }, []);

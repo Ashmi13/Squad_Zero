@@ -7,6 +7,7 @@ from app.api.deps import (
     get_supabase_service_client,
 )
 from app.schemas.user import UserProfile
+from app.schemas.announcements import Announcement, AnnouncementCreate, AnnouncementUpdate
 from pydantic import BaseModel, EmailStr
 from app.core.config import settings
 
@@ -164,3 +165,66 @@ async def update_user_role(
         raise HTTPException(status_code=404, detail="User not found")
         
     return {"status": "success", "user": response.data[0]}
+
+
+# --- Announcement Endpoints ---
+
+@router.get("/announcements", response_model=List[Announcement])
+async def list_announcements(
+    admin_id: str = Depends(check_admin_role),
+    supabase_client: Client = Depends(get_supabase_service_client),
+):
+    """List all announcements"""
+    response = supabase_client.table("announcements").select("*").order("created_at", desc=True).execute()
+    return response.data
+
+@router.post("/announcements", response_model=Announcement)
+async def create_announcement(
+    request: AnnouncementCreate,
+    admin_id: str = Depends(check_admin_role),
+    supabase_client: Client = Depends(get_supabase_service_client),
+):
+    """Create a new announcement"""
+    announcement_data = {
+        "title": request.title,
+        "content": request.content,
+        "type": request.type or "info",
+        "created_by": admin_id
+    }
+    response = supabase_client.table("announcements").insert(announcement_data).execute()
+    if not response.data:
+        raise HTTPException(status_code=400, detail="Failed to create announcement")
+    return response.data[0]
+
+@router.patch("/announcements/{announcement_id}", response_model=Announcement)
+async def update_announcement(
+    announcement_id: int,
+    request: AnnouncementUpdate,
+    admin_id: str = Depends(check_admin_role),
+    supabase_client: Client = Depends(get_supabase_service_client),
+):
+    """Update an existing announcement"""
+    update_data = {}
+    if request.title is not None: update_data["title"] = request.title
+    if request.content is not None: update_data["content"] = request.content
+    if request.type is not None: update_data["type"] = request.type
+
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    response = supabase_client.table("announcements").update(update_data).eq("id", announcement_id).execute()
+    if not response.data:
+        raise HTTPException(status_code=404, detail="Announcement not found")
+    return response.data[0]
+
+@router.delete("/announcements/{announcement_id}")
+async def delete_announcement(
+    announcement_id: int,
+    admin_id: str = Depends(check_admin_role),
+    supabase_client: Client = Depends(get_supabase_service_client),
+):
+    """Delete an announcement"""
+    response = supabase_client.table("announcements").delete().eq("id", announcement_id).execute()
+    if not response.data:
+        raise HTTPException(status_code=404, detail="Announcement not found")
+    return {"status": "success", "message": "Announcement deleted"}

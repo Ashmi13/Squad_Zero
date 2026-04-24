@@ -1,11 +1,17 @@
 """Authentication endpoints: signup, signin, session, logout, password reset"""
+import os
+import uuid
 from fastapi import APIRouter, HTTPException, Response, Depends, Request
+from fastapi import UploadFile, File
 from fastapi.responses import RedirectResponse
 from fastapi.security import HTTPBearer
+from pydantic import BaseModel
 from typing import Any
 from datetime import timedelta
 import httpx
 import json
+import boto3
+from botocore.exceptions import ClientError
 from app.core.security import (
     create_access_token,
     create_refresh_token,
@@ -34,6 +40,40 @@ from app.api.deps import (
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
 security = HTTPBearer(auto_error=False)
+
+
+class UpdateProfileRequest(BaseModel):
+    full_name: str
+
+
+def _aws_profile_storage_configured() -> bool:
+    access_key = settings.aws_access_key_id
+    secret_key = settings.aws_secret_access_key
+    bucket = settings.aws_s3_bucket
+    if not access_key or not secret_key or not bucket:
+        return False
+
+    lowered = f"{access_key} {secret_key} {bucket}".lower()
+    placeholders = ["your-", "placeholder", "example", "changeme", "dummy", "akia1234567890abcdef"]
+    return not any(marker in lowered for marker in placeholders)
+
+
+def _profile_bucket_name() -> str:
+    return os.getenv("SUPABASE_PROFILE_BUCKET", "profile-images")
+
+
+def _create_profile_bucket_if_missing(supabase_client: Any, bucket: str) -> None:
+    """Best-effort bucket creation for service-role environments.
+
+    This keeps profile image uploads self-healing when the storage bucket
+    was not pre-provisioned.
+    """
+    try:
+        supabase_client.storage.create_bucket(bucket, options={"public": True})
+    except Exception as create_exc:
+        # Ignore already exists races and re-raise other creation failures.
+        if "already exists" not in str(create_exc).lower():
+            raise
 
 
 @router.post("/signup", response_model=SessionResponse)
@@ -155,6 +195,148 @@ async def logout(response: Response):
     """
     clear_session_cookie(response)
     return {"message": "Logged out successfully"}
+
+
+@router.get("/me", response_model=UserResponse)
+async def get_current_profile(
+    user_id: str = Depends(get_current_user_id),
+    supabase_client: Any = Depends(get_supabase_service_client),
+):
+    """Get current user profile data from users table."""
+    try:
+        user_response = (
+            supabase_client.table("users")
+            .select("id,email,full_name,avatar_url")
+            .eq("id", user_id)
+            .single()
+            .execute()
+        )
+
+        user_data = user_response.data
+        if not user_data:
+            raise HTTPException(status_code=404, detail="User profile not found")
+
+        return UserResponse(
+            id=user_data["id"],
+            email=user_data["email"],
+            full_name=user_data.get("full_name"),
+            avatar_url=user_data.get("avatar_url"),
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch profile: {str(exc)}")
+
+
+@router.patch("/profile", response_model=UserResponse)
+async def update_current_profile(
+    payload: UpdateProfileRequest,
+    user_id: str = Depends(get_current_user_id),
+    supabase_client: Any = Depends(get_supabase_service_client),
+):
+    """Update current user profile fields."""
+    try:
+        updated = (
+            supabase_client.table("users")
+            .update({"full_name": payload.full_name.strip()})
+            .eq("id", user_id)
+            .execute()
+        )
+
+        if not updated.data:
+            raise HTTPException(status_code=404, detail="User profile not found")
+
+        row = updated.data[0]
+        return UserResponse(
+            id=row["id"],
+            email=row["email"],
+            full_name=row.get("full_name"),
+            avatar_url=row.get("avatar_url"),
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to update profile: {str(exc)}")
+
+
+@router.post("/profile/image", response_model=UserResponse)
+async def upload_profile_image(
+    image: UploadFile = File(...),
+    user_id: str = Depends(get_current_user_id),
+    supabase_client: Any = Depends(get_supabase_service_client),
+):
+    """Upload profile image to AWS S3 (if configured) or Supabase Storage fallback."""
+    if not image.filename:
+        raise HTTPException(status_code=400, detail="Image filename is required")
+
+    content = await image.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Uploaded image is empty")
+
+    ext = os.path.splitext(image.filename)[1].lower() or ".jpg"
+    object_key = f"profiles/{user_id}/{uuid.uuid4().hex}{ext}"
+    avatar_url = None
+
+    try:
+        if _aws_profile_storage_configured():
+            s3 = boto3.client(
+                "s3",
+                aws_access_key_id=settings.aws_access_key_id,
+                aws_secret_access_key=settings.aws_secret_access_key,
+                region_name=settings.aws_region,
+            )
+            s3.put_object(
+                Bucket=settings.aws_s3_bucket,
+                Key=object_key,
+                Body=content,
+                ContentType=image.content_type or "image/jpeg",
+            )
+            avatar_url = f"https://{settings.aws_s3_bucket}.s3.{settings.aws_region}.amazonaws.com/{object_key}"
+        else:
+            bucket = _profile_bucket_name()
+            try:
+                supabase_client.storage.from_(bucket).upload(
+                    path=object_key,
+                    file=content,
+                    file_options={"content-type": image.content_type or "image/jpeg", "upsert": "true"},
+                )
+            except Exception as upload_exc:
+                if "bucket not found" not in str(upload_exc).lower():
+                    raise
+
+                _create_profile_bucket_if_missing(supabase_client, bucket)
+                supabase_client.storage.from_(bucket).upload(
+                    path=object_key,
+                    file=content,
+                    file_options={"content-type": image.content_type or "image/jpeg", "upsert": "true"},
+                )
+            avatar_url = supabase_client.storage.from_(bucket).get_public_url(object_key)
+    except ClientError as exc:
+        raise HTTPException(status_code=500, detail=f"Profile image upload failed: {str(exc)}")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Profile image upload failed: {str(exc)}")
+
+    try:
+        updated = (
+            supabase_client.table("users")
+            .update({"avatar_url": avatar_url})
+            .eq("id", user_id)
+            .execute()
+        )
+        if not updated.data:
+            raise HTTPException(status_code=404, detail="User profile not found")
+
+        row = updated.data[0]
+        return UserResponse(
+            id=row["id"],
+            email=row["email"],
+            full_name=row.get("full_name"),
+            avatar_url=row.get("avatar_url"),
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to save profile image URL: {str(exc)}")
 
 
 @router.post("/refresh-token", response_model=SessionResponse)

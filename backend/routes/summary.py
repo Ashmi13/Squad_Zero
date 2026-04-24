@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 from models.schemas import ResummarizeRequest, SummaryResponse
 from app.services.openai_service import generate_summary
 
-router = APIRouter(prefix="/summary", tags=["summary"])
+router = APIRouter(tags=["summary"])
 
 VALID_STYLES = ["default", "bullet", "short"]
 

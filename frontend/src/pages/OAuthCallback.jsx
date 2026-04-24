@@ -31,8 +31,8 @@ export default function OAuthCallback() {
         // 2. Store user record for Dashboard.jsx persistence
         localStorage.setItem('user', JSON.stringify(user));
         
-        console.log('OAuth Login Successful, redirecting to dashboard...');
-        navigate('/dashboard', { replace: true });
+        console.log('OAuth Login Successful, redirecting to files...');
+        navigate('/files', { replace: true });
       } catch (e) {
         console.error('Failed to parse user data from URL', e);
         navigate('/login');

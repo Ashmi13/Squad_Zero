@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import React, { useState, useEffect, useRef } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { ThemeProvider } from '@/context/ThemeContext';
 
 // ===== MEMBER 1 (Nihaaj) - Auth =====
 import LandingPage from '@/pages/LandingPage';
@@ -15,9 +16,7 @@ import OAuthCallback from '@/pages/OAuthCallback';
 // ===== MEMBER 2 (Ashmitha) - File Manager =====
 import FileManagerPage from '@/pages/FileManagerPage';
 import Rail from '@/components/filemanager/Rail';
-
-// ===== SHARED DASHBOARD =====
-import Dashboard from '@/pages/Dashboard';
+import WorkspaceFolderPanel from '@/components/workspace/WorkspaceFolderPanel';
 
 // ===== MEMBER 3 (Sandavi) - Structured Notes =====
 import M3Dashboard from './m3_structurednotes/pages/Dashboard';
@@ -29,9 +28,14 @@ import QuizHistory from '@/components/quiz/QuizHistory';
 
 // ===== MEMBER 5 - Tasks =====
 import TaskDashboard from '@/components/tasks/TaskDashboard';
+import PomodoroPage from '@/pages/PomodoroPage';
+import SecondBrainPage from '@/pages/SecondBrainPage';
+import FlashcardsPage from '@/pages/FlashcardsPage';
 
 // ===== DEV NAVIGATION (auto-hidden in production) =====
 import DevNav from '@/components/DevNav';
+import { pomodoroTimer } from '@/utils/pomodoroTimer';
+import { workspaceApi } from '@/services/workspaceApi';
 
 import './index.css';
 
@@ -40,12 +44,18 @@ const noRailPages = ['/', '/login', '/signup', '/oauth/callback'];
 
 const AppLayout = () => {
   const location = useLocation();
+  const navigate = useNavigate();
   const [activeView, setActiveView] = useState('home');
+  const [selectedWorkspaceFolder, setSelectedWorkspaceFolder] = useState(null);
+  const lastSavedCompletionVersionRef = useRef(0);
   const showRail = !noRailPages.includes(location.pathname);
+  const showWorkspacePanel = showRail && location.pathname !== '/dashboard' && location.pathname !== '/files';
 
   // Sync activeView with current URL
   useEffect(() => {
-    if (location.pathname === '/notes') {
+    if (location.pathname === '/dashboard') {
+      setActiveView('home');
+    } else if (location.pathname === '/notes') {
       setActiveView('notes');
     } else if (location.pathname.startsWith('/notes')) {
       setActiveView('notes');
@@ -53,10 +63,43 @@ const AppLayout = () => {
       setActiveView('tasks');
     } else if (location.pathname === '/quiz' || location.pathname === '/quiz/history') {
       setActiveView('quiz');
-    } else if (location.pathname === '/dashboard') {
-      setActiveView('dashboard');
+    } else if (location.pathname === '/pomodoro') {
+      setActiveView('pomodoro');
+    } else if (location.pathname === '/flashcards') {
+      setActiveView('flashcards');
+    } else if (location.pathname === '/second-brain') {
+      setActiveView('second-brain');
+    } else if (location.pathname === '/files') {
+      setActiveView('files');
     }
   }, [location.pathname]);
+
+  useEffect(() => {
+    const unsubscribe = pomodoroTimer.subscribe(async (snapshot) => {
+      if (snapshot.completionVersion <= lastSavedCompletionVersionRef.current) {
+        return;
+      }
+
+      const pending = pomodoroTimer.takeCompletedSessions();
+      if (!pending.length) {
+        lastSavedCompletionVersionRef.current = snapshot.completionVersion;
+        return;
+      }
+
+      try {
+        for (const payload of pending) {
+          await workspaceApi.recordFocusSession(payload);
+        }
+        window.dispatchEvent(new Event('neuranote:focus-updated'));
+      } catch {
+        // Timer UI must continue even if save fails; dashboard will retry on next refresh.
+      } finally {
+        lastSavedCompletionVersionRef.current = snapshot.completionVersion;
+      }
+    });
+
+    return unsubscribe;
+  }, []);
 
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
@@ -64,6 +107,19 @@ const AppLayout = () => {
       {/* Rail shown on all pages except auth */}
       {showRail && (
         <Rail activeView={activeView} setActiveView={setActiveView} />
+      )}
+
+      {showWorkspacePanel && (
+        <WorkspaceFolderPanel
+          selectedFolderId={selectedWorkspaceFolder?.id}
+          onSelectFolder={(folder) => {
+            setSelectedWorkspaceFolder(folder);
+            if (folder) {
+              setActiveView('files');
+              navigate('/files', { state: { navigatedFromRecent: true, targetFolder: folder } });
+            }
+          }}
+        />
       )}
 
       {/* Page content */}
@@ -81,10 +137,8 @@ const AppLayout = () => {
           <Route path="/oauth/callback" element={<OAuthCallback />} />
 
           {/* Member 2 - File Manager */}
-          <Route path="/files" element={<FileManagerPage activeView={activeView} setActiveView={setActiveView} />} />
-
-          {/* Shared Dashboard */}
-          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/dashboard" element={<FileManagerPage activeView='home' setActiveView={setActiveView} />} />
+          <Route path="/files" element={<FileManagerPage activeView='files' setActiveView={setActiveView} />} />
 
           {/* Member 3 - Structured Notes */}
           <Route path="/notes"                element={<M3Dashboard />} />
@@ -96,6 +150,11 @@ const AppLayout = () => {
 
           {/* Member 5 - Tasks */}
           <Route path="/tasks" element={<TaskDashboard />} />
+
+          {/* Shared modules (isolated scaffolds) */}
+          <Route path="/pomodoro" element={<PomodoroPage />} />
+          <Route path="/flashcards" element={<FlashcardsPage />} />
+          <Route path="/second-brain" element={<SecondBrainPage />} />
 
           {/* Fallback */}
           <Route path="*" element={<Navigate to="/" replace />} />
@@ -110,9 +169,11 @@ const AppLayout = () => {
 
 function App() {
   return (
-    <Router>
-      <AppLayout />
-    </Router>
+    <ThemeProvider>
+      <Router>
+        <AppLayout />
+      </Router>
+    </ThemeProvider>
   );
 }
 

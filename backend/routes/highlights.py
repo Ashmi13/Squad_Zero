@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 from datetime import datetime
 from models.schemas import HighlightCreate, HighlightResponse, HighlightsList
 
-router = APIRouter(prefix="/highlights", tags=["highlights"])
+router = APIRouter(tags=["highlights"])
 
 @router.post("/create")
 async def create_highlight(highlight: HighlightCreate):

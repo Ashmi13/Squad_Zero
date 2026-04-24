@@ -6,7 +6,7 @@ from datetime import datetime
 from app.services.openai_service import answer_question
 from models.schemas import ChatCreate  # adjust if needed
 
-router = APIRouter(prefix="/chat", tags=["chat"])
+router = APIRouter(tags=["chat"])
 
 # Create Supabase client (commented out for now)
 # supabase = create_client(

@@ -5,20 +5,13 @@ import SchoolOutlinedIcon from '@mui/icons-material/SchoolOutlined';
 import HomeOutlinedIcon from '@mui/icons-material/HomeOutlined';
 import './styles.css';
 import TaskList from './TaskList';
-import axios from 'axios';
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
+import axiosInstance from '@/lib/axios';   // ← uses the configured instance with auth interceptor
 
 const CATEGORIES = [
   { id: 'work',     name: 'Work',     icon: 'work' },
   { id: 'study',    name: 'Study',    icon: 'study' },
   { id: 'personal', name: 'Personal', icon: 'personal' },
 ];
-
-function getAuthHeader() {
-  const token = localStorage.getItem('access_token');
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
 
 function TaskDashboard() {
   const [tasksByCategory, setTasksByCategory] = useState({
@@ -28,7 +21,6 @@ function TaskDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Fetch all tasks on mount
   useEffect(() => {
     fetchTasks();
   }, []);
@@ -36,11 +28,8 @@ function TaskDashboard() {
   const fetchTasks = async () => {
     try {
       setLoading(true);
-      const response = await axios.get(`${API_BASE}/api/v1/tasks/`, {
-        headers: getAuthHeader()
-      });
+      const response = await axiosInstance.get('/api/v1/tasks/');
 
-      // Group tasks by category
       const grouped = { work: [], study: [], personal: [] };
       response.data.forEach(task => {
         const cat = task.category || 'personal';
@@ -52,7 +41,12 @@ function TaskDashboard() {
       setError(null);
     } catch (err) {
       console.error('Failed to fetch tasks:', err);
-      setError('Failed to load tasks');
+      if (err.response?.status === 401) {
+        setError('Not logged in. Redirecting to login...');
+        setTimeout(() => { window.location.href = '/login'; }, 1500);
+      } else {
+        setError('Failed to load tasks. Is the backend running?');
+      }
     } finally {
       setLoading(false);
     }
@@ -60,11 +54,7 @@ function TaskDashboard() {
 
   const handleToggle = async (taskId) => {
     try {
-      const response = await axios.patch(
-        `${API_BASE}/api/v1/tasks/${taskId}/toggle`,
-        {},
-        { headers: getAuthHeader() }
-      );
+      const response = await axiosInstance.patch(`/api/v1/tasks/${taskId}/toggle`, {});
       const updated = response.data;
       setTasksByCategory(prev => ({
         ...prev,
@@ -79,11 +69,12 @@ function TaskDashboard() {
 
   const handleAdd = async (title) => {
     try {
-      const response = await axios.post(
-        `${API_BASE}/api/v1/tasks/`,
-        { title, category: activeList, status: 'todo', priority: 'medium' },
-        { headers: getAuthHeader() }
-      );
+      const response = await axiosInstance.post('/api/v1/tasks/', {
+        title,
+        category: activeList,
+        status: 'todo',
+        priority: 'medium',
+      });
       setTasksByCategory(prev => ({
         ...prev,
         [activeList]: [...prev[activeList], response.data]
@@ -95,10 +86,7 @@ function TaskDashboard() {
 
   const handleDelete = async (taskId) => {
     try {
-      await axios.delete(
-        `${API_BASE}/api/v1/tasks/${taskId}`,
-        { headers: getAuthHeader() }
-      );
+      await axiosInstance.delete(`/api/v1/tasks/${taskId}`);
       setTasksByCategory(prev => ({
         ...prev,
         [activeList]: prev[activeList].filter(t => t.id !== taskId)

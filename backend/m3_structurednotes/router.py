@@ -10,8 +10,9 @@ router = APIRouter()
 services = AIService()
 
 from m3_structurednotes.models import (
-    NoteRequest, RefineRequest, PromptsRequest, 
-    FolderRequest, NoteUpdateFolder, NoteUpdate, NoteCreate
+    NoteRequest, RefineRequest, PromptsRequest,
+    FolderRequest, NoteUpdateFolder, NoteUpdate,
+    NoteCreate, DiscussRequest
 )
 
 @router.post("/upload")
@@ -19,34 +20,30 @@ async def upload_pdf(files: List[UploadFile] = File(...)):
     if not files:
         raise HTTPException(status_code=400, detail="No files uploaded")
     
-    file_id = str(uuid.uuid4())
-    
     try:
-        all_text = ""
-        all_images = []
-        first_pdf_url = ""
-        
+        results = []
         for file in files:
+            file_id = str(uuid.uuid4())
             file_bytes = await file.read()
-            # Process each file
             res = services.process_pdf(file_bytes, file_id, file.filename)
             if res and res.get("status") == "success":
-                all_text += f"\n--- Source: {file.filename} ---\n"
-                all_text += res.get("extracted_text", "")
-                all_images.extend(res.get("extracted_images", []))
-                if not first_pdf_url:
-                    first_pdf_url = res.get("pdf_url")
-            
-        if all_text:
-            return {
-                "pdf_id": file_id, 
-                "filename": files[0].filename if len(files) == 1 else "Combined Notebook", 
-                "pdf_url": first_pdf_url,
-                "extracted_images": all_images,
-                "combined_text": all_text
-            }
-        else:
-            raise HTTPException(status_code=500, detail="Failed to process uploaded files")
+                results.append({
+                    "pdf_id": file_id,
+                    "filename": file.filename,
+                    "pdf_url": res.get("pdf_url")
+                })
+            else:
+                results.append({
+                    "pdf_id": file_id,
+                    "filename": file.filename,
+                    "error": res.get("message", "Processing failed") if res else "Unknown error"
+                })
+        
+        return {
+            "uploaded_files": results,
+            "total": len(results),
+            "successful": len([r for r in results if "error" not in r])
+        }
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -54,11 +51,12 @@ async def upload_pdf(files: List[UploadFile] = File(...)):
 
 @router.post("/generate-note")
 async def generate_note(req: NoteRequest):
-    extracted_images = getattr(req, 'extracted_images', None) or []
     result = services.generate_note(
-        req.pdf_id, req.user_id, req.instruction,
+        pdf_ids=req.pdf_ids,
+        user_id=req.user_id,
+        instruction=req.instruction,
         language=req.language,
-        extracted_images=extracted_images
+        ordering=req.ordering
     )
     return {"content": result}
 
@@ -66,6 +64,15 @@ async def generate_note(req: NoteRequest):
 async def refine_text(req: RefineRequest):
     result = services.refine_text(req.pdf_id, req.selected_text, req.instruction)
     return {"refined_text": result}
+
+@router.post("/discuss-note")
+async def discuss_note(req: DiscussRequest):
+    result = services.discuss_note(
+        note_content=req.note_content,
+        user_question=req.user_question,
+        pdf_id=req.pdf_id
+    )
+    return {"refined_content": result["refined_content"]}
 
 @router.post("/summarize-prompts")
 async def summarize_prompts(req: PromptsRequest):

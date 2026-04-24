@@ -16,13 +16,13 @@ import {
 import styles from './NoteEditor.module.css';
 import SaveModal from '../components/SaveModal';
 import RefineModal from '../components/RefineModal';
-import { generateNote, refineText, updateNote, createNote, summarizePrompts } from '../api';
+import { generateNote, refineText, updateNote, createNote, summarizePrompts, discussNote } from '../api';
 
 
 // --- CONFIGURATION ---
 // Set to TRUE for full AI features (Final)
 // Set to FALSE for manual-only mode (Interim Demo)
-const ENABLE_AI = false;
+const ENABLE_AI = true;
 
 // --- MERMAID RENDERER ---
 const Mermaid = ({ chart }) => {
@@ -93,13 +93,27 @@ const NoteEditor = () => {
 
     useEffect(() => {
         const savedNote = localStorage.getItem('currentNote');
-
         if (savedNote) {
             const parsed = JSON.parse(savedNote);
-            let loadedContent = parsed.content;
-            if (loadedContent && !loadedContent.includes('<p>') && !loadedContent.includes('<h1>')) {
+            let loadedContent = parsed.content || '';
+
+            // Check if content is already HTML (ignore image/div wrappers from synthesis)
+            const isHTML = loadedContent.includes('<p>') || 
+                           loadedContent.includes('<h1') || 
+                           loadedContent.includes('<h2') ||
+                           loadedContent.includes('<li') ||
+                           loadedContent.includes('<table');
+            
+            if (!isHTML || (loadedContent.includes('##') && !loadedContent.includes('<p>'))) {
+                // Content is markdown (or mixed) — configure marked properly
+                marked.setOptions({
+                    breaks: true,    // ← THIS IS THE KEY FIX
+                    gfm: true,
+                    headerIds: false,
+                });
                 loadedContent = marked.parse(loadedContent);
             }
+            
             setContent(loadedContent);
             if (!currentNoteId) setCurrentNoteId(parsed.noteId);
 
@@ -107,11 +121,33 @@ const NoteEditor = () => {
                 ? `http://127.0.0.1:8000${parsed.pdfUrl}`
                 : parsed.pdfUrl;
 
-            // Load the actual uploaded document into the viewer
-            setDocuments([
-                { id: 1, name: parsed.filename || "Uploaded Document.pdf", url: absolutePdfUrl, pdfId: parsed.pdfId },
-                { id: 2, name: "Neural Networks Intro (Mock).pdf", url: "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf", pdfId: "mock-123" },
-            ]);
+            // CHANGE 1: Load all real uploaded files from localStorage
+            let docs = [];
+            if (parsed.filename && absolutePdfUrl) {
+                docs.push({ id: 'primary', name: parsed.filename, url: absolutePdfUrl, pdfId: parsed.pdfId });
+            }
+
+            if (parsed.allFiles && Array.isArray(parsed.allFiles)) {
+                // If there are multiple files, allFiles will contain them
+                // We map them to the documents state
+                parsed.allFiles.forEach((file, idx) => {
+                    const fileUrl = file.pdf_url?.startsWith('/')
+                        ? `http://127.0.0.1:8000${file.pdf_url}`
+                        : file.pdf_url;
+                    
+                    // Avoid duplicating the primary file if it's already there
+                    if (file.pdf_id !== parsed.pdfId) {
+                        docs.push({
+                            id: file.pdf_id,
+                            name: file.filename || `Document ${idx + 1}`,
+                            url: fileUrl,
+                            pdfId: file.pdf_id
+                        });
+                    }
+                });
+            }
+
+            setDocuments(docs);
 
             // If it's a markdown source, fetch the content to display
             if (absolutePdfUrl && absolutePdfUrl.toLowerCase().endsWith('.md')) {
@@ -308,8 +344,8 @@ const NoteEditor = () => {
 
         try {
             if (selection) {
+                // CASE 1 — When selection exists (tag and refine)
                 const result = await refineText(pdfId, selection.text, chatInput);
-                // Handle all possible backend response shapes
                 const rawResult = result.refined_text || result;
                 const refinedStr = rawResult?.refined_content
                     || rawResult?.refined_text
@@ -320,6 +356,15 @@ const NoteEditor = () => {
                     refined: refinedStr,
                     instruction: chatInput,
                     isFullNote: false
+                });
+            } else {
+                // CASE 2 — When NO selection (whole note discussion)
+                const result = await discussNote(content, chatInput, pdfId);
+                setRefinementResult({
+                    original: "Full Note Discussion",
+                    refined: result.refined_content,
+                    instruction: chatInput,
+                    isFullNote: true
                 });
             }
         } catch (error) {
@@ -334,19 +379,21 @@ const NoteEditor = () => {
     /* handleScroll removed as we're switching to a unified page wrapper structure */
 
     const applyRefinement = async (finalRefinedText, history = [], insertionType = 'replace') => {
-        if (!selection || !quillRef.current) return;
+        const editor = quillRef.current?.getEditor();
+        if (!editor) return;
 
-        // Snap current selection before clearing so the modal forces shut instantly!
-        const currentSelection = { ...selection };
+        const isFullNote = refinementResult?.isFullNote;
+        const currentSelection = selection ? { ...selection } : null;
+
         setRefinementResult(null); // Closes Modal!
-        clearSelection();
+        if (currentSelection) clearSelection();
 
         let metaTopic = refinementResult?.instruction || 'Refined Update';
         let metaDescription = '';
         if (history && history.length > 0) {
             const prompts = history.map(h => h.prompt);
             try {
-                const summaryResponse = await summarizePrompts(prompts, currentSelection.text);
+                const summaryResponse = await summarizePrompts(prompts, currentSelection?.text || 'Full Note');
                 const combined = summaryResponse.topic || '';
                 const parts = combined.split('||');
                 metaTopic = parts[0]?.trim() || prompts.join(' → ');
@@ -357,40 +404,45 @@ const NoteEditor = () => {
             }
         }
 
-        const editor = quillRef.current.getEditor();
         let combinedHtml = "";
+        const parsedMarkdown = marked.parse(finalRefinedText);
 
         if (insertionType === 'insert') {
-            // Keep original text, append elegantly framed box right below
-            // We use blockquote so Quill doesn't strip the container layout!
             combinedHtml = `
-                <blockquote>
-                    <strong style="color: #6C5DD3; font-size: 13px;">✨ AI Refined: ${metaTopic}</strong>
-                    ${metaDescription ? `<br/><em style="color: #888; font-size: 12px;">${metaDescription}</em>` : ''}
-                </blockquote>
-                ${marked.parse(finalRefinedText).split('</p>').map(p => p.trim() ? `<blockquote>${p}</p></blockquote>` : '').join('')}
+                <p><br></p>
+                <div style="border-left: 4px solid #2F6CF6; background: #f8faff; padding: 16px; margin: 12px 0; border-radius: 4px;">
+                    <strong style="color: #2F6CF6; font-size: 14px; display: block; margin-bottom: 4px;">✨ ${metaTopic}</strong>
+                    ${metaDescription ? `<em style="color: #666; font-size: 12px; display: block; margin-bottom: 8px;">${metaDescription}</em>` : ''}
+                    <div style="font-size: 15px; line-height: 1.6;">${parsedMarkdown}</div>
+                </div>
                 <p><br></p>
             `;
-            // Insert a newline after selection and paste the box
-            editor.insertText(currentSelection.start + currentSelection.length, '\n');
-            editor.clipboard.dangerouslyPasteHTML(currentSelection.start + currentSelection.length + 1, combinedHtml);
+
+            if (currentSelection) {
+                // Insert right below selection
+                editor.insertText(currentSelection.start + currentSelection.length, '\n');
+                editor.clipboard.dangerouslyPasteHTML(currentSelection.start + currentSelection.length + 1, combinedHtml);
+            } else {
+                // Append to end of document (for full note discussion)
+                const length = editor.getLength();
+                editor.clipboard.dangerouslyPasteHTML(length, combinedHtml);
+            }
         } else {
-            // Seamlessly replace the original text inline
-            combinedHtml = marked.parse(finalRefinedText);
-            editor.deleteText(currentSelection.start, currentSelection.length);
-            editor.clipboard.dangerouslyPasteHTML(currentSelection.start, combinedHtml);
+            // Replace logic
+            combinedHtml = parsedMarkdown;
+            if (currentSelection) {
+                editor.deleteText(currentSelection.start, currentSelection.length);
+                editor.clipboard.dangerouslyPasteHTML(currentSelection.start, combinedHtml);
+            } else {
+                // For full note, maybe replace everything? 
+                // Usually for full note discussion, 'insert' is safer, 
+                // but if user clicks replace, we replace the whole content.
+                editor.root.innerHTML = combinedHtml;
+            }
         }
 
         const newContent = editor.root.innerHTML;
         setContent(newContent);
-        setRefinementResult(null);
-        clearSelection();
-
-        localStorage.setItem('currentNote', JSON.stringify({
-            content: newContent,
-            pdfId,
-            noteId: currentNoteId
-        }));
     };
 
     return (
@@ -542,7 +594,9 @@ const NoteEditor = () => {
                                     <input
                                         ref={chatInputRef}
                                         type="text"
-                                        placeholder={selection ? "Refine tagged text..." : "Instructions to AI (Summarize, expand, format)..."}
+                                        placeholder={selection 
+                                            ? "Ask about tagged text: explain more, give example..." 
+                                            : "Ask anything about your note content..."}
                                         value={chatInput}
                                         onChange={(e) => setChatInput(e.target.value)}
                                         onKeyDown={(e) => e.key === 'Enter' && handleChatSubmit()}
@@ -692,7 +746,9 @@ const NoteEditor = () => {
 
             {refinementResult && (
                 <RefineModal
-                    originalText={refinementResult.isFullNote ? "Full Note" : refinementResult.original}
+                    originalText={refinementResult.isFullNote 
+                        ? refinementResult.instruction 
+                        : refinementResult.original}
                     initialRefinedText={refinementResult.refined}
                     currentInstruction={refinementResult.instruction}
                     pdfId={pdfId}

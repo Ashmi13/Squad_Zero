@@ -2,11 +2,11 @@ from pydantic import BaseModel
 from typing import List, Optional
 
 class NoteRequest(BaseModel):
-    pdf_id: str
+    pdf_ids: List[str]
     user_id: str
     instruction: Optional[str] = None
     language: str = "English"
-    extracted_images: Optional[List[dict]] = []
+    ordering: str = "ai"
 
 class RefineRequest(BaseModel):
     pdf_id: str
@@ -32,3 +32,8 @@ class NoteCreate(BaseModel):
     title: str
     content: str
     pdf_id: str
+
+class DiscussRequest(BaseModel):
+    note_content: str
+    user_question: str
+    pdf_id: Optional[str] = None

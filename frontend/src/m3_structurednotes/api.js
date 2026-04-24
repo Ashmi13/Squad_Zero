@@ -35,13 +35,19 @@ export const uploadPDF = async (files) => {
     }
 };
 
-export const generateNote = async (pdfId, userId, instruction, language = "English", extractedImages = []) => {
+export const generateNote = async (
+    pdfIds,
+    userId,
+    instruction,
+    language = "English",
+    ordering = "ai"
+) => {
     const response = await api.post('/generate-note', {
-        pdf_id: pdfId,
+        pdf_ids: pdfIds,
         user_id: userId,
         instruction: instruction,
         language: language,
-        extracted_images: extractedImages
+        ordering: ordering
     });
     return response.data.content;
 };
@@ -51,6 +57,19 @@ export const refineText = async (pdfId, selectedText, instruction) => {
         pdf_id: pdfId,
         selected_text: selectedText,
         instruction,
+    });
+    return response.data;
+};
+
+export const discussNote = async (
+    noteContent,
+    userQuestion,
+    pdfId = null
+) => {
+    const response = await api.post('/discuss-note', {
+        note_content: noteContent,
+        user_question: userQuestion,
+        pdf_id: pdfId
     });
     return response.data;
 };

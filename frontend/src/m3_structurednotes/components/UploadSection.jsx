@@ -11,6 +11,7 @@ const UploadSection = () => {
     const [isUploading, setIsUploading] = useState(false);
     const [uploadStatus, setUploadStatus] = useState('');
     const [selectedLanguage, setSelectedLanguage] = useState("English");
+    const [ordering, setOrdering] = useState("ai");
     const [folders, setFolders] = useState([]);
     const [filesByFolder, setFilesByFolder] = useState({});
     const [expandedFolders, setExpandedFolders] = useState({});
@@ -141,68 +142,45 @@ const UploadSection = () => {
 
         try {
             setIsUploading(true);
-            setUploadStatus(`Preparing materials...`);
+            setUploadStatus(`Uploading ${selectedFiles.length + notebookNotes.length} file(s)...`);
 
             let combinedFiles = [...selectedFiles];
-            
-            // ----------------------------------------------------
-            // CONVERT NOTEBOOK NOTES TO VIRTUAL FILES FOR UPLOAD
-            // ----------------------------------------------------
             for (const note of notebookNotes) {
-                // In a real app, we'd fetch actual content from localStorage: 
-                // const content = localStorage.getItem(`neuranote_note_${note.id}`) || "";
-                
-                // For this mock test, we generate some relevant fake content:
-                const mockContent = `Content for ${note.name}:\nThis is a detailed analysis of ${note.name.toLowerCase()} retrieved from your internal notebooks. It covers the core principles, history, and implementation details relevant to the topic.`;
-                
+                const mockContent = `Content for ${note.name}:\nThis is a detailed analysis of ${note.name.toLowerCase()} retrieved from your internal notebooks.`;
                 const blob = new Blob([mockContent], { type: 'text/markdown' });
                 const virtualFile = new File([blob], `${note.name}.md`, { type: 'text/markdown' });
                 combinedFiles.push(virtualFile);
             }
-            // ----------------------------------------------------
-
-            if (combinedFiles.length === 0) {
-                setIsUploading(false);
-                return;
-            }
 
             const uploadResult = await uploadPDF(combinedFiles);
-            console.log("Upload result:", uploadResult);
+            const successfulFiles = uploadResult.uploaded_files.filter(f => !f.error);
+            if (successfulFiles.length === 0) throw new Error("All files failed");
+            
+            const allPdfIds = successfulFiles.map(f => f.pdf_id);
+            const primaryFile = successfulFiles[0];
 
-            if (uploadResult.pdf_id) {
-                const images = uploadResult.extracted_images || [];
-                setUploadStatus(`Synthesizing Note with AI (+ ${images.length} Contextual Assets)...`);
-                
-                const userId = "test_user";
+            setUploadStatus("Generating structured note...");
+            const generatedContent = await generateNote(
+                allPdfIds, "test_user", "", selectedLanguage, ordering);
 
-                // 2. GENERATE NOTE WITH AI (Passing images for embedding!)
-                const generatedNoteContent = await generateNote(
-                    uploadResult.pdf_id, 
-                    userId, 
-                    "", 
-                    selectedLanguage,
-                    images
-                );
+            const title = selectedFiles.length + notebookNotes.length > 1
+                ? "Combined Note — " + (selectedFiles.length + notebookNotes.length) + " Documents"
+                : (selectedFiles[0]?.name || notebookNotes[0]?.name);
 
-                const title = uploadResult.filename || (selectedFiles.length > 1 ? `Combined Note (${selectedFiles.length} files)` : selectedFiles[0].name);
+            setUploadStatus("Saving to database...");
+            const createResult = await createNote(
+                "test_user", title, generatedContent, primaryFile.pdf_id);
 
-                setUploadStatus("Finalizing Structure...");
-                // 3. CREATE NOTE IN DB
-                const createResult = await createNote(userId, title, generatedNoteContent, uploadResult.pdf_id);
-                const noteId = createResult.note_id;
+            localStorage.setItem('currentNote', JSON.stringify({
+                content: generatedContent,
+                pdfId: primaryFile.pdf_id,
+                pdfUrl: "http://127.0.0.1:8000" + primaryFile.pdf_url,
+                noteId: createResult.note_id,
+                filename: title,
+                allFiles: successfulFiles
+            }));
 
-                localStorage.setItem('currentNote', JSON.stringify({
-                    content: generatedNoteContent,
-                    pdfId: uploadResult.pdf_id,
-                    pdfUrl: uploadResult.pdf_url,
-                    noteId: noteId,
-                    filename: title,
-                    isPptx: uploadResult.pdf_url.toLowerCase().endsWith('.pptx') || selectedFiles.some(f => f.name.toLowerCase().endsWith('.pptx'))
-                }));
-
-                navigate(`/notes/editor/${noteId}`);
-            }
-
+            navigate("/notes/editor/" + createResult.note_id);
         } catch (error) {
             console.error("Error flow:", error);
             alert("Failed to process files. Please try again.");
@@ -347,6 +325,35 @@ const UploadSection = () => {
                         <option value="Sinhala">Sinhala</option>
                         <option value="Tamil">Tamil</option>
                     </select>
+                </div>
+
+                <div style={{ marginTop: '25px', width: '100%' }}>
+                    <p style={{ fontSize: '14px', fontWeight: '600', color: '#4a4a4a', marginBottom: '12px', textAlign: 'center' }}>Note Structure:</p>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '10px' }}>
+                        {[
+                            { value: 'topic', label: '🗂️ By Topic', desc: 'Group similar ideas' },
+                            { value: 'importance', label: '⚡ By Importance', desc: 'Critical points first' },
+                            { value: 'chronological', label: '📖 Step by Step', desc: 'Logical flow' },
+                            { value: 'ai', label: '🤖 Let AI Decide', desc: 'Best structure' }
+                        ].map((opt) => (
+                            <div 
+                                key={opt.value}
+                                onClick={() => !isUploading && setOrdering(opt.value)}
+                                style={{
+                                    padding: '12px',
+                                    borderRadius: '10px',
+                                    border: `2px solid ${ordering === opt.value ? '#9B51E0' : '#e0d7f7'}`,
+                                    backgroundColor: ordering === opt.value ? '#f9f5ff' : 'white',
+                                    cursor: isUploading ? 'not-allowed' : 'pointer',
+                                    transition: 'all 0.2s ease',
+                                    textAlign: 'center'
+                                }}
+                            >
+                                <div style={{ fontWeight: '700', fontSize: '13px', marginBottom: '4px' }}>{opt.label}</div>
+                                <div style={{ fontSize: '10px', color: '#888' }}>{opt.desc}</div>
+                            </div>
+                        ))}
+                    </div>
                 </div>
 
                 <div className={styles.buttonRow} style={{ marginTop: '25px', width: '100%', maxWidth: '400px' }}>

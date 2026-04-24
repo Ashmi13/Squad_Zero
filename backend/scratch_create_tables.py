@@ -48,13 +48,15 @@ def create_tables():
             );
         """)
         
-        print("Creating folders table...")
+        print("Creating document_images table...")
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS folders (
-                folder_id TEXT PRIMARY KEY,
-                user_id TEXT,
-                name TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            CREATE TABLE IF NOT EXISTS document_images (
+                id TEXT PRIMARY KEY,
+                pdf_id TEXT,
+                image_data TEXT,
+                media_type TEXT,
+                page_number INTEGER,
+                caption TEXT
             );
         """)
         

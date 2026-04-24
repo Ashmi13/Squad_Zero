@@ -1,4 +1,5 @@
 const DEFAULT_MINUTES = 25;
+const STORAGE_KEY = 'neuranote_pomodoro_state_v1';
 
 let timerId = null;
 let completionVersion = 0;
@@ -12,6 +13,7 @@ const state = {
   isRunning: false,
   isPaused: false,
   sessionDurationMinutes: DEFAULT_MINUTES,
+  endAtMs: null,
   completionVersion,
 };
 
@@ -28,6 +30,65 @@ const notify = () => {
   });
 };
 
+const persist = () => {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      focusMinutes: state.focusMinutes,
+      remainingSeconds: state.remainingSeconds,
+      isRunning: state.isRunning,
+      isPaused: state.isPaused,
+      sessionDurationMinutes: state.sessionDurationMinutes,
+      endAtMs: state.endAtMs,
+      completionVersion: state.completionVersion,
+    }));
+  } catch {
+    // Ignore persistence errors.
+  }
+};
+
+const restore = () => {
+  if (typeof window === 'undefined') return;
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+
+    const focusMinutes = Math.max(1, Number(parsed?.focusMinutes) || DEFAULT_MINUTES);
+    const sessionDurationMinutes = Math.max(1, Number(parsed?.sessionDurationMinutes) || focusMinutes);
+    const endAtMs = Number(parsed?.endAtMs) || null;
+    const wasRunning = Boolean(parsed?.isRunning) && !!endAtMs;
+    const now = Date.now();
+
+    state.focusMinutes = focusMinutes;
+    state.sessionDurationMinutes = sessionDurationMinutes;
+    state.completionVersion = Number(parsed?.completionVersion) || completionVersion;
+    completionVersion = state.completionVersion;
+
+    if (wasRunning) {
+      const remaining = Math.max(0, Math.ceil((endAtMs - now) / 1000));
+      if (remaining > 0) {
+        state.isRunning = true;
+        state.isPaused = false;
+        state.endAtMs = endAtMs;
+        state.remainingSeconds = remaining;
+      } else {
+        state.isRunning = false;
+        state.isPaused = false;
+        state.endAtMs = null;
+        state.remainingSeconds = focusMinutes * 60;
+      }
+    } else {
+      state.isRunning = false;
+      state.isPaused = Boolean(parsed?.isPaused);
+      state.endAtMs = null;
+      state.remainingSeconds = Math.max(0, Number(parsed?.remainingSeconds) || focusMinutes * 60);
+    }
+  } catch {
+    // Ignore restore errors and keep defaults.
+  }
+};
+
 const stopInterval = () => {
   if (timerId) {
     clearInterval(timerId);
@@ -39,6 +100,7 @@ const completeSession = () => {
   stopInterval();
   state.isRunning = false;
   state.isPaused = false;
+  state.endAtMs = null;
   state.remainingSeconds = 0;
   completionVersion += 1;
   state.completionVersion = completionVersion;
@@ -51,13 +113,17 @@ const completeSession = () => {
     date: now.toISOString().slice(0, 10),
   });
 
+  persist();
   notify();
 };
 
 const tick = () => {
   if (!state.isRunning) return;
 
-  const next = Math.max(0, Number(state.remainingSeconds) - 1);
+  const now = Date.now();
+  const next = state.endAtMs
+    ? Math.max(0, Math.ceil((state.endAtMs - now) / 1000))
+    : Math.max(0, Number(state.remainingSeconds) - 1);
   state.remainingSeconds = next;
 
   if (next === 0) {
@@ -65,13 +131,19 @@ const tick = () => {
     return;
   }
 
+  persist();
   notify();
 };
 
 const ensureInterval = () => {
   if (timerId || !state.isRunning) return;
-  timerId = setInterval(tick, 1000);
+  timerId = setInterval(tick, 250);
 };
+
+restore();
+if (state.isRunning) {
+  ensureInterval();
+}
 
 export const pomodoroTimer = {
   getSnapshot() {
@@ -93,6 +165,7 @@ export const pomodoroTimer = {
       state.sessionDurationMinutes = value;
       state.remainingSeconds = value * 60;
     }
+    persist();
     notify();
   },
 
@@ -106,15 +179,22 @@ export const pomodoroTimer = {
     state.sessionDurationMinutes = minutes;
     state.isRunning = true;
     state.isPaused = false;
+    state.endAtMs = Date.now() + (state.remainingSeconds * 1000);
     ensureInterval();
+    persist();
     notify();
   },
 
   pause() {
     if (!state.isRunning) return;
+    if (state.endAtMs) {
+      state.remainingSeconds = Math.max(0, Math.ceil((state.endAtMs - Date.now()) / 1000));
+    }
     stopInterval();
     state.isRunning = false;
     state.isPaused = true;
+    state.endAtMs = null;
+    persist();
     notify();
   },
 
@@ -122,7 +202,9 @@ export const pomodoroTimer = {
     if (!state.isPaused) return;
     state.isRunning = true;
     state.isPaused = false;
+    state.endAtMs = Date.now() + (Math.max(0, Number(state.remainingSeconds) || 0) * 1000);
     ensureInterval();
+    persist();
     notify();
   },
 
@@ -133,6 +215,8 @@ export const pomodoroTimer = {
     state.remainingSeconds = minutes * 60;
     state.isRunning = false;
     state.isPaused = false;
+    state.endAtMs = null;
+    persist();
     notify();
   },
 
@@ -146,6 +230,8 @@ export const pomodoroTimer = {
     stopInterval();
     state.isRunning = false;
     state.isPaused = false;
+    state.endAtMs = null;
+    persist();
   },
 };
 

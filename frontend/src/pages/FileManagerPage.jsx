@@ -23,7 +23,8 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { FilePlus } from 'lucide-react';
 import FolderPanel from '../components/filemanager/FolderPanel';
 import FileList from '../components/filemanager/FileList';
 import FileViewer from '../components/filemanager/FileViewer';
@@ -70,6 +71,7 @@ const sanitizeFilesForStorage = (items) => {
 const FileManagerPage = ({ activeView, setActiveView }) => {
   const { theme } = useTheme();
   const location = useLocation();
+  const navigate = useNavigate();
 
   const [selectedFolder, setSelectedFolder] = useState(null);
   const [selectedFile, setSelectedFile] = useState(null);
@@ -174,9 +176,51 @@ const FileManagerPage = ({ activeView, setActiveView }) => {
 
       {/* Right side */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        {activeView === 'home' ? (
+          <TopBar folderName="NeuraNote" />
+        ) : (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '18px 32px',
+            backgroundColor: theme.colors.bg.primary,
+            borderBottom: `1px solid ${theme.colors.ui.border}`,
+            transition: 'background-color 0.3s, border-color 0.3s',
+          }}>
+            <div>
+              <h2 style={{ margin: 0, fontSize: '24px', fontWeight: '700', color: theme.colors.text.primary, letterSpacing: '-0.5px' }}>
+                {selectedFolder?.name || 'Files'}
+              </h2>
+              <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: theme.colors.text.tertiary, fontWeight: '500' }}>
+                Browse and organize your uploaded files
+              </p>
+            </div>
 
-        {/* Top Bar */}
-        <TopBar folderName={activeView === 'home' ? 'NeuraNote' : selectedFolder?.name} />
+            <button
+              type="button"
+              onClick={() => navigate('/notes/create')}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                border: 'none',
+                borderRadius: '12px',
+                padding: '12px 16px',
+                background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
+                color: '#fff',
+                fontWeight: 700,
+                fontSize: '14px',
+                cursor: 'pointer',
+                boxShadow: '0 10px 22px rgba(79, 70, 229, 0.24)',
+              }}
+              title="Create Notes"
+            >
+              <FilePlus size={16} />
+              Create Notes
+            </button>
+          </div>
+        )}
 
         {/* Content */}
         <div style={{ display: 'flex', flex: 1, overflow: activeView === 'home' ? 'auto' : 'hidden' }}>

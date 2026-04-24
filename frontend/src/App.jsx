@@ -21,6 +21,7 @@ import WorkspaceFolderPanel from '@/components/workspace/WorkspaceFolderPanel';
 // ===== MEMBER 3 (Sandavi) - Structured Notes =====
 import M3Dashboard from './m3_structurednotes/pages/Dashboard';
 import NoteEditor from './m3_structurednotes/pages/NoteEditor';
+import ManualNoteEditor from './m3_structurednotes/pages/ManualNoteEditor';
 
 // ===== MEMBER 4 - Quiz =====
 import QuizPage from '@/components/quiz/QuizPage';
@@ -49,7 +50,7 @@ const AppLayout = () => {
   const [selectedWorkspaceFolder, setSelectedWorkspaceFolder] = useState(null);
   const lastSavedCompletionVersionRef = useRef(0);
   const showRail = !noRailPages.includes(location.pathname);
-  const showWorkspacePanel = showRail && location.pathname !== '/dashboard' && location.pathname !== '/files';
+  const showWorkspacePanel = showRail && location.pathname !== '/dashboard' && location.pathname !== '/files' && location.pathname !== '/notes/create';
 
   // Sync activeView with current URL
   useEffect(() => {
@@ -142,6 +143,7 @@ const AppLayout = () => {
 
           {/* Member 3 - Structured Notes */}
           <Route path="/notes"                element={<M3Dashboard />} />
+          <Route path="/notes/create"         element={<ManualNoteEditor />} />
           <Route path="/notes/editor/:noteId" element={<NoteEditor />} />
 
           {/* Member 4 - Quiz */}

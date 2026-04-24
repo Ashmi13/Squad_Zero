@@ -160,10 +160,16 @@ const FileList = ({ selectedFolder, files, onSelectFile, onFilesUpdate }) => {
     setUploadProgress(0);
     try {
       const forcePickerFirst = !hasKnownLocalFolderBinding(selectedFolder.id);
+      let localSyncWarning = '';
 
       // Keep local machine, backend, and UI in sync: local save first.
       // If we do not have a known binding yet, force picker immediately from this user gesture.
-      await saveFileToLocalFolder(selectedFolder, file, { forcePickerFirst });
+      try {
+        await saveFileToLocalFolder(selectedFolder, file, { forcePickerFirst });
+      } catch (localSyncError) {
+        console.warn('Local folder sync skipped:', localSyncError);
+        localSyncWarning = ' Local device sync was skipped; file is still saved to workspace.';
+      }
       const isTextFile = (file.type || '').startsWith('text/') || /\.(txt|md|csv|json|log)$/i.test(file.name);
       const fileContent = isTextFile ? await readFileAsText(file) : null;
 
@@ -225,7 +231,7 @@ const FileList = ({ selectedFolder, files, onSelectFile, onFilesUpdate }) => {
 
       await loadFiles();
       window.dispatchEvent(new Event('neuranote:files-updated'));
-      setUploadSuccess('Upload complete. File is now visible in this folder.');
+      setUploadSuccess(`Upload complete. File is now visible in this folder.${localSyncWarning}`);
     } catch (err) {
       await removeFileFromLocalFolder(selectedFolder, file?.name);
       setError(err.message || 'Upload failed');

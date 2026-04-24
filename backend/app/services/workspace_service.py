@@ -386,6 +386,11 @@ class WorkspaceService:
                 metadata["file_type"] = ext.replace(".", "").upper() if ext else "FILE"
             if self._files_has_storage_path:
                 metadata["storage_path"] = file_key
+            now_iso = datetime.now(timezone.utc).isoformat()
+            if self._files_has_last_accessed:
+                metadata["last_accessed"] = now_iso
+            if self._files_has_updated_at:
+                metadata["updated_at"] = now_iso
             if self._files_has_storage_url and s3 and bucket:
                 region = settings.aws_region
                 metadata["storage_url"] = f"https://{bucket}.s3.{region}.amazonaws.com/{file_key}"
@@ -397,6 +402,24 @@ class WorkspaceService:
                 mime_type = file.content_type or "application/octet-stream"
                 encoded = base64.b64encode(content).decode("ascii")
                 metadata["file_content"] = f"data:{mime_type};base64,{encoded}"
+
+            # No-AWS fallback: ensure at least one previewable payload exists in DB metadata.
+            if not (s3 and bucket):
+                mime_type = file.content_type or "application/octet-stream"
+                encoded = base64.b64encode(content).decode("ascii")
+                data_url = f"data:{mime_type};base64,{encoded}"
+
+                if "file_content" not in metadata and self._files_has_file_content:
+                    metadata["file_content"] = data_url
+                elif self._files_has_storage_url and not metadata.get("storage_url"):
+                    metadata["storage_url"] = data_url
+                elif self._files_has_storage_path and not self._files_has_storage_url and not self._files_has_file_content:
+                    # Some schemas only expose storage_path. Persist a data URL there in no-AWS mode
+                    # so preview remains available until cloud storage is configured.
+                    metadata["storage_path"] = data_url
+                elif self._files_has_storage_path and not metadata.get("storage_path"):
+                    # Final fallback for schemas without file_content/storage_url columns.
+                    metadata["storage_path"] = data_url
 
             if not metadata:
                 metadata["name"] = os.path.splitext(file.filename)[0]
@@ -542,6 +565,7 @@ class WorkspaceService:
             folders_query = self.supabase.table("folders").select("*").eq("user_id", user_id)
             folders = folders_query.execute().data or []
             folder_lookup = {str(folder["id"]): folder for folder in folders if folder.get("id")}
+            bucket = settings.aws_s3_bucket
 
             limited = sorted(files, key=self._row_recent_timestamp, reverse=True)[: max(1, min(int(limit or 5), 50))]
             recent_files = []
@@ -549,12 +573,20 @@ class WorkspaceService:
                 folder_id = row.get("folder_id")
                 folder = folder_lookup.get(str(folder_id)) if folder_id else None
                 parent_id = folder.get("parent_folder_id") if folder else None
+                storage_key = self._extract_storage_key(row)
+                preview_available = bool(
+                    row.get("file_content")
+                    or row.get("storage_url")
+                    or (isinstance(row.get("storage_path"), str) and str(row.get("storage_path")).startswith("data:"))
+                    or (storage_key and bucket)
+                )
                 recent_files.append({
                     **row,
                     "folder_name": folder.get("name") if folder else None,
                     "folder_path": self._build_folder_path(folder_lookup, folder_id),
                     "parent_folder_path": self._build_folder_path(folder_lookup, parent_id),
                     "recent_timestamp": self._row_recent_timestamp(row).isoformat(),
+                    "preview_available": preview_available,
                 })
 
             return {"files": recent_files}
@@ -593,17 +625,16 @@ class WorkspaceService:
                     "source": "database",
                 }
 
-            storage_url = row.get("storage_url")
-            if storage_url:
+            storage_key = self._extract_storage_key(row)
+            if storage_key and isinstance(storage_key, str) and storage_key.startswith("data:"):
                 return {
                     "file_id": file_id,
-                    "preview_url": storage_url,
+                    "preview_url": storage_key,
                     "content": None,
                     "mime_type": row.get("mime_type"),
-                    "source": "storage_url",
+                    "source": "storage_path_data_url",
                 }
 
-            storage_key = self._extract_storage_key(row)
             s3 = self._maybe_s3_client()
             bucket = settings.aws_s3_bucket
             if storage_key and s3 and bucket:
@@ -623,6 +654,29 @@ class WorkspaceService:
                     "content": None,
                     "mime_type": row.get("mime_type"),
                     "source": "presigned_url",
+                }
+
+            # Fallback when AWS credentials are unavailable but bucket/key metadata exists.
+            # If objects are publicly readable this enables preview without presign support.
+            if storage_key and bucket:
+                region = settings.aws_region
+                derived_public_url = f"https://{bucket}.s3.{region}.amazonaws.com/{storage_key}"
+                return {
+                    "file_id": file_id,
+                    "preview_url": derived_public_url,
+                    "content": None,
+                    "mime_type": row.get("mime_type"),
+                    "source": "derived_storage_url",
+                }
+
+            storage_url = row.get("storage_url")
+            if storage_url:
+                return {
+                    "file_id": file_id,
+                    "preview_url": storage_url,
+                    "content": None,
+                    "mime_type": row.get("mime_type"),
+                    "source": "storage_url",
                 }
 
             raise HTTPException(

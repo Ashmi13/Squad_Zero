@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Home, FolderOpen, BrainCircuit, CheckSquare, Edit3, Settings, Shield } from 'lucide-react';
+import { Home, FolderOpen, BrainCircuit, CheckSquare, Edit3, Settings, Shield, GitBranch } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import SettingsPanel from './SettingsPanel';
 import { useAuth } from '@/hooks/useAuth';
@@ -66,9 +66,10 @@ const Rail = ({ activeView, setActiveView }) => {
 
       {/* Other nav icons */}
      {[
-  { icon: BrainCircuit, path: '/notes', view: 'notes' },
-  { icon: CheckSquare, path: '/tasks', view: 'tasks' },
-  { icon: Edit3, path: '/quiz', view: 'quiz' },
+  { icon: BrainCircuit, path: '/notes',        view: 'notes'   },
+  { icon: CheckSquare,  path: '/tasks',        view: 'tasks'   },
+  { icon: Edit3,        path: '/quiz',         view: 'quiz'    },
+  { icon: GitBranch,    path: '/second-brain', view: 'second-brain' },
 ].map(({ icon: Icon, path, view }) => (
   <div
     key={path}

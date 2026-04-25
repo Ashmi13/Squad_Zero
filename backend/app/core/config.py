@@ -8,7 +8,6 @@ from pydantic import Field
 
 
 class Settings(BaseSettings):
-
     # Application
     app_name: str = Field(default="SquadZero API", env="APP_NAME")
     debug: bool = Field(default=False, env="DEBUG")
@@ -18,7 +17,7 @@ class Settings(BaseSettings):
     api_version: str = Field(default="v1", env="API_VERSION")
     backend_url: str = Field(default="http://127.0.0.1:8000", env="BACKEND_URL")
 
-    # Supabase — Optional so backend starts without keys in dev
+    # Supabase
     supabase_url: Optional[str] = Field(default=None, env="SUPABASE_URL")
     supabase_anon_key: Optional[str] = Field(default=None, env="SUPABASE_ANON_KEY")
     supabase_service_role_key: Optional[str] = Field(default=None, env="SUPABASE_SERVICE_ROLE_KEY")
@@ -31,7 +30,7 @@ class Settings(BaseSettings):
 
     # Cookie
     cookie_name: str = Field(default="session", env="COOKIE_NAME")
-    cookie_secure: bool = Field(default=True, env="COOKIE_SECURE")
+    cookie_secure: bool = Field(default=False, env="COOKIE_SECURE")
     cookie_httponly: bool = Field(default=True, env="COOKIE_HTTPONLY")
     cookie_samesite: str = Field(default="lax", env="COOKIE_SAMESITE")
     cookie_domain: Optional[str] = Field(default=None, env="COOKIE_DOMAIN")
@@ -51,11 +50,11 @@ class Settings(BaseSettings):
     google_client_id: Optional[str] = Field(default=None, env="GOOGLE_CLIENT_ID")
     google_client_secret: Optional[str] = Field(default=None, env="GOOGLE_CLIENT_SECRET")
     google_redirect_uri: str = Field(
-        default="http://127.0.0.1:8000/api/v1/auth/google/callback", 
+        default="http://127.0.0.1:8000/api/v1/auth/google/callback",
         env="GOOGLE_REDIRECT_URI"
     )
 
-    # AWS S3 — Optional so backend starts without keys in dev
+    # AWS S3
     aws_s3_bucket: Optional[str] = Field(default=None, env="AWS_S3_BUCKET")
     aws_access_key_id: Optional[str] = Field(default=None, env="AWS_ACCESS_KEY_ID")
     aws_secret_access_key: Optional[str] = Field(default=None, env="AWS_SECRET_ACCESS_KEY")
@@ -66,16 +65,16 @@ class Settings(BaseSettings):
         default=60, env="PASSWORD_RESET_TOKEN_EXPIRE_MINUTES"
     )
 
-    # OpenAI (legacy)
-    OPENAI_API_KEY: str = Field(default=os.getenv("OPENAI_API_KEY", ""), env="OPENAI_API_KEY")
+    # OpenAI
+    OPENAI_API_KEY: str = Field(default="", env="OPENAI_API_KEY")
 
-    # OpenRouter — used for Nvidia Nemotron via OpenRouter
-    OPENROUTER_API_KEY: str = Field(default=os.getenv("OPENROUTER_API_KEY", ""), env="OPENROUTER_API_KEY")
+    # OpenRouter
+    OPENROUTER_API_KEY: str = Field(default="", env="OPENROUTER_API_KEY")
 
     class Config:
-        env_file = str(Path(__file__).parent.parent.parent / ".env")
+        env_file = ".env"
+        env_file_encoding = "utf-8"
         case_sensitive = False
-        # ↓ This allows extra fields in .env without crashing
         extra = "ignore"
 
     @property

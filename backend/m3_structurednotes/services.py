@@ -7,8 +7,8 @@ from io import BytesIO
 # from langchain_groq import ChatGroq
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from dotenv import load_dotenv
-from .database import get_db_connection
-from psycopg2.extras import RealDictCursor
+# from .database import get_db_connection
+# from psycopg2.extras import RealDictCursor
 import uuid
 import math
 import re

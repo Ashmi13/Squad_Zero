@@ -36,7 +36,7 @@ def create_app() -> FastAPI:
     # Include Core Team Routers
     app.include_router(v1_router)
 
-        # Include Member 3 Router (Smart Note Management)
+    # Include Member 3 Router (Smart Note Management)
     # from m3_structurednotes.router import router as m3_router
     # app.include_router(m3_router)
     

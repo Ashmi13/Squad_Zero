@@ -4,6 +4,7 @@ from pathlib import Path
 import os
 from pydantic_settings import BaseSettings
 from pydantic import Field
+from pydantic import field_validator
 
 
 class Settings(BaseSettings):
@@ -27,14 +28,9 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = Field(default=30, env="ACCESS_TOKEN_EXPIRE_MINUTES")
     refresh_token_expire_days: int = Field(default=7, env="REFRESH_TOKEN_EXPIRE_DAYS")
 
-    from pydantic import field_validator
-
-    @field_validator("secret_key")
-    def secret_key_must_be_set(cls, v):
-        if v == "dev-secret-change-me":
-            import warnings
-            warnings.warn("SECRET_KEY is using the insecure default. Set it in .env!")
-        return v
+    # OpenAI / OpenRouter
+    openai_api_key: str = Field(default="", env="OPENAI_API_KEY")
+    openrouter_api_key: str = Field(default="", env="OPENROUTER_API_KEY")
 
     # Cookie
     cookie_name: str = Field(default="session", env="COOKIE_NAME")
@@ -73,19 +69,22 @@ class Settings(BaseSettings):
         default=60, env="PASSWORD_RESET_TOKEN_EXPIRE_MINUTES"
     )
 
- OPENAI_API_KEY: str = Field(default="", env="OPENAI_API_KEY")
-    # OpenRouter
-    OPENROUTER_API_KEY: str = Field(default="", env="OPENROUTER_API_KEY")
+    @field_validator("secret_key")
+    def secret_key_must_be_set(cls, v):
+        if v == "dev-secret-change-me":
+            import warnings
+            warnings.warn("SECRET_KEY is using the insecure default. Set it in .env!")
+        return v
+
+    @property
+    def cors_origins_list(self) -> List[str]:
+        return [origin.strip() for origin in self.cors_origins.split(",")]
 
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
         case_sensitive = False
         extra = "ignore"
-
-    @property
-    def cors_origins_list(self) -> List[str]:
-        return [origin.strip() for origin in self.cors_origins.split(",")]
 
 
 settings = Settings()

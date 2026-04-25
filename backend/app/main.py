@@ -132,12 +132,12 @@ except ImportError as e:
 except Exception as e:
     print(f"⚠️  Notes routes skipped: {e}")
 
-# Tasks Module
+# ✅ FIX — routes land at /api/v1/tasks/, /api/v1/calendar/, etc.
 _optional_routes = [
-    ("routes.tasks",         "tasks_router",         "/api", ["tasks"]),
-    ("routes.calendar",      "calendar_router",      "/api", ["calendar"]),
-    ("routes.notifications", "notifications_router", "/api", ["notifications"]),
-    ("routes.task_list",     "task_list_router",     "/api", ["task-list"]),
+    ("routes.tasks",         "router", "/api/v1/tasks",         ["tasks"]),
+    ("routes.calendar",      "router", "/api/v1/calendar",      ["calendar"]),
+    ("routes.notifications", "router", "/api/v1/notifications", ["notifications"]),
+    ("routes.task_list",     "router", "/api/v1/task-list",     ["task-list"]),
 ]
 
 for _module, _attr, _prefix, _tags in _optional_routes:

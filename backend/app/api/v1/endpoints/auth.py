@@ -58,6 +58,7 @@ async def signup(
             data={
                 "sub": user_data["id"],
                 "email": user_data["email"],
+                "role": user_data.get("role", "user"),
             }
         )
         
@@ -65,6 +66,7 @@ async def signup(
             data={
                 "sub": user_data["id"],
                 "email": user_data["email"],
+                "role": user_data.get("role", "user"),
             }
         )
         
@@ -79,6 +81,7 @@ async def signup(
                 id=user_data["id"],
                 email=user_data["email"],
                 full_name=user_data.get("full_name"),
+                role=user_data.get("role", "user"),
             ),
         )
         
@@ -112,6 +115,7 @@ async def signin(
             data={
                 "sub": user_data["id"],
                 "email": user_data["email"],
+                "role": user_data.get("role", "user"),
             }
         )
         
@@ -119,6 +123,7 @@ async def signin(
             data={
                 "sub": user_data["id"],
                 "email": user_data["email"],
+                "role": user_data.get("role", "user"),
             }
         )
         
@@ -133,6 +138,7 @@ async def signin(
                 id=user_data["id"],
                 email=user_data["email"],
                 full_name=user_data.get("full_name"),
+                role=user_data.get("role", "user"),
             ),
         )
         
@@ -186,6 +192,7 @@ async def refresh_token(
             data={
                 "sub": claims.get("sub"),
                 "email": claims.get("email"),
+                "role": claims.get("role", "user"),
             }
         )
         
@@ -199,6 +206,7 @@ async def refresh_token(
             user=UserResponse(
                 id=claims.get("sub"),
                 email=claims.get("email"),
+                role=claims.get("role", "user"),
             ),
         )
         
@@ -277,7 +285,8 @@ async def google_callback(
             "sub": user_record["id"],
             "email": user_record["email"],
             "full_name": user_record.get("full_name"),
-            "avatar_url": user_record.get("avatar_url")
+            "avatar_url": user_record.get("avatar_url"),
+            "role": user_record.get("role", "user")
         }
         
         internal_access_token = create_access_token(data=token_payload)

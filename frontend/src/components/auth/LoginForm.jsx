@@ -55,7 +55,7 @@ export function LoginForm() {
         console.log("Mocking Demo Auth for testjay@neuranote.com");
         
         // Feed fake Supabase tokens so App.jsx doesn't kick us out
-        setTokens("mock_access_token_jd82nd28dj29", "mock_refresh_token_u29j1jd");
+        
         localStorage.setItem('user', JSON.stringify({ 
           email: 'testjay@neuranote.com', 
           full_name: 'Test Jay' 

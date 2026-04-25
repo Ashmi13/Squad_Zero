@@ -104,3 +104,4 @@ frontend/package-lock.json
 Squad_Zero_Sync/
 run_servers.batbackend/.env
 backend/dump.sql
+.env.backup

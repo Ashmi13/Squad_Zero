@@ -8,6 +8,7 @@ import mermaid from 'mermaid';
 import ReactQuill from 'react-quill-new';
 import 'react-quill-new/dist/quill.snow.css';
 import { marked } from 'marked';
+import TurndownService from 'turndown';
 import {
     Share2, Search, ZoomIn, ZoomOut, ChevronLeft, ChevronRight,
     Bold, Italic, Underline, List, Link as LinkIcon, Mic,
@@ -16,7 +17,7 @@ import {
 import styles from './NoteEditor.module.css';
 import SaveModal from '../components/SaveModal';
 import RefineModal from '../components/RefineModal';
-import { generateNote, refineText, updateNote, createNote, summarizePrompts, discussNote } from '../api';
+import { generateNote, refineText, updateNote, createNote, summarizePrompts, discussNote, getNote } from '../api';
 
 
 // --- CONFIGURATION ---
@@ -97,6 +98,12 @@ const NoteEditor = () => {
             const parsed = JSON.parse(savedNote);
             let loadedContent = parsed.content || '';
 
+            // Clean backend artifact wrappers
+            loadedContent = loadedContent
+                .replace(/End_of_Notes/g, '')
+                .replace(/^```markdown\n|^```\n|```$/gm, '')
+                .trim();
+
             // Check if content is already HTML (ignore image/div wrappers from synthesis)
             const isHTML = loadedContent.includes('<p>') || 
                            loadedContent.includes('<h1') || 
@@ -107,7 +114,7 @@ const NoteEditor = () => {
             if (!isHTML || (loadedContent.includes('##') && !loadedContent.includes('<p>'))) {
                 // Content is markdown (or mixed) — configure marked properly
                 marked.setOptions({
-                    breaks: true,    // ← THIS IS THE KEY FIX
+                    breaks: true,
                     gfm: true,
                     headerIds: false,
                 });
@@ -148,6 +155,25 @@ const NoteEditor = () => {
             }
 
             setDocuments(docs);
+
+            // Fetch actual content if missing from localStorage but we have a noteId
+            const activeNoteId = noteId || parsed.noteId;
+            if (!loadedContent && activeNoteId) {
+                getNote(activeNoteId).then(data => {
+                    let fetchedContent = data.content || '';
+                    fetchedContent = fetchedContent
+                        .replace(/End_of_Notes/g, '')
+                        .replace(/^```markdown\n|^```\n|```$/gm, '')
+                        .trim();
+
+                    const isFetchedHTML = fetchedContent.includes('<p>') || fetchedContent.includes('<h1');
+                    if (!isFetchedHTML || (fetchedContent.includes('##') && !fetchedContent.includes('<p>'))) {
+                        marked.setOptions({ breaks: true, gfm: true, headerIds: false });
+                        fetchedContent = marked.parse(fetchedContent);
+                    }
+                    setContent(fetchedContent);
+                }).catch(err => console.error("Error fetching note content:", err));
+            }
 
             // If it's a markdown source, fetch the content to display
             if (absolutePdfUrl && absolutePdfUrl.toLowerCase().endsWith('.md')) {
@@ -244,25 +270,77 @@ const NoteEditor = () => {
         }, 100);
     };
 
-    const handleExport = () => {
+    const downloadNote = () => {
+        if (!content) {
+            alert('No note content to download.');
+            return;
+        }
+        
+        const turndownService = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced' });
+        const markdown = turndownService.turndown(content);
+        
+        const blob = new Blob([markdown], { type: 'text/markdown' });
+        const url = URL.createObjectURL(blob);
+        
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Study_Notes.md`;
+        document.body.appendChild(a);
+        a.click();
+        
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    };
+
+    const downloadAsPDF = () => {
+        if (!content) return;
         setIsProcessing(true);
+        
         const script = document.createElement('script');
         script.src = "https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js";
         script.onload = () => {
-            const element = document.getElementById('export-content');
+            const wrapper = document.createElement('div');
+            // Hide the wrapper from view but keep it in DOM for html2pdf
+            wrapper.style.position = 'absolute';
+            wrapper.style.left = '-9999px';
+            wrapper.style.top = '-9999px';
+            wrapper.style.fontFamily = '-apple-system, sans-serif';
+            wrapper.style.color = '#1a1523';
+            wrapper.style.lineHeight = '1.7';
+            wrapper.style.padding = '20px';
+            wrapper.style.width = '800px';
+            wrapper.innerHTML = `
+              <style>
+                h1 { font-size: 22px; border-bottom: 2px solid #7C3AED; padding-bottom: 8px; }
+                h2 { font-size: 17px; color: #3C3489; margin-top: 28px; }
+                li { margin-bottom: 8px; }
+                code { background: #f3f0ff; padding: 2px 5px; border-radius: 3px; font-size: 12px; }
+                pre { background: #1e1e2e; color: #cdd6f4; padding: 14px; border-radius: 8px; }
+                hr { border: none; border-top: 1px solid #e4deff; }
+                blockquote { border-left: 3px solid #7C3AED; padding-left: 12px; color: #6B6780; }
+                img { max-width: 100%; height: auto; border-radius: 8px; margin: 16px 0; }
+              </style>
+              <div>${content}</div>
+            `;
+            document.body.appendChild(wrapper);
 
             const opt = {
-                margin: 10,
-                filename: 'note.pdf',
+                margin: [10, 10, 10, 10],
+                filename: 'Study_Notes.pdf',
                 image: { type: 'jpeg', quality: 0.98 },
-                html2canvas: { scale: 2, useCORS: true },
+                html2canvas: { scale: 2, useCORS: true, logging: false },
                 jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
             };
 
             // @ts-ignore
-            window.html2pdf().set(opt).from(element).save().then(() => {
+            window.html2pdf().set(opt).from(wrapper).save().then(() => {
+                document.body.removeChild(wrapper);
                 setIsProcessing(false);
-                alert("PDF Downloaded! 📥");
+            }).catch(err => {
+                console.error("PDF generation failed:", err);
+                document.body.removeChild(wrapper);
+                setIsProcessing(false);
+                alert("Failed to generate PDF. Please try again.");
             });
         };
         document.body.appendChild(script);
@@ -405,7 +483,12 @@ const NoteEditor = () => {
         }
 
         let combinedHtml = "";
-        const parsedMarkdown = marked.parse(finalRefinedText);
+        
+        const cleanRefinedText = finalRefinedText
+            .replace(/End_of_Notes/g, '')
+            .replace(/^```markdown\n|^```\n|```$/gm, '')
+            .trim();
+        const parsedMarkdown = marked.parse(cleanRefinedText);
 
         if (insertionType === 'insert') {
             combinedHtml = `
@@ -487,8 +570,11 @@ const NoteEditor = () => {
                             )}
                         </div>
                         <div className={styles.actionGroup}>
-                            <button className={styles.headerBtn} onClick={handleExport} disabled={isProcessing} style={{ padding: '8px 16px', background: '#f5f5f5', border: '1px solid #ddd', borderRadius: '6px', cursor: 'pointer' }}>
-                                {isProcessing ? '...' : 'Download PDF'}
+                            <button className={styles.headerBtn} onClick={downloadNote} style={{ padding: '8px 16px', background: '#f5f5f5', border: '1px solid #ddd', borderRadius: '6px', cursor: 'pointer' }}>
+                                Download .md
+                            </button>
+                            <button className={styles.headerBtn} onClick={downloadAsPDF} disabled={isProcessing} style={{ padding: '8px 16px', background: '#f5f5f5', border: '1px solid #ddd', borderRadius: '6px', cursor: 'pointer' }}>
+                                {isProcessing ? 'Generating...' : 'Download PDF'}
                             </button>
                             <button className={styles.primaryBtn} onClick={() => setShowSaveModal(true)}>Save</button>
                         </div>
@@ -752,7 +838,8 @@ const NoteEditor = () => {
                     initialRefinedText={refinementResult.refined}
                     currentInstruction={refinementResult.instruction}
                     pdfId={pdfId}
-                    refineTextApi={refineText}
+                    isFullNote={refinementResult.isFullNote}
+                    content={content}
                     onClose={() => setRefinementResult(null)}
                     onApply={(finalRefinedText, history, insertionType) => applyRefinement(finalRefinedText, history, insertionType)}
                 />

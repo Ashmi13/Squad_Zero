@@ -37,3 +37,4 @@ class DiscussRequest(BaseModel):
     note_content: str
     user_question: str
     pdf_id: Optional[str] = None
+    conversation_history: Optional[List[dict]] = None

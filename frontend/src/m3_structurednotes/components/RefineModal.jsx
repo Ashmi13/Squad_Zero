@@ -1,26 +1,44 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Check, X, ArrowRight, Send, Loader2 } from 'lucide-react';
 import styles from './RefineModal.module.css';
+import { discussNote, refineText } from '../api';
 
-const RefineModal = ({ originalText, initialRefinedText, onClose, onApply, pdfId, refineTextApi, currentInstruction }) => {
+const RefineModal = ({ originalText, initialRefinedText, onClose, onApply, pdfId, isFullNote, content, currentInstruction }) => {
     const [currentRefined, setCurrentRefined] = useState(initialRefinedText);
     const [history, setHistory] = useState([{ prompt: currentInstruction, result: initialRefinedText }]);
     const [followUp, setFollowUp] = useState('');
     const [isRefining, setIsRefining] = useState(false);
 
+    const conversationHistoryRef = useRef([
+        { role: 'user', content: currentInstruction },
+        { role: 'assistant', content: initialRefinedText }
+    ]);
+
     const handleFollowUp = async () => {
         if (!followUp.trim()) return;
         setIsRefining(true);
+
+        // Append user message before API call
+        conversationHistoryRef.current.push({ role: 'user', content: followUp });
+
         try {
-            const result = await refineTextApi(pdfId, currentRefined, followUp);
-            const newRefined = result.refined_text?.refined_content || result.refined_content;
+            let result;
+            if (isFullNote) {
+                result = await discussNote(content, followUp, pdfId, conversationHistoryRef.current);
+            } else {
+                result = await refineText(pdfId, currentRefined, followUp);
+            }
+
+            const newRefined = result.refined_text?.refined_content || result.refined_content || result.refined_text;
             if (newRefined) {
+                conversationHistoryRef.current.push({ role: 'assistant', content: newRefined });
                 setCurrentRefined(newRefined);
                 setHistory([...history, { prompt: followUp, result: newRefined }]);
                 setFollowUp('');
             }
         } catch (e) {
             alert("Error trying to refine further.");
+            conversationHistoryRef.current.pop();
         } finally {
             setIsRefining(false);
         }

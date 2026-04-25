@@ -1,37 +1,37 @@
+"""
+NeuraNote — Member 3: Structured Note Generation
+services.py — FULL REBUILD (Production-Ready Hybrid Pipeline)
+"""
+
 import os
-import base64
-import json
-from io import BytesIO
-# Make specific dependencies optional
-# They will be imported inside functions so other team members
-# don't need to install them if they don't do AI logic.
-from dotenv import load_dotenv
-from .database import get_db_connection
-from psycopg2.extras import RealDictCursor
+import re
 import uuid
 import math
-import re
-from collections import Counter
 import json
-import numpy as np
+import base64
+from io import BytesIO
+from collections import Counter, defaultdict
+from dotenv import load_dotenv
+from psycopg2.extras import RealDictCursor, execute_values
+
+from .database import get_db_connection
 
 load_dotenv()
 
-class AIService:
+# ─────────────────────────────────────────────────────────────
+#  SECTION 1 — AI SERVICE (lazy-loaded, singleton pattern)
+# ─────────────────────────────────────────────────────────────
 
+class AIService:
     def __init__(self):
-        # Use HuggingFace local embeddings (free)
         self._embeddings = None
-        # Use Groq for LLM (free tier)
         self._llm = None
 
     @property
     def embeddings(self):
         if self._embeddings is None:
-            # OpenRouter does not provide free robust text-embedding models reliably.
-            # We revert to local HuggingFace to keep document processing functional and free.
             from langchain_huggingface import HuggingFaceEmbeddings
-            print("Loading HuggingFace Embeddings for Document Vectorization...")
+            print("[AIService] Loading HuggingFace embeddings (all-MiniLM-L6-v2)...")
             self._embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
         return self._embeddings
 
@@ -39,177 +39,947 @@ class AIService:
     def llm(self):
         if self._llm is None:
             from langchain_openai import ChatOpenAI
-            
-            # Use OpenRouter - dynamically read from environment
             api_key = os.getenv("OPENROUTER_API_KEY")
-            model_name = os.getenv("OPENROUTER_MODEL", "liquid/lfm-2.5-1.2b-instruct:free")
-            
-            print(f"[*] Initializing AIService with model: {model_name}")
-            
+            model_name = os.getenv("OPENROUTER_MODEL", "google/gemini-flash-1.5-8b")
+            if not api_key:
+                raise EnvironmentError("OPENROUTER_API_KEY is not set. Add it to your .env file.")
+            print(f"[AIService] Initializing LLM: {model_name}")
             self._llm = ChatOpenAI(
-                api_key=api_key, 
+                api_key=api_key,
                 base_url="https://openrouter.ai/api/v1",
                 model=model_name,
-                temperature=0
+                temperature=0,
+                timeout=120,
             )
         return self._llm
 
-    def extract_keywords_tfidf(self, text, top_n=10):
-        """
-        MANUAL ALGORITHM: Deep Topic Modeling via TF-IDF Scoring.
-        We avoided using external libraries (like scikit-learn) to implement this completely manually.
-        This algorithm calculates Term Frequency (TF) and Inverse Document Frequency (IDF) mathematically.
-        By analyzing term rarity, it dives deeper than simple summarizing algorithms by pulling out core,
-        sometimes hidden, thematic keywords (not just common words) from user content to build a highly structured note.
-        """
-        # Stopwords to ignore
-        stopwords = {"the", "is", "in", "and", "to", "of", "a", "for", "on", "with", "as", "by", "this", 
-                     "that", "it", "at", "from", "or", "an", "be", "are", "can", "will", "which"}
-        
-        # 1. Clean and tokenize text into words
-        words = re.findall(r'\b[a-z]{3,}\b', text.lower())
-        words = [w for w in words if w not in stopwords]
-        
-        if not words:
-            return []
-            
-        # 2. Treat paragraphs/sentences as 'documents' for IDF calculation
-        sentences = [s.strip() for s in text.lower().split('.') if len(s.strip()) > 10]
-        if not sentences:
-            sentences = [text.lower()]
-            
-        N = len(sentences)
-        
-        # 3. Calculate Term Frequency (TF) for the entire text
-        word_counts = Counter(words)
-        total_words = len(words)
-        
-        tfidf_scores = {}
-        for word, count in word_counts.items():
-            tf = count / total_words
-            
-            # 4. Calculate Inverse Document Frequency (IDF)
-            # Count how many sentences contain the word
-            doc_freq = sum(1 for sentence in sentences if word in sentence)
-            idf = math.log(N / (1 + doc_freq)) + 1  # Add 1 to avoid zero weights
-            
-            # 5. Final TF-IDF Score
-            tfidf_scores[word] = tf * idf
-            
-        # Sort words by score descending
-        sorted_keywords = sorted(tfidf_scores.items(), key=lambda item: item[1], reverse=True)
-        return [word for word, score in sorted_keywords[:top_n]]
 
-    def extract_images_from_file(self, file_bytes, original_filename):
-        print(f"[IMAGE DEBUG] Starting image extraction for: {original_filename}")
-        results = []
+# ─────────────────────────────────────────────────────────────
+#  SECTION 2 — MANUAL ALGORITHM: TF-IDF KEYWORD EXTRACTION
+# ─────────────────────────────────────────────────────────────
+
+STOPWORDS = {
+    "the","is","in","and","to","of","a","for","on","with","as","by",
+    "this","that","it","at","from","or","an","be","are","can","will",
+    "which","was","has","have","had","not","but","its","also","been",
+    "more","than","when","there","they","their","about","into",
+    "through","during","before","after","above","below","between",
+    "each","other","such","then","these","those","would","could",
+    "should","may","might","must","shall","very","just","all","any",
+    "both","few","most","some","so","yet","if","do","did","does",
+    "how","what","why","who","where","used","use","using","one",
+    "two","three","our","we","you","your","him","her","his","them",
+    "us","my","me","he","she","am","get","make","like","know","see",
+    "come","go","give","take","same","different","way","time","part",
+    "type","set","based","given","called","known","well","new",
+    "first","second","third","often","always","key",
+}
+
+def extract_keywords_tfidf(text: str, top_n: int = 30) -> list[str]:
+    words = re.findall(r"\b[a-zA-Z]{3,}\b", text)
+    words = [w.lower() for w in words if w.lower() not in STOPWORDS]
+
+    if not words:
+        return []
+
+    sentences = [s.strip() for s in re.split(r"[.!?]", text.lower()) if len(s.strip()) > 10]
+    if not sentences:
+        sentences = [text.lower()]
+
+    N = len(sentences)
+    word_counts = Counter(words)
+    total_words = len(words)
+    tfidf_scores = {}
+
+    for word, count in word_counts.items():
+        if count < 2:
+            continue
+        tf = count / total_words
+        doc_freq = sum(1 for s in sentences if word in s)
+        idf = math.log(N / (1 + doc_freq)) + 1
+        tfidf_scores[word] = tf * idf
+
+    sorted_kw = sorted(tfidf_scores.items(), key=lambda x: x[1], reverse=True)
+    return [w for w, _ in sorted_kw[:top_n]]
+
+
+# ─────────────────────────────────────────────────────────────
+#  SECTION 3 — MANUAL ALGORITHM: CROSS-DOCUMENT DEDUPLICATION
+# ─────────────────────────────────────────────────────────────
+
+def _shingle(text: str, k: int = 3) -> set:
+    tokens = re.findall(r"\b\w+\b", text.lower())
+    if len(tokens) < k:
+        return {tuple(tokens)}
+    return {tuple(tokens[i:i+k]) for i in range(len(tokens) - k + 1)}
+
+def jaccard_similarity(set_a: set, set_b: set) -> float:
+    if not set_a or not set_b:
+        return 0.0
+    intersection = len(set_a & set_b)
+    union = len(set_a | set_b)
+    return intersection / union if union > 0 else 0.0
+
+def deduplicate_points(points: list[dict], threshold: float = 0.55) -> list[dict]:
+    unique = []
+    unique_shingles = []
+
+    for point in points:
+        shingles = _shingle(point["text"])
+        is_dup = False
+
+        for i, existing_shingles in enumerate(unique_shingles):
+            sim = jaccard_similarity(shingles, existing_shingles)
+            if sim >= threshold:
+                is_dup = True
+                if len(point["text"]) > len(unique[i]["text"]):
+                    unique[i] = point
+                    unique_shingles[i] = shingles
+                break
+
+        if not is_dup:
+            unique.append(point)
+            unique_shingles.append(shingles)
+
+    return unique
+
+
+# ─────────────────────────────────────────────────────────────
+#  SECTION 4 — MANUAL ALGORITHM: IMPORTANCE SCORING
+# ─────────────────────────────────────────────────────────────
+
+def score_importance(
+    point_text: str,
+    keywords: list[str],
+    chunk_index: int,
+    total_chunks: int,
+) -> int:
+    score = 0
+    text_lower = point_text.lower()
+
+    kw_hits = sum(1 for k in keywords if k in text_lower)
+    score += min(kw_hits * 5, 25)
+
+    word_count = len(point_text.split())
+    if 8 <= word_count <= 30:
+        score += 20
+    elif 5 <= word_count <= 50:
+        score += 10
+
+    DEFINITION_MARKERS = [
+        " is ", " are ", " means ", " refers to ",
+        " defined as ", " known as ", " called ",
+        " describes ", " represents ", " stands for ",
+        ":", "=", " consist of "
+    ]
+    if any(m in text_lower for m in DEFINITION_MARKERS):
+        score += 20
+
+    if re.search(r"\d", point_text):
+        score += 10
+
+    SIGNAL_WORDS = [
+        "important", "key", "critical", "essential",
+        "fundamental", "note that", "remember", "significant",
+        "major", "primary", "main", "crucial", "must", "always"
+    ]
+    sig_hits = sum(1 for w in SIGNAL_WORDS if w in text_lower)
+    score += min(sig_hits * 5, 15)
+
+    if total_chunks > 0 and (chunk_index / total_chunks) < 0.30:
+        score += 10
+
+    return min(score, 100)
+
+
+# ─────────────────────────────────────────────────────────────
+#  SECTION 5 — MANUAL ALGORITHM: POINT EXTRACTION
+# ─────────────────────────────────────────────────────────────
+
+def extract_points_from_chunk(
+    chunk_text: str,
+    chunk_index: int,
+    doc_id: str,
+    page_hint: int = 0,
+) -> list[dict]:
+    points = []
+    lines = chunk_text.split("\n")
+
+    for line in lines:
+        line = line.strip()
         
+        if len(line) < 15:
+            continue
+
+        if line.isupper() and len(line) < 80:
+            points.append({
+                "type": "heading",
+                "text": line.title(),
+                "doc_id": doc_id,
+                "chunk_index": chunk_index,
+                "page_hint": page_hint,
+                "score": 0
+            })
+        elif line[0] in ("-", "•", "*", "→", ">"):
+            clean = line.lstrip("-•*→> ").strip()
+            if len(clean) >= 5:
+                points.append({
+                    "type": "bullet",
+                    "text": clean,
+                    "doc_id": doc_id,
+                    "chunk_index": chunk_index,
+                    "page_hint": page_hint,
+                    "score": 0
+                })
+        elif re.match(r"^\d{1,2}[\.\)\:]", line):
+            clean = re.sub(r"^\d{1,2}[\.\)\:]\s*", "", line).strip()
+            if len(clean) >= 5:
+                points.append({
+                    "type": "numbered",
+                    "text": clean,
+                    "doc_id": doc_id,
+                    "chunk_index": chunk_index,
+                    "page_hint": page_hint,
+                    "score": 0
+                })
+        elif len(line) > 30:
+            points.append({
+                "type": "sentence",
+                "text": line,
+                "doc_id": doc_id,
+                "chunk_index": chunk_index,
+                "page_hint": page_hint,
+                "score": 0
+            })
+
+    return points
+
+
+# ─────────────────────────────────────────────────────────────
+#  SECTION 6 — MANUAL ALGORITHM: LECTURE-ORDER TOPIC CLUSTERING
+# ─────────────────────────────────────────────────────────────
+
+def cluster_topics(
+    points: list[dict],
+    keywords: list[str]
+) -> dict[str, list[dict]]:
+    n_clusters = min(8, max(3, len(keywords) // 3))
+
+    buckets = {}
+    kw_to_bucket = {}
+
+    step = max(1, len(keywords) // n_clusters)
+    for i in range(0, len(keywords), step):
+        group = keywords[i : i + step]
+        if not group:
+            continue
+        name = " & ".join(w.capitalize() for w in group[:2])
+        buckets[name] = []
+        for kw in group:
+            kw_to_bucket[kw] = name
+
+    buckets["General Concepts"] = []
+
+    for point in points:
+        text_lower = point["text"].lower()
+        scores = defaultdict(int)
+
+        for kw, bucket_name in kw_to_bucket.items():
+            if kw in text_lower:
+                scores[bucket_name] += 1
+
+        best = max(scores, key=scores.get) if scores else "General Concepts"
+        buckets[best].append(point)
+
+    buckets = {k: v for k, v in buckets.items() if v}
+
+    def bucket_order(item):
+        _, pts = item
+        return min(p["chunk_index"] for p in pts) if pts else float('inf')
+
+    ordered = dict(sorted(buckets.items(), key=bucket_order))
+    return ordered
+
+
+# ─────────────────────────────────────────────────────────────
+#  SECTION 7 — MANUAL ALGORITHM: SLIDING WINDOW SECTION BUILDER
+# ─────────────────────────────────────────────────────────────
+
+def build_section_content(
+    points: list[dict],
+    target_chars: int = 4500,
+) -> tuple[str, list[dict]]:
+    sorted_pts = sorted(points, key=lambda p: p.get("score", 0), reverse=True)
+    included = []
+    overflow = []
+    char_count = 0
+
+    for pt in sorted_pts:
+        label = "⚡HIGH" if pt.get("score", 0) >= 60 else "MED" if pt.get("score", 0) >= 30 else "LOW"
+        line = f"[{label}] {pt['text']}\n"
+        if char_count + len(line) > target_chars and len(included) >= 3:
+            overflow.append(pt)
+        else:
+            included.append(pt)
+            char_count += len(line)
+
+    content_str = "".join(
+        f"[{'⚡HIGH' if p.get('score',0)>=60 else 'MED' if p.get('score',0)>=30 else 'LOW'}] {p['text']}\n"
+        for p in included
+    )
+    return content_str, overflow
+
+
+# ─────────────────────────────────────────────────────────────
+#  SECTION 8 — MANUAL ALGORITHM: SEMANTIC IMAGE MATCHING
+# ─────────────────────────────────────────────────────────────
+
+def match_images_to_sections(
+    images: list[dict],
+    topic_groups: dict[str, list[dict]],
+) -> dict[str, list[dict]]:
+    section_pages = {}
+    for name, pts in topic_groups.items():
+        hints = [p.get("page_hint", 0) for p in pts if p.get("page_hint")]
+        section_pages[name] = hints if hints else [0]
+
+    result = {name: [] for name in topic_groups}
+
+    for img in images:
+        img_page = img.get("page_number", 0)
+        best_section = None
+        best_distance = float("inf")
+
+        for name, pages in section_pages.items():
+            if not pages:
+                continue
+            dist = min(abs(img_page - p) for p in pages)
+            if dist < best_distance:
+                best_distance = dist
+                best_section = name
+
+        if best_section:
+            result[best_section].append(img)
+
+    return result
+
+
+# ─────────────────────────────────────────────────────────────
+#  SECTION 9 — TEXT CLEANING
+# ─────────────────────────────────────────────────────────────
+
+def clean_note_formatting(text: str) -> str:
+    text = re.sub(r"\s+-\s+\*\*", "\n- **", text)
+    text = re.sub(r"(?<=[a-z.!?])\s+-\s+(?=[A-Z\*])", "\n- ", text)
+
+    text = re.sub(r"([^\n])(##)", r"\1\n\n\2", text)
+    text = re.sub(r"(## .+)\n([^\n])", r"\1\n\n\2", text)
+    text = re.sub(r"\n(##)", r"\n\n\1", text)
+
+    text = re.sub(r"([^\n])---", r"\1\n\n---", text)
+    text = re.sub(r"---([^\n])", r"---\n\n\1", text)
+
+    text = re.sub(r"\n{4,}", "\n\n\n", text)
+    for emoji in ["⚡", "⚠️", "💡"]:
+        text = re.sub(rf"(?<=[a-z.!?])\s+- {re.escape(emoji)}", f"\n- {emoji}", text)
+
+    text = re.sub(r"^```(markdown)?\n|```$", "", text, flags=re.MULTILINE)
+    return text.strip()
+
+
+# ─────────────────────────────────────────────────────────────
+#  SECTION 10 — DATABASE HELPERS
+# ─────────────────────────────────────────────────────────────
+
+def _get_conn():
+    conn = get_db_connection()
+    if not conn:
+        raise RuntimeError("Database connection failed. Check DB_URL in .env")
+    return conn
+
+def _fetch_all_chunks_per_doc(pdf_ids: list[str]) -> dict[str, list[dict]]:
+    conn = _get_conn()
+    result = {}
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        for pdf_id in pdf_ids:
+            cur.execute(
+                """
+                SELECT chunk_index, content,
+                       COALESCE((metadata->>'page')::int, 0) AS page_hint
+                FROM document_chunks
+                WHERE pdf_id = %s
+                ORDER BY chunk_index ASC
+                """,
+                (pdf_id,),
+            )
+            rows = cur.fetchall()
+            result[pdf_id] = [dict(r) for r in rows]
+        cur.close()
+    finally:
+        conn.close()
+    return result
+
+def _fetch_images(pdf_ids: list[str]) -> list[dict]:
+    conn = _get_conn()
+    images = []
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        for pdf_id in pdf_ids:
+            cur.execute(
+                """
+                SELECT image_data, media_type, page_number, caption
+                FROM document_images
+                WHERE pdf_id = %s
+                ORDER BY page_number ASC
+                """,
+                (pdf_id,),
+            )
+            images.extend([dict(r) for r in cur.fetchall()])
+        cur.close()
+    finally:
+        conn.close()
+    return images[:20]
+
+
+# ─────────────────────────────────────────────────────────────
+#  SECTION 11 — CORE SERVICE CLASS
+# ─────────────────────────────────────────────────────────────
+
+class NoteService:
+    def __init__(self):
+        self._ai = AIService()
+
+    def _llm_call(self, prompt: str) -> str:
+        response = self._ai.llm.invoke(prompt)
+        text = response.content.strip()
+        text = text.replace("End_of_Notes", "").strip()
+        text = text.replace("|||SECTION_END|||", "").strip()
+        text = re.sub(r"^```(markdown)?\n|```$", "", text, flags=re.MULTILINE)
+        return text
+
+    def generate_note(
+        self,
+        pdf_ids: list[str],
+        user_id: str,
+        instruction: str = "",
+        language: str = "English",
+        ordering: str = "ai",
+        job_id: str = None,
+    ) -> str:
+        print(f"\n[generate_note] Starting for {len(pdf_ids)} doc(s), user={user_id}")
+
+        all_points = []
+        total_chunks_global = 0
+
+        # PASS 1 — PER-DOCUMENT EXTRACTION
+        self._update_job(job_id, "retrieving")
+        
+        for pdf_id in pdf_ids:
+            try:
+                doc_chunks = _fetch_all_chunks_per_doc([pdf_id])
+                chunks = doc_chunks.get(pdf_id, [])
+            except RuntimeError as e:
+                self._update_job(job_id, "failed")
+                return f"# Error\n\n{e}"
+
+            total_chunks_global += len(chunks)
+
+            for chunk in chunks:
+                chunk_pts = extract_points_from_chunk(
+                    chunk_text=chunk["content"],
+                    chunk_index=chunk["chunk_index"],
+                    doc_id=pdf_id,
+                    page_hint=chunk.get("page_hint", 0),
+                )
+                
+                for pt in chunk_pts:
+                    pt["score"] = score_importance(
+                        point_text=pt["text"],
+                        keywords=[],
+                        chunk_index=pt["chunk_index"],
+                        total_chunks=len(chunks),
+                    )
+                all_points.extend(chunk_pts)
+            
+            del chunks
+
+        if not all_points:
+            self._update_job(job_id, "failed")
+            return "# Error\n\nNo content found for the selected materials."
+
+        # PASS 2 — GLOBAL ORGANISATION
+        self._update_job(job_id, "deduplicating")
+        unique_points = deduplicate_points(all_points, threshold=0.55)
+
+        self._update_job(job_id, "analyzing")
+        combined_text = " ".join(p["text"] for p in unique_points)
+        keywords = extract_keywords_tfidf(combined_text, top_n=30)
+
+        for point in unique_points:
+            point["score"] = score_importance(
+                point_text=point["text"],
+                keywords=keywords,
+                chunk_index=point["chunk_index"],
+                total_chunks=total_chunks_global,
+            )
+
+        topic_groups = cluster_topics(unique_points, keywords)
+
+        images = _fetch_images(pdf_ids)
+        section_images = match_images_to_sections(images, topic_groups)
+
+        self._update_job(job_id, "generating")
+        section_notes = []
+        overflow_points = []
+
+        for topic_name, points in topic_groups.items():
+            combined_for_section = overflow_points + points
+            overflow_points = []
+
+            content_str, overflow_points = build_section_content(
+                combined_for_section, target_chars=4500
+            )
+
+            if not content_str.strip():
+                continue
+
+            sec_imgs = section_images.get(topic_name, [])
+            img_hints = "\n".join(
+                f"[IMG: page {img['page_number']}]"
+                for img in sec_imgs[:3]
+            ) if sec_imgs else "None"
+
+            prompt = f"""You are NotesGPT — expert academic note writer for university
+exam preparation. Write one section of a structured study note
+in {language}.
+
+TOPIC SECTION: {topic_name}
+
+SOURCE MATERIAL (labelled by importance):
+{content_str}
+
+IMAGE HINTS (place on their own line if relevant): {img_hints}
+
+STRICT OUTPUT FORMAT — follow exactly:
+1. Start immediately with: ## 📌 {topic_name}
+2. Write ONLY bullet points — absolutely no paragraphs or essays
+3. Each bullet must be 2-4 lines long. One-line bullets are forbidden.
+4. Bold ALL key terms using **term**
+5. Mark critical points with ⚡ at the start of the bullet
+6. Use 💡 for concrete examples
+7. Use ⚠️ for common mistakes or confusion points
+8. Include EVERY piece of information from the source material
+   Do NOT skip, merge, or summarise away any point
+9. If any point in the source is underdeveloped (under 15 words,
+   or lacks explanation of WHY or HOW), expand it into a clear
+   2-3 sentence explanation using your own knowledge so the
+   student fully understands without opening the original slides
+10. Connect related points to show logical flow
+11. End with exactly: End_of_Notes
+
+The student is preparing for their final exam. After reading
+this section alone they must know everything about {topic_name}
+without needing to look at the original lecture materials.
+"""
+            try:
+                raw = self._llm_call(prompt)
+                clean = clean_note_formatting(raw)
+                section_notes.append(clean)
+            except Exception as e:
+                print(f"[Phase 9] ERROR on '{topic_name}': {e}")
+                fallback = f"## 📌 {topic_name}\n\n"
+                for pt in sorted(points, key=lambda p: p.get("score", 0), reverse=True)[:8]:
+                    fallback += f"- **{pt['text'][:60]}**: {pt['text']}\n\n"
+                section_notes.append(fallback)
+
+        if overflow_points:
+            overflow_content = "\n".join(
+                f"- {p['text']}" for p in overflow_points[:20]
+            )
+            section_notes.append(f"## 📌 Additional Concepts\n\n{overflow_content}")
+
+        kw0 = keywords[0].capitalize() if len(keywords) > 0 else "Study"
+        kw1 = keywords[1].capitalize() if len(keywords) > 1 else "Notes"
+        title_line = f"# 🎯 {kw0} & {kw1} — Complete Study Notes"
+        subtitle = (
+            f"> 📚 {len(pdf_ids)} document(s) · {len(unique_points)} concepts · {len(section_notes)} sections\n"
+        )
+
+        self._update_job(job_id, "finalising")
+        takeaway_text = self._generate_takeaways(section_notes, keywords, language)
+
+        body = "\n\n---\n\n".join(section_notes)
+        final_note = (
+            title_line + "\n\n"
+            + subtitle + "\n\n"
+            + body + "\n\n"
+            + takeaway_text
+        )
+
+        final_note = self._inject_images(final_note, images)
+        final_note = clean_note_formatting(final_note)
+        
+        self._update_job(job_id, "done")
+        return final_note
+
+    def _generate_takeaways(self, section_notes: list[str], keywords: list[str], language: str) -> str:
+        merged_for_takeaways = "\n\n".join(section_notes)[:3000]
+        prompt = f"""You are NotesGPT writing the Key Takeaways section
+of a structured study note in {language}.
+
+CONTENT OF THE NOTE:
+{merged_for_takeaways}
+
+Write ONLY the ## 🗝️ Key Takeaways section.
+These takeaways must be MEANINGFUL complete sentences
+that a student can use to review the whole topic.
+
+BAD takeaway (do not write like this):
+- Input is a core concept in this material.
+
+GOOD takeaway (write like this):
+- ⚡ **Java I/O Streams**: Java uses streams as 
+  communication channels between programs and I/O 
+  devices. Every input and output operation in Java 
+  goes through either a byte stream or character stream.
+
+FORMAT:
+## 🗝️ Key Takeaways
+
+- ⚡ **[Concept]**: Full sentence explaining the most 
+  important idea from the whole note. Must be specific 
+  to the actual content, not generic.
+
+Write 6 to 8 takeaways.
+Each must reference actual content from the note.
+Never write generic sentences like "X is a core concept".
+Start with ## 🗝️ immediately.
+End with |||SECTION_END|||
+"""
         try:
-            if original_filename.lower().endswith('.pdf'):
-                print(f"[IMAGE DEBUG] Detected PDF file")
-                try:
-                    import fitz
-                    print(f"[IMAGE DEBUG] PyMuPDF imported successfully")
-                except ImportError:
-                    print(f"[IMAGE DEBUG] ❌ PyMuPDF NOT installed! Run: pip install PyMuPDF")
-                    return []
-                
-                doc = fitz.open(stream=file_bytes, filetype="pdf")
-                print(f"[IMAGE DEBUG] PDF opened. Total pages: {len(doc)}")
-                
-                for page_num, page in enumerate(doc):
-                    image_list = page.get_images()
-                    print(f"[IMAGE DEBUG] Page {page_num + 1}: found {len(image_list)} images")
-                    
-                    for img_index, img in enumerate(image_list):
-                        try:
-                            xref = img[0]
-                            base_image = doc.extract_image(xref)
-                            image_bytes = base_image["image"]
-                            ext = base_image["ext"]
-                            
-                            import base64
-                            image_b64 = base64.b64encode(image_bytes).decode()
-                            media_type = f"image/{ext}"
-                            
-                            results.append({
-                                "image_data": image_b64,
-                                "media_type": media_type,
-                                "page_or_slide": page_num + 1,
-                                "caption": ""
-                            })
-                            print(f"[IMAGE DEBUG] OK: Extracted image {img_index + 1} from page {page_num + 1}, size: {len(image_bytes)} bytes")
-                        except Exception as img_err:
-                            print(f"[IMAGE DEBUG] ERR: Failed to extract image {img_index + 1} from page {page_num + 1}: {img_err}")
-                
-                doc.close()
-                print(f"[IMAGE DEBUG] Total images extracted: {len(results)}")
-                
-                # Limit to 10
-                results = results[:10]
-                return results
-                
-            elif original_filename.lower().endswith('.pptx'):
-                print(f"[IMAGE DEBUG] Detected PPTX file")
-                try:
-                    from pptx import Presentation
-                    from io import BytesIO
-                except ImportError:
-                    print(f"[IMAGE DEBUG] ERR: python-pptx NOT installed!")
-                    return []
-                
-                prs = Presentation(BytesIO(file_bytes))
-                print(f"[IMAGE DEBUG] PPTX opened. Total slides: {len(prs.slides)}")
-                
-                for slide_num, slide in enumerate(prs.slides):
-                    for shape in slide.shapes:
-                        if shape.shape_type == 13:  # Picture
-                            try:
-                                import base64
-                                image_bytes = shape.image.blob
-                                content_type = shape.image.content_type
-                                image_b64 = base64.b64encode(image_bytes).decode()
-                                
-                                results.append({
-                                    "image_data": image_b64,
-                                    "media_type": content_type,
-                                    "page_or_slide": slide_num + 1,
-                                    "caption": ""
-                                })
-                                print(f"[IMAGE DEBUG] OK: Extracted image from slide {slide_num + 1}")
-                            except Exception as img_err:
-                                print(f"[IMAGE DEBUG] ERR: Failed on slide {slide_num + 1}: {img_err}")
-                
-                print(f"[IMAGE DEBUG] Total images extracted: {len(results)}")
-                results = results[:10]
-                return results
-            
-            else:
-                print(f"[IMAGE DEBUG] ERR: Unsupported file type: {original_filename}")
-                return []
-                
+            return self._llm_call(prompt)
         except Exception as e:
-            print(f"[IMAGE DEBUG] ERR: Complete failure in extract_images_from_file: {e}")
-            import traceback
-            traceback.print_exc()
-            return []
+            print(f"[Takeaways] ERROR: {e}")
+            return (
+                "## 🗝️ Key Takeaways\n\n"
+                + "\n".join(f"- **{kw.capitalize()}** is a core concept in this material." for kw in keywords[:6])
+            )
 
-    def process_pdf(self, file_bytes, pdf_id, original_filename):
-        """
-        Optimized document processor: 
-        - Single pass for text and images (consolidated)
-        - Uses fitz (PyMuPDF) for high-speed PDF parsing
-        - Batch inserts chunks into Postgres for database efficiency
-        """
-        # Determine file type
-        is_pptx = original_filename.lower().endswith('.pptx')
-        extension = ".pptx" if is_pptx else ".pdf"
+    def _inject_images(self, note: str, images: list[dict]) -> str:
+        for img in images:
+            placeholder = f"[IMG: page {img['page_number']}]"
+            if placeholder not in note:
+                continue
+            b64 = img.get("image_data", "")
+            mt = img.get("media_type", "image/png")
+            block = (
+                f'\n<div style="text-align:center;margin:16px 0;">'
+                f'<img src="data:{mt};base64,{b64}" '
+                f'style="max-width:100%;border-radius:8px;'
+                f'box-shadow:0 4px 12px rgba(0,0,0,0.12);" '
+                f'alt="Figure from page {img["page_number"]}" />'
+                f'<p style="font-size:11px;color:#888;margin-top:6px;">'
+                f'Source: Page {img["page_number"]}</p></div>\n'
+            )
+            note = note.replace(placeholder, block)
+        return note
 
-        # 1. Save File to disk for viewing (needed by frontend)
+    def _update_job(self, job_id: str | None, status: str):
+        if not job_id:
+            return
+        try:
+            conn = get_db_connection()
+            if not conn:
+                return
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE generation_jobs SET status = %s, updated_at = NOW() WHERE job_id = %s",
+                (status, job_id),
+            )
+            conn.commit()
+            cur.close()
+            conn.close()
+        except Exception:
+            pass
+
+
+    def refine_text(
+        self, pdf_id: str, selected_text: str, instruction: str
+    ) -> dict:
+        """
+        HYBRID: Manual relevance scoring picks best context chunks.
+        AI rewrites in structured note format.
+
+        Refinement types (auto-detected from instruction):
+          DEEP_EXPLAIN  — "explain", "confused", "what is"
+          GIVE_EXAMPLE  — "example", "eg", "show me"
+          REORGANIZE    — "organize", "structure", "format"
+          SIMPLIFY      — "simpler", "shorter", "brief"
+          GENERAL       — anything else
+        """
+        # ── Manual relevance scorer ──
+        query = selected_text + " " + instruction
+        query_words = [
+            w.lower()
+            for w in re.findall(r"\b[a-zA-Z]{3,}\b", query)
+            if w.lower() not in STOPWORDS
+        ]
+
+        context_chunks = []
+        try:
+            conn = _get_conn()
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            cur.execute(
+                "SELECT content, chunk_index FROM document_chunks WHERE pdf_id = %s ORDER BY chunk_index ASC",
+                (pdf_id,),
+            )
+            rows = cur.fetchall()
+            cur.close()
+            conn.close()
+
+            def _score(chunk_text):
+                lower = chunk_text.lower()
+                score = sum(lower.count(w) * 2 for w in query_words)
+                if selected_text.lower()[:40] in lower:
+                    score += 25
+                return score
+
+            scored = sorted(rows, key=lambda r: _score(r["content"]), reverse=True)
+            context_chunks = [r["content"] for r in scored[:5] if _score(r["content"]) > 0]
+
+            # Vector fallback if keyword scoring finds nothing
+            if not context_chunks:
+                try:
+                    qe = self._ai.embeddings.embed_query(query)
+                    conn2 = _get_conn()
+                    cur2 = conn2.cursor()
+                    cur2.execute(
+                        """
+                        SELECT content FROM document_chunks WHERE pdf_id = %s
+                        ORDER BY embedding <=> %s::vector LIMIT 5
+                        """,
+                        (pdf_id, "[" + ",".join(str(x) for x in qe) + "]"),
+                    )
+                    context_chunks = [r[0] for r in cur2.fetchall()]
+                    cur2.close()
+                    conn2.close()
+                except Exception as ve:
+                    print(f"[refine_text] Vector fallback error: {ve}")
+
+        except Exception as e:
+            print(f"[refine_text] DB error: {e}")
+
+        context_text = "\n\n".join(context_chunks)
+
+        # ── Instruction type detection ──
+        il = instruction.lower()
+        if any(w in il for w in ["example", "eg", "show me", "instance"]):
+            task = "Provide 2–3 concrete real-world examples that illustrate the concept clearly."
+        elif any(w in il for w in ["explain", "confused", "understand", "what is", "elaborate"]):
+            task = "Give a thorough step-by-step explanation. Start from basics, explain why and how, use an analogy if helpful."
+        elif any(w in il for w in ["organize", "structure", "format", "arrange"]):
+            task = "Reorganize the content into a cleaner, more logical and scannable structure."
+        elif any(w in il for w in ["simpler", "shorter", "brief", "simplify", "concise"]):
+            task = "Rewrite in simpler, shorter language a student can understand instantly. Keep all key facts."
+        else:
+            task = f"The student asked: {instruction}. Answer this specific request thoroughly."
+
+        prompt = f"""You are NotesGPT — expert academic note writer.
+A student is refining a section of their structured study note.
+
+CONTEXT FROM ORIGINAL DOCUMENT:
+{context_text or "No additional context available."}
+
+SELECTED TEXT FROM THEIR NOTE:
+\"\"\"{selected_text}\"\"\"
+
+TASK: {task}
+
+OUTPUT FORMAT (match the note's existing style exactly):
+## 📌 [Short Topic Title]
+
+> [One line describing what this response covers]
+
+- ⚡ **[Key Term]**: Full explanation, 2–4 lines.
+  Connect to the original concept and add context.
+
+- **[Another Point]**: Detailed explanation.
+  Include why this matters for the exam.
+
+- 💡 **[Example or Insight]**: Concrete illustration.
+  Make it memorable and easy to recall.
+
+## 🗝️ Key Takeaways from This Section
+- ⚡ **[Point 1]**: Complete sentence.
+- **[Point 2]**: Complete sentence.
+- **[Point 3]**: Complete sentence.
+
+RULES: Bullets only. Each 2–4 lines. Bold all key terms.
+Start with ## 📌 immediately. End with End_of_Notes.
+"""
+        try:
+            result = self._llm_call(prompt)
+            return {"refined_content": result}
+        except Exception as e:
+            return {
+                "refined_content": f"## 📌 Context Found\n\n"
+                + "\n".join(f"- {c[:200]}" for c in context_chunks[:3]),
+                "error": str(e),
+            }
+
+    # ─────────────────────────────────────────────────────────
+    #  PUBLIC: discuss_note
+    #  Chat popup — looped conversation about the note
+    # ─────────────────────────────────────────────────────────
+    def discuss_note(
+        self,
+        note_content: str,
+        user_question: str,
+        pdf_id: str = None,
+        conversation_history: list[dict] = None
+    ) -> dict:
+        """
+        HYBRID: Manual section extractor picks relevant note sections.
+        AI answers scoped to those sections.
+        """
+        # Manual section extractor
+        plain = re.sub(r"<[^>]+>", "", note_content)
+        sections = re.split(r"\n##\s+", plain)
+
+        query_words = [
+            w.lower()
+            for w in re.findall(r"\b[a-zA-Z]{3,}\b", user_question)
+            if w.lower() not in STOPWORDS
+        ]
+
+        scored_sections = []
+        for sec in sections:
+            if len(sec.strip()) < 30:
+                continue
+            lower = sec.lower()
+            score = sum(lower.count(w) * 2 for w in query_words)
+            scored_sections.append((score, sec.strip()))
+
+        scored_sections.sort(reverse=True)
+        top = [s for sc, s in scored_sections[:3] if sc > 0]
+        relevant_text = ("\n\n---\n\n".join(top) if top else plain)[:3000]
+
+        history_context = ""
+        if conversation_history and len(conversation_history) > 1:
+            history_context = "\n\nPREVIOUS CONVERSATION:\n"
+            for msg in conversation_history[:-1]:  # all except current
+                role = "Student" if msg['role'] == 'user' else "NotesGPT"
+                history_context += f"{role}: {msg['content'][:300]}\n"
+
+        prompt = f"""You are NotesGPT — expert academic note writer.
+A student is asking a follow-up question about their study note.
+{history_context}
+RELEVANT SECTIONS FROM THEIR NOTE:
+{relevant_text}
+
+STUDENT'S QUESTION: {user_question}
+
+Answer this specific question. If it references a previous 
+exchange shown above, build on that context naturally.
+Do not repeat what was already explained unless asked.
+Answer the question using ONLY the note content above.
+If they want more detail, expand from the context given.
+Use the EXACT SAME format as their note:
+
+## 📌 [Topic Answering Their Question]
+
+> [One line saying what this response provides]
+
+- ⚡ **[Key Point]**: Full explanation, 2–4 lines.
+
+- **[Another Point]**: Explanation with context.
+
+- 💡 **[Tip or Insight]**: Helpful for exam recall.
+
+## 🗝️ Key Takeaways
+- ⚡ **[Point 1]**: Full sentence.
+- **[Point 2]**: Full sentence.
+
+RULES: Bullets only. Bold all key terms. Start with ## 📌.
+End with End_of_Notes.
+"""
+        try:
+            result = self._llm_call(prompt)
+            return {"refined_content": result}
+        except Exception as e:
+            return {
+                "refined_content": "## 📌 Response\n\n"
+                + "\n".join(f"- {line.strip()}" for line in relevant_text.split("\n") if len(line.strip()) > 20)[:800],
+                "error": str(e),
+            }
+
+    # ─────────────────────────────────────────────────────────
+    #  PUBLIC: summarize_prompts
+    #  Generates a topic label for a refined section
+    # ─────────────────────────────────────────────────────────
+    def summarize_prompts(
+        self, prompts: list[str], original_text: str = None
+    ) -> str:
+        """
+        Manual keyword extraction → AI topic label (≤5 words).
+        Used to label refined sections inserted back into the note.
+        """
+        if not prompts:
+            return "Refined Section"
+
+        subject_keywords = []
+        if original_text:
+            words = re.findall(r"\b[a-zA-Z]{4,}\b", original_text)
+            freq: dict[str, int] = {}
+            for w in words:
+                wl = w.lower()
+                if wl not in STOPWORDS:
+                    freq[wl] = freq.get(wl, 0) + 1
+            top = sorted(freq.items(), key=lambda x: x[1], reverse=True)
+            subject_keywords = [w for w, _ in top[:3]]
+
+        prompt = f"""Generate a SHORT topic label (maximum 5 words, Capitalize Each Word)
+that describes WHAT THIS TEXT IS ABOUT (not what was done to it).
+
+Keywords found: {", ".join(subject_keywords)}
+Text snippet: {(original_text or "")[:120].replace(chr(10), " ")}
+User instructions: {" → ".join(prompts)}
+
+Output ONLY the topic label. No quotes. No punctuation at end. Nothing else.
+GOOD: "Mitochondria Energy Production"
+BAD: "Refined Text", "AI Adjustment", "Simplified Version"
+"""
+        try:
+            return self._llm_call(prompt).strip().strip('"').strip("'")
+        except Exception:
+            return " ".join(w.capitalize() for w in subject_keywords[:3]) or "Refined Study Content"
+
+    # ─────────────────────────────────────────────────────────
+    #  PUBLIC: File processing
+    # ─────────────────────────────────────────────────────────
+    def process_file(
+        self, file_bytes: bytes, file_id: str, original_filename: str
+    ) -> dict:
+        """
+        Processes an uploaded file (PDF, PPTX, MD, TXT):
+          1. Save to disk for frontend source-viewer
+          2. Extract full text
+          3. Extract images (PDF + PPTX)
+          4. Chunk text with overlap
+          5. Generate embeddings
+          6. Batch-insert chunks + images to DB
+        """
+        fname_lower = original_filename.lower()
+        is_pptx = fname_lower.endswith(".pptx")
+        is_md_txt = fname_lower.endswith((".md", ".txt"))
+        ext = ".pptx" if is_pptx else (".pdf" if not is_md_txt else fname_lower[-3:])
+
+        # Save file to disk
         save_dir = "documents"
         os.makedirs(save_dir, exist_ok=True)
-        safe_filename = f"{pdf_id}{extension}"
-        file_path = os.path.join(save_dir, safe_filename)
+        safe_name = f"{file_id}{ext}"
+        file_path = os.path.join(save_dir, safe_name)
         with open(file_path, "wb") as f:
             f.write(file_bytes)
 
@@ -217,1046 +987,293 @@ class AIService:
         extracted_images = []
 
         try:
-            # 2. Extract Text (Single Pass)
+            # ── Text extraction ──
             if is_pptx:
                 from pptx import Presentation
                 prs = Presentation(BytesIO(file_bytes))
-                for i, slide in enumerate(prs.slides):
+                for slide_num, slide in enumerate(prs.slides):
                     for shape in slide.shapes:
-                        if hasattr(shape, "text"):
-                            full_text += shape.text + " "
+                        if hasattr(shape, "text") and shape.text.strip():
+                            full_text += shape.text.strip() + "\n"
                     full_text += "\n"
-            elif original_filename.lower().endswith(('.md', '.txt')):
-                full_text = file_bytes.decode('utf-8', errors='ignore')
-            else:
+
+            elif is_md_txt:
+                full_text = file_bytes.decode("utf-8", errors="ignore")
+
+            else:  # PDF
                 import fitz
                 doc = fitz.open(stream=file_bytes, filetype="pdf")
-                for i, page in enumerate(doc):
-                    full_text += page.get_text() + "\n"
+                for page_num, page in enumerate(doc):
+                    page_text = page.get_text()
+                    full_text += page_text + "\n"
                 doc.close()
 
-            # 2b. Extract Images (Using debug method)
-            print(f"[IMAGE DEBUG] Calling extract_images_from_file...")
-            extracted_images = self.extract_images_from_file(file_bytes, original_filename)
-            print(f"[IMAGE DEBUG] Got {len(extracted_images)} images back")
+            # ── Image extraction ──
+            extracted_images = self._extract_images(file_bytes, original_filename)
 
-            # 3. Chunk text for Vector Storage
+            # ── Chunking ──
             from langchain_text_splitters import RecursiveCharacterTextSplitter
-            text_splitter = RecursiveCharacterTextSplitter(
-                chunk_size=1200, # Slightly larger chunks for better context
-                chunk_overlap=200
+            splitter = RecursiveCharacterTextSplitter(
+                chunk_size=1200, chunk_overlap=200
             )
-            chunks = text_splitter.split_text(full_text)
-            if not chunks: chunks = ["No readable text found."]
+            chunks = splitter.split_text(full_text) or ["No readable text found."]
 
-            # 4. Generate Embeddings and Save to Postgres (Batch Mode)
-            conn = get_db_connection()
-            if conn:
-                cur = conn.cursor()
-                
-                # Ensure table exists (Safety check)
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS document_images (
-                        id TEXT PRIMARY KEY,
-                        pdf_id TEXT,
-                        image_data TEXT,
-                        media_type TEXT,
-                        page_number INTEGER,
-                        caption TEXT
-                    );
-                """)
-                
-                # Batch insert images
-                if extracted_images:
-                    print(f"[IMAGE DEBUG] Attempting to save {len(extracted_images)} images to DB...")
-                    for img in extracted_images:
-                        img_id = str(uuid.uuid4())
-                        cur.execute("""
-                            INSERT INTO document_images (id, pdf_id, image_data, media_type, page_number, caption)
-                            VALUES (%s, %s, %s, %s, %s, %s)
-                        """, (img_id, pdf_id, img["image_data"], img["media_type"], img["page_or_slide"], img["caption"]))
-                    print(f"[IMAGE DEBUG] Images saved to DB successfully")
-                
-                # Generate embeddings in one batch (Fastest way)
-                print(f"[*] Vectorizing {len(chunks)} chunks for {pdf_id}...")
-                embeddings = self.embeddings.embed_documents(chunks)
-                
-                # BATCH INSERT chunks using execute_values for maximum speed
-                from psycopg2.extras import execute_values
-                data_list = []
-                for i, (chunk_text, embedding) in enumerate(zip(chunks, embeddings)):
-                    chunk_id = str(uuid.uuid4())
-                    embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
-                    data_list.append((
-                        chunk_id, pdf_id, i, chunk_text, 
-                        embedding_str, json.dumps({"source": original_filename})
-                    ))
-                
-                execute_values(cur, """
-                    INSERT INTO document_chunks (id, pdf_id, chunk_index, content, embedding, metadata)
-                    VALUES %s
-                """, data_list)
-                
-                conn.commit()
-                cur.close()
-                conn.close()
-            
+            # ── Embed + DB insert ──
+            conn = _get_conn()
+            cur = conn.cursor()
+
+            # Ensure images table exists
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS document_images (
+                    id TEXT PRIMARY KEY,
+                    pdf_id TEXT,
+                    image_data TEXT,
+                    media_type TEXT,
+                    page_number INTEGER,
+                    caption TEXT
+                )
+            """)
+
+            # Insert images
+            for img in extracted_images:
+                cur.execute(
+                    """
+                    INSERT INTO document_images (id, pdf_id, image_data, media_type, page_number, caption)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (id) DO NOTHING
+                    """,
+                    (str(uuid.uuid4()), file_id, img["image_data"],
+                     img["media_type"], img["page_or_slide"], img.get("caption", "")),
+                )
+
+            # Generate embeddings (batch)
+            print(f"[process_file] Vectorising {len(chunks)} chunks for {file_id}...")
+            embeddings = self._ai.embeddings.embed_documents(chunks)
+
+            data_list = []
+            for i, (chunk_text, embedding) in enumerate(zip(chunks, embeddings)):
+                # Estimate page_hint from chunk position
+                page_hint = max(1, int((i / len(chunks)) * max(1, len(full_text) // 2000)))
+                data_list.append((
+                    str(uuid.uuid4()),
+                    file_id,
+                    i,
+                    chunk_text,
+                    "[" + ",".join(str(x) for x in embedding) + "]",
+                    json.dumps({"source": original_filename, "page": page_hint}),
+                ))
+
+            execute_values(cur, """
+                INSERT INTO document_chunks (id, pdf_id, chunk_index, content, embedding, metadata)
+                VALUES %s
+                ON CONFLICT DO NOTHING
+            """, data_list)
+
+            conn.commit()
+            cur.close()
+            conn.close()
+
         except Exception as e:
             import traceback
             traceback.print_exc()
-            print(f"Processing error for {original_filename}: {e}")
-            if 'conn' in locals() and conn: conn.close()
-        
+            print(f"[process_file] ERROR for {original_filename}: {e}")
+            try:
+                conn.close()
+            except Exception:
+                pass
+            return {"status": "error", "message": str(e)}
+
         return {
             "status": "success",
-            "pdf_url": f"/documents/{safe_filename}",
-            "extracted_text": full_text[:1000], # Don't send whole text back to UI
-            "image_count": len(extracted_images)
+            "pdf_url": f"/documents/{safe_name}",
+            "extracted_text": full_text[:500],
+            "image_count": len(extracted_images),
         }
 
-    def get_images_for_pdf(self, pdf_id):
-        print(f"[IMAGE DEBUG] Fetching images for pdf_id: {pdf_id}")
-        conn = get_db_connection()
-        if not conn:
-            return []
-        try:
-            cur = conn.cursor(cursor_factory=RealDictCursor)
-            cur.execute("""
-                SELECT image_data, media_type, page_number, caption
-                FROM document_images
-                WHERE pdf_id = %s
-                ORDER BY page_number ASC
-            """, (pdf_id,))
-            results = cur.fetchall()
-            cur.close()
-            conn.close()
-            print(f"[IMAGE DEBUG] Fetched {len(results)} images from DB")
-            return results
-        except Exception as e:
-            print(f"Error fetching images for PDF: {e}")
-            if conn: conn.close()
-            return []
+    def _extract_images(self, file_bytes: bytes, filename: str) -> list[dict]:
+        """Extracts images from PDF or PPTX. Returns list of image dicts."""
+        results = []
+        fname_lower = filename.lower()
 
-    def save_note_to_db(self, user_id, pdf_id, title, content):
-        conn = get_db_connection()
-        if not conn:
-            print("Database connection failed")
-            return None
-        
         try:
+            if fname_lower.endswith(".pdf"):
+                import fitz
+                doc = fitz.open(stream=file_bytes, filetype="pdf")
+                for page_num, page in enumerate(doc):
+                    for img in page.get_images():
+                        try:
+                            xref = img[0]
+                            base_img = doc.extract_image(xref)
+                            results.append({
+                                "image_data": base64.b64encode(base_img["image"]).decode(),
+                                "media_type": f"image/{base_img['ext']}",
+                                "page_or_slide": page_num + 1,
+                                "caption": "",
+                            })
+                        except Exception:
+                            pass
+                doc.close()
+
+            elif fname_lower.endswith(".pptx"):
+                from pptx import Presentation
+                prs = Presentation(BytesIO(file_bytes))
+                for slide_num, slide in enumerate(prs.slides):
+                    for shape in slide.shapes:
+                        if shape.shape_type == 13:  # Picture
+                            try:
+                                results.append({
+                                    "image_data": base64.b64encode(shape.image.blob).decode(),
+                                    "media_type": shape.image.content_type,
+                                    "page_or_slide": slide_num + 1,
+                                    "caption": "",
+                                })
+                            except Exception:
+                                pass
+        except Exception as e:
+            print(f"[_extract_images] {e}")
+
+        return results[:15]  # Cap per file
+
+    # ─────────────────────────────────────────────────────────
+    #  PUBLIC: DB helpers (folder + note management)
+    # ─────────────────────────────────────────────────────────
+    def save_note_to_db(
+        self, user_id: str, pdf_id: str, title: str, content: str
+    ) -> str | None:
+        try:
+            conn = _get_conn()
             cur = conn.cursor()
             note_id = str(uuid.uuid4())
-            
-            # Use pdf_id if provided (ensure column exists or handle gracefully)
-            cur.execute("""
-                INSERT INTO notes (note_id, user_id, title, content, created_at, updated_at, note_type, is_in_folder, has_embeddings)
+            cur.execute(
+                """
+                INSERT INTO notes (note_id, user_id, title, content,
+                                   created_at, updated_at, note_type,
+                                   is_in_folder, has_embeddings)
                 VALUES (%s, %s, %s, %s, NOW(), NOW(), 'ai_generated', FALSE, TRUE)
                 RETURNING note_id
-            """, (note_id, user_id, title, content))
-            
+                """,
+                (note_id, user_id, title, content),
+            )
             returned_id = cur.fetchone()[0]
-            
             conn.commit()
             cur.close()
             conn.close()
-            print(f"Note saved to DB via RETURNING: {returned_id}")
             return returned_id
         except Exception as e:
-            print(f"Error saving to DB: {e}")
-            if conn:
-                conn.rollback()
+            print(f"[save_note_to_db] ERROR: {e}")
             return None
 
-    def extract_clean_points(self, text):
-        points = []
-        lines = text.split('\n')
-        for line in lines:
-            line = line.strip()
-            if not line or line.isdigit() or len(line) < 20:
-                continue
-            
-            if line.isupper() and len(line) < 60:
-                points.append({"type": "heading", "text": line})
-            elif line.startswith(('-', '•', '*', '→', '>')):
-                points.append({"type": "bullet", "text": line.lstrip('-•*→> ').strip()})
-            elif re.match(r'^\d+[\.\)\:]', line):
-                points.append({"type": "numbered", "text": line[2:].strip()})
-            elif len(line) > 30:
-                points.append({"type": "sentence", "text": line})
-        return points
-
-    def remove_duplicates(self, points):
-        unique_points = []
-        for i, p in enumerate(points):
-            p_words = set(p['text'].lower().split())
-            is_duplicate = False
-            for up in unique_points:
-                up_words = set(up['text'].lower().split())
-                intersection = len(p_words.intersection(up_words))
-                union = len(p_words.union(up_words))
-                similarity = intersection / union if union > 0 else 0
-                if similarity > 0.7:
-                    is_duplicate = True
-                    if len(p['text']) > len(up['text']):
-                        up['text'] = p['text']
-                    break
-            if not is_duplicate:
-                unique_points.append(p)
-        return unique_points
-
-    def score_point_importance(self, point_text, keywords, all_texts):
-        score = 0
-        match_count = sum(1 for k in keywords if k.lower() in point_text.lower())
-        score += min(match_count * 8, 40)
-        
-        words = point_text.split()
-        if 8 <= len(words) <= 25:
-            score += 20
-        elif 5 <= len(words) <= 40:
-            score += 10
-            
-        markers = [" is ", " are ", " means ", " refers to ", " defined as ", " known as ", ":", "="]
-        if any(m in point_text.lower() for m in markers):
-            score += 20
-            
-        if any(char.isdigit() for char in point_text):
-            score += 10
-            
-        prefix = " ".join(point_text.split()[:3]).lower()
-        for other in all_texts:
-            if other != point_text and other.lower().startswith(prefix):
-                score -= 15
-                break
-                
-        return max(score, 0)
-
-    def group_points_by_topic(self, points, keywords):
-        buckets = {}
-        for i in range(0, len(keywords), 3):
-            group = keywords[i:i+3]
-            topic_name = " & ".join(group).title()
-            buckets[topic_name] = []
-            
-        buckets["General Notes"] = []
-        for p in points:
-            best_bucket = "General Notes"
-            max_matches = 0
-            for topic in buckets:
-                if topic == "General Notes": continue
-                matches = sum(1 for word in topic.lower().split(" & ") if word in p['text'].lower())
-                if matches > max_matches:
-                    max_matches = matches
-                    best_bucket = topic
-            buckets[best_bucket].append(p)
-        return {k: v for k, v in buckets.items() if v}
-
-
-        
-    def generate_note(self, pdf_ids: list, user_id: str,
-                      instruction: str = "",
-                      language: str = "English",
-                      ordering: str = "ai"):
-        """
-        ULTIMATE STRUCTURED NOTE GENERATOR (Sequential Chapter Synthesis)
-        1. Retrieval: Fetch all chunks for all selected materials.
-        2. Pre-processing: Clean, deduplicate, and score every point (Manual Alg).
-        3. Topic Modeling: Group points into logical chapters using TF-IDF (Manual Alg).
-        4. Sequential Synthesis: Process each chapter individually via AI to ensure 
-           COMPLETELY every point is well discussed without context loss.
-        5. Assembly: Combine chapters into one continuous, high-fidelity note.
-        """
-
-        # PHASE 1 - Retrieval
-        combined_text = ""
-        conn = get_db_connection()
-        if not conn: return "Error: DB Connection failed."
+    def update_note(self, note_id: str, new_content: str) -> bool:
         try:
-            for pdf_id in pdf_ids:
-                cur = conn.cursor()
-                cur.execute("""
-                    SELECT content FROM document_chunks 
-                    WHERE pdf_id = %s ORDER BY chunk_index ASC
-                """, (pdf_id,))
-                rows = cur.fetchall()
-                combined_text += f"\n\n--- DOC: {pdf_id} ---\n" + "\n".join([r[0] for r in rows])
-                cur.close()
-            conn.close()
-        except Exception as e:
-            if conn: conn.close()
-            return f"Retrieval Error: {e}"
-
-        if not combined_text.strip(): return "No material found."
-
-        # PHASE 2 - Manual Pre-processing (Cleaning, Keywords, Scoring)
-        all_points = self.extract_clean_points(combined_text)
-        unique_points = self.remove_duplicates(all_points)
-        keywords = self.extract_keywords_tfidf(combined_text, top_n=20)
-        point_texts = [p['text'] for p in unique_points]
-        for p in unique_points:
-            p['score'] = self.score_point_importance(p['text'], keywords, point_texts)
-
-        # PHASE 3 - Chapter Grouping (TF-IDF buckets)
-        topic_groups = self.group_points_by_topic(unique_points, keywords)
-        
-        # NEW PHASE 8 — Chunked Generation
-        section_notes = []
-        all_images = [] 
-        for pdf_id in pdf_ids:
-            all_images.extend(self.get_images_for_pdf(pdf_id))
-        print(f"[IMAGE DEBUG] Total images collected for note: {len(all_images)}")
-        
-        # Track hinted images
-        used_image_indices = set()
-
-        for i, (topic_name, points) in enumerate(topic_groups.items()):
-            # Sort points by score for this section
-            sorted_points = sorted(points, key=lambda x: x['score'], reverse=True)
-            
-            section_content = ""
-            for p in sorted_points:
-                label = "HIGH" if p['score'] >= 50 else "MEDIUM" if p['score'] >= 25 else "LOW"
-                section_content += f"[{label}] {p['text']}\n"
-            
-            # Limit section content to 3000 chars for deeper discussion
-            section_content = section_content[:3000]
-
-            # Detect relevant images for this section
-            section_images_hint = []
-            for idx, img in enumerate(all_images[:20]):
-                if idx not in used_image_indices:
-                    # Distribute images: ~1.5 images per section
-                    if (i * 1.5) <= idx < ((i + 1) * 1.5):
-                        section_images_hint.append(f"[IMAGE_{idx+1}: page {img['page_number']}]")
-                        used_image_indices.add(idx)
-
-            image_hints_str = ", ".join(section_images_hint) if section_images_hint else "None available."
-
-            section_prompt = f"""
-You are NotesGPT — a world-class academic writer.
-Write a DEEP and high-fidelity section of a study note in {language}.
-
-TOPIC: {topic_name}
-
-SOURCE CONTENT:
-{section_content}
-
-IMAGE LOCATIONS: {image_hints_str}
-
-STRICT OUTPUT FORMAT:
-- Start with the ## 📌 {topic_name} heading immediately.
-- Use ONLY highly detailed bullet points (NO generic summaries).
-- Each bullet point MUST be 2 to 4 lines long, providing deep context.
-- Bold all key terms. Use ⚡ for HIGH importance points.
-- Include EVERY single detail from the source content; do not summarize or skip.
-- Connect concepts into a professional, continuous academic flow.
-- Place image hints on their own line between bullets if provided.
-- End with End_of_Notes.
-"""
-            try:
-                print(f"[*] Generating section: {topic_name}")
-                response = self.llm.invoke(section_prompt)
-                res_text = response.content.strip()
-                # Strip End_of_Notes
-                res_text = res_text.replace("End_of_Notes", "").strip()
-                # Clean up markdown fences
-                res_text = re.sub(r'^```markdown\n|^```\n|```$', '', res_text, flags=re.MULTILINE)
-                res_text = self.clean_note_formatting(res_text)
-                section_notes.append(res_text)
-            except Exception as e:
-                print(f"Error generating section {topic_name}: {e}")
-                fallback = f"## 📌 {topic_name}\n"
-                for p in sorted_points[:5]:
-                    fallback += f"- **{p['text'][:50]}**: {p['text']}\n"
-                section_notes.append(fallback)
-
-        # NEW PHASE 9 — Build title
-        title_line = f"# 🎯 {keywords[0].title()} Study Notes" # Default
-        try:
-            kw_str = ", ".join(keywords[:5])
-            title_prompt = f"Generate ONLY a single title line in the format: # 🎯 [Title]. Base it on these keywords: {kw_str}. Write in {language}."
-            title_res = self.llm.invoke(title_prompt)
-            title_line = title_res.content.strip().split('\n')[0]
-        except Exception:
-            pass
-
-        # NEW PHASE 10 — Build takeaways
-        takeaway_text = "## 🗝️ Key Takeaways\n- Critical concepts discussed in material."
-        try:
-            # Merge some content for takeaways
-            merged_for_takeaways = "\n".join(section_notes)[:2000]
-            takeaways_prompt = f"""
-Based on the following content, generate ONLY the ## 🗝️ Key Takeaways section in {language}.
-Rules:
-- 6-8 bullets, each a complete meaningful sentence.
-- Start with ## 🗝️ immediately.
-- End with End_of_Notes.
-
-CONTENT:
-{merged_for_takeaways}
-"""
-            takeaways_res = self.llm.invoke(takeaways_prompt)
-            takeaway_text = takeaways_res.content.strip().replace("End_of_Notes", "").strip()
-        except Exception:
-            pass
-
-        # NEW PHASE 11 — Assemble final note
-        final_note = title_line + "\n\n" + "\n---\n".join(section_notes) + "\n\n" + takeaway_text
-        final_note = self.clean_note_formatting(final_note)
-
-        # Image Injection (Final Post-processing)
-        for i, img in enumerate(all_images[:20]):
-            placeholder = f"[IMAGE_{i+1}: page {img['page_number']}]"
-            html_block = f"""
-<div style="text-align:center; margin: 20px 0;">
-  <img src="data:{img['media_type']};base64,{img['image_data']}"
-       style="max-width:100%; border-radius:8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);"
-       alt="Contextual Figure" />
-  <p style="font-size:12px; color:#666; margin-top:8px;">Source: Page/Slide {img['page_number']}</p>
-</div>"""
-            final_note = final_note.replace(placeholder, html_block)
-
-        return final_note
-
-    def clean_note_formatting(self, text):
-        """
-        Manual algorithm: Cleans and fixes note formatting.
-        Ensures every bullet point is on its own line.
-        Fixes AI responses that merge bullets into one line.
-        """
-        import re
-        
-        # Step 1: Replace ' - **' pattern with newline + '- **'
-        # This fixes merged bullets like "text - **Next"
-        text = re.sub(r'\s+-\s+\*\*', '\n- **', text)
-        
-        # Step 2: Replace ' - ' that appears mid-sentence
-        # Only when followed by capital or **
-        text = re.sub(r'(?<=[a-z.!?])\s+-\s+(?=[A-Z\*])', '\n- ', text)
-        
-        # Step 3: Ensure ## headings always on own line
-        text = re.sub(r'([^\n])##', r'\1\n\n##', text)
-        
-        # Step 4: Ensure ### headings always on own line
-        text = re.sub(r'([^\n])###', r'\1\n\n###', text)
-        
-        # Step 5: Ensure > blockquotes on own line
-        text = re.sub(r'([^\n])>', r'\1\n>', text)
-        
-        # Step 6: Remove more than 3 consecutive newlines
-        text = re.sub(r'\n{4,}', '\n\n\n', text)
-        
-        # Step 7: Ensure --- dividers on own line
-        text = re.sub(r'([^\n])---', r'\1\n\n---', text)
-        text = re.sub(r'---([^\n])', r'---\n\n\1', text)
-        
-        # Step 8: Fix ⚡ bullets merged in line
-        text = re.sub(r'(?<=[a-z.!?])\s+- ⚡', '\n- ⚡', text)
-        text = re.sub(r'(?<=[a-z.!?])\s+- ⚠️', '\n- ⚠️', text)
-        text = re.sub(r'(?<=[a-z.!?])\s+- 💡', '\n- 💡', text)
-        
-        # Step 9: Ensure blank line before every ## heading
-        text = re.sub(r'\n(##)', r'\n\n\1', text)
-        
-        # Step 10: Ensure blank line after every ## heading
-        text = re.sub(r'(## .+)\n([^\n])', r'\1\n\n\2', text)
-        
-        return text.strip()
-
-    def update_note(self, note_id: str, new_content: str):
-        """
-        Updates the content of an existing note in the database.
-        """
-        conn = get_db_connection()
-        if not conn:
-            return False
-            
-        try:
+            conn = _get_conn()
             cur = conn.cursor()
             cur.execute(
                 "UPDATE notes SET content = %s, updated_at = NOW() WHERE note_id = %s",
-                (new_content, note_id)
+                (new_content, note_id),
             )
-            rows_updated = cur.rowcount
+            updated = cur.rowcount > 0
             conn.commit()
             cur.close()
             conn.close()
-            
-            if rows_updated == 0:
-                print(f"Warning: Attempted to update non-existent note {note_id}")
-                return False
-                
-            return True
+            return updated
         except Exception as e:
-            print(f"Error updating note: {e}")
+            print(f"[update_note] ERROR: {e}")
             return False
 
-    def refine_text(self, pdf_id: str, selected_text: str,
-                    instruction: str):
-        """
-        HYBRID: Manual algorithm finds relevant context,
-        AI answers in structured note format.
-        """
-
-        # ── MANUAL ALGORITHM: Relevance Scorer ──
-        # Score each document chunk by relevance to the
-        # selected text + instruction using keyword overlap.
-        # This is a manual TF-IDF-based relevance algorithm.
-
-        def score_relevance(chunk_text, query_words):
-            """
-            Manual relevance scoring algorithm.
-            Counts how many query words appear in chunk.
-            Weights by position — earlier chunks score higher
-            to prefer introductory/definitional content.
-            Returns a relevance score integer.
-            """
-            chunk_lower = chunk_text.lower()
-            score = 0
-            for word in query_words:
-                if len(word) < 3:
-                    continue
-                count = chunk_lower.count(word)
-                score += count * 2
-            # Bonus for exact phrase match
-            if selected_text.lower()[:30] in chunk_lower:
-                score += 20
-            return score
-
-        # Extract query words from selected text
-        # and instruction combined
-        import re
-        stopwords = {
-            "the","is","in","and","to","of","a","for",
-            "on","with","as","by","this","that","it",
-            "at","from","or","an","be","are","can",
-            "will","which","what","how","why","more",
-            "give","make","explain","me","please","yet",
-            "not","clear","this","part","want","need"
-        }
-        combined_query = selected_text + " " + instruction
-        query_words = [
-            w.lower() for w in
-            re.findall(r'\b[a-z]{3,}\b', combined_query.lower())
-            if w.lower() not in stopwords
-        ]
-
-        # Fetch all chunks for this PDF from database
-        context_chunks = []
-        conn = get_db_connection()
-        if conn:
-            try:
-                cur = conn.cursor()
-                cur.execute("""
-                    SELECT content, chunk_index
-                    FROM document_chunks
-                    WHERE pdf_id = %s
-                    ORDER BY chunk_index ASC
-                """, (pdf_id,))
-                rows = cur.fetchall()
-                cur.close()
-                conn.close()
-
-                # Score each chunk manually
-                scored_chunks = []
-                for row in rows:
-                    chunk_text = row[0]
-                    score = score_relevance(chunk_text, query_words)
-                    scored_chunks.append((score, chunk_text))
-
-                # Sort by relevance score descending
-                scored_chunks.sort(reverse=True)
-
-                # Take top 4 most relevant chunks
-                context_chunks = [
-                    chunk for score, chunk in scored_chunks[:4]
-                    if score > 0
-                ]
-
-                # Fallback: if no relevant chunks found
-                # use vector similarity search
-                if not context_chunks:
-                    try:
-                        query_embedding = self.embeddings.embed_query(
-                            combined_query
-                        )
-                        conn2 = get_db_connection()
-                        if conn2:
-                            cur2 = conn2.cursor()
-                            cur2.execute("""
-                                SELECT content
-                                FROM document_chunks
-                                WHERE pdf_id = %s
-                                ORDER BY embedding <=> %s::vector
-                                LIMIT 4
-                            """, (pdf_id, "[" + ",".join(str(x) for x in query_embedding) + "]"))
-                            context_chunks = [
-                                r[0] for r in cur2.fetchall()
-                            ]
-                            cur2.close()
-                            conn2.close()
-                    except Exception as e:
-                        print(f"Vector fallback failed: {e}")
-
-            except Exception as e:
-                print(f"Error fetching chunks: {e}")
-                if conn:
-                    conn.close()
-
-        context_text = "\n\n".join(context_chunks)
-
-        # ── DETECT INSTRUCTION TYPE ──
-        # Manual classification of what user wants
-        instruction_lower = instruction.lower()
-
-        if any(word in instruction_lower for word in
-               ["example", "eg", "instance", "show me"]):
-            task_type = "GIVE_EXAMPLE"
-            task_instruction = """
-                Provide 2-3 concrete real-world examples that
-                clearly illustrate the selected concept.
-                Each example must be specific and easy to
-                visualize. After examples briefly explain
-                why each one demonstrates the concept.
-            """
-        elif any(word in instruction_lower for word in
-                 ["not clear", "confused", "understand",
-                  "what does", "what is", "explain", "elaborate"]):
-            task_type = "DEEP_EXPLAIN"
-            task_instruction = """
-                Give a thorough step-by-step explanation of
-                the selected concept. Start from the basics,
-                explain the why and how, use an analogy if
-                helpful, then connect back to the main topic.
-            """
-        elif any(word in instruction_lower for word in
-                 ["organize", "structured", "clean",
-                  "format", "arrange", "easy to focus"]):
-            task_type = "REORGANIZE"
-            task_instruction = """
-                Reorganize and restructure the selected content
-                into a cleaner, more logical and scannable
-                format. Break it into clear sub-points.
-                Keep all information but make it easier to
-                read and absorb at a glance.
-            """
-        elif any(word in instruction_lower for word in
-                 ["shorter", "simpler", "simplify",
-                  "brief", "concise", "summarize"]):
-            task_type = "SIMPLIFY"
-            task_instruction = """
-                Rewrite the selected content in simpler,
-                shorter language. Use plain words a student
-                can understand instantly. Keep all key facts
-                but remove complexity and unnecessary words.
-            """
-        else:
-            task_type = "GENERAL"
-            task_instruction = f"""
-                The user asked: {instruction}
-                Answer this specific request about the
-                selected text using the provided context.
-                Be thorough and helpful.
-            """
-
-        # ── BUILD PROMPT ──
-        prompt = f"""
-You are NotesGPT — expert academic note writer.
-A student is working with their structured study note
-and needs help with a specific selected part.
-
-CONTEXT FROM ORIGINAL DOCUMENT:
-{context_text if context_text else "No additional context available."}
-
-THE STUDENT SELECTED THIS TEXT FROM THEIR NOTE:
-\"\"\"{selected_text}\"\"\"
-
-STUDENT'S REQUEST: {instruction}
-
-TASK TYPE DETECTED: {task_type}
-{task_instruction}
-
-OUTPUT FORMAT RULES — FOLLOW EXACTLY:
-Your response must be in the EXACT SAME FORMAT
-as the structured note the student is reading.
-Use this format:
-
-## 📌 [Topic Title Describing Selected Content]
-
-> [One line intro explaining what this response covers]
-
-- ⚡ **[Key Term or Point]**: Full explanation here.
-  Additional context or detail on second line.
-  Third line if needed for examples or connection.
-
-- **[Another Point]**: Explanation with enough detail
-  that a student fully understands without other help.
-
-- 💡 **[Insight or Example]**: Concrete real-world
-  example or interesting insight that helps it click.
-
-- ⚠️ **[If confusion point exists]**: Clarify the
-  common mistake or misunderstanding about this topic.
-
-## 🗝️ Key Takeaways from This Section
-- ⚡ **[Most important point]**: Full sentence.
-- **[Second point]**: Full sentence.
-- **[Third point]**: Full sentence.
-
-STRICT RULES:
-1. Never write paragraphs — only bullets with explanations
-2. Every bullet minimum 2 lines, maximum 4 lines
-3. Bold all key terms
-4. Start IMMEDIATELY with ## 📌 heading
-5. Do not write "Here is" or any meta phrases
-6. Write in English
-7. End with End_of_Notes on its own line
-"""
-
+    def get_images_for_pdf(self, pdf_id: str) -> list[dict]:
         try:
-            response = self.llm.invoke(prompt)
-            result = response.content.strip()
-            # Remove End_of_Notes marker before returning
-            result = result.replace("End_of_Notes", "").strip()
-            if result.startswith("```"):
-                result = re.sub(r"^```markdown\n|^```\n|```$", "", result, flags=re.MULTILINE)
-            return {"refined_content": result}
-        except Exception as e:
-            return {
-                "refined_content": f"""## 📌 Response
-
-> Could not process with AI. Showing context found.
-
-{chr(10).join(f'- {c[:200]}' for c in context_chunks[:3])}
-""",
-                "error": str(e)
-            }
-
-    def discuss_note(self, note_content: str,
-                     user_question: str,
-                     pdf_id: str = None):
-        """
-        HYBRID: Manual algorithm extracts relevant sections
-        from note, AI answers in structured note format.
-        Feature 2 — whole note discussion mode.
-        """
-
-        # ── MANUAL ALGORITHM: Note Section Extractor ──
-        # Finds which sections of the note are most relevant
-        # to the user question using keyword scoring.
-        # This is a manual algorithm — no AI used here.
-
-        def extract_relevant_sections(note_html, query):
-            """
-            Manual algorithm: splits note by ## headings,
-            scores each section by keyword overlap with query,
-            returns top 3 most relevant sections as text.
-            """
-            import re
-
-            # Remove HTML tags to get plain text
-            plain = re.sub(r'<[^>]+>', '', note_html)
-
-            # Split by section headings
-            sections = re.split(r'\n##\s+', plain)
-
-            # Get query keywords
-            stopwords = {
-                "the","is","in","and","to","of","a",
-                "for","on","with","as","by","this","that",
-                "it","at","from","or","an","be","are",
-                "can","will","which","what","how","why",
-                "more","want","need","me","my","make",
-                "please","about","tell","explain"
-            }
-            query_words = [
-                w.lower() for w in
-                re.findall(r'\b[a-z]{3,}\b', query.lower())
-                if w.lower() not in stopwords
-            ]
-
-            # Score each section
-            scored = []
-            for section in sections:
-                if len(section.strip()) < 30:
-                    continue
-                section_lower = section.lower()
-                score = sum(
-                    section_lower.count(word) * 2
-                    for word in query_words
-                )
-                scored.append((score, section.strip()))
-
-            # Sort by score and return top 3
-            scored.sort(reverse=True)
-            top_sections = [s for sc, s in scored[:3] if sc > 0]
-
-            # Fallback: return first 1000 chars of note
-            if not top_sections:
-                return [plain[:1000]]
-
-            return top_sections
-
-        # Run manual section extractor
-        relevant_sections = extract_relevant_sections(
-            note_content, user_question
-        )
-        relevant_text = "\n\n---\n\n".join(relevant_sections)
-
-        # Limit to 3000 chars
-        relevant_text = relevant_text[:3000]
-
-        # ── BUILD PROMPT ──
-        prompt = f"""
-You are NotesGPT — expert academic note writer.
-A student has a structured study note and wants
-to explore or improve part of it through a question.
-
-RELEVANT SECTIONS FROM THEIR NOTE:
-{relevant_text}
-
-STUDENT'S QUESTION OR REQUEST:
-{user_question}
-
-YOUR TASK:
-Answer the student's question OR fulfill their request
-using ONLY the content from their note sections above.
-If they want reorganization, reorganize only that content.
-If they want more detail, expand using the context given.
-If they want a different format, reformat it.
-
-OUTPUT FORMAT — SAME AS THEIR NOTE:
-
-## 📌 [Topic That Answers Their Question]
-
-> [One line saying what this response provides]
-
-- ⚡ **[Key Point]**: Full explanation in 2-3 lines.
-  Give enough detail that it fully answers the question.
-
-- **[Another Point]**: Explanation with context.
-  Connect it to the student's original question.
-
-- 💡 **[Tip or Insight]**: Something helpful the
-  student can use when studying this material.
-
-## 🗝️ Key Takeaways
-- ⚡ **[Point 1]**: Complete meaningful sentence.
-- **[Second point]**: Complete meaningful sentence.
-- **[Third point]**: Complete meaningful sentence.
-
-STRICT RULES:
-1. Bullets only — no paragraphs
-2. Every bullet 2 to 4 lines
-3. Bold all key terms
-4. Start with ## 📌 immediately
-5. No meta phrases ever
-6. End with End_of_Notes
-"""
-
-        try:
-            response = self.llm.invoke(prompt)
-            result = response.content.strip()
-            result = result.replace("End_of_Notes", "").strip()
-            if result.startswith("```"):
-                result = re.sub(r"^```markdown\n|^```\n|```$", "", result, flags=re.MULTILINE)
-            return {"refined_content": result}
-        except Exception as e:
-            return {
-                "refined_content": f"""## 📌 Response
-
-> Showing relevant sections from your note.
-
-{chr(10).join(f'- {line.strip()}' for line in relevant_text.split(chr(10)) if len(line.strip()) > 20)[:800]}
-""",
-                "error": str(e)
-            }
-
-    def summarize_prompts(self, prompts: list,
-                          original_text: str = None) -> str:
-        """
-        Generate topic label describing WHAT the text
-        is about — not what was done to it.
-        Uses manual keyword extraction before calling AI.
-        """
-        if not prompts:
-            return "Refined Section"
-
-        # ── MANUAL ALGORITHM: Extract subject keywords ──
-        # Find the most meaningful words from original text
-        # to identify the actual topic being discussed.
-        import re
-        stopwords = {
-            "the","is","in","and","to","of","a","for",
-            "on","with","as","by","this","that","it",
-            "at","from","or","an","be","are","can",
-            "will","which","make","give","explain",
-            "more","please","want","need","clear","yet"
-        }
-
-        subject_keywords = []
-        if original_text:
-            words = re.findall(
-                r'\b[a-zA-Z]{4,}\b', original_text
+            conn = _get_conn()
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            cur.execute(
+                "SELECT image_data, media_type, page_number, caption FROM document_images WHERE pdf_id = %s ORDER BY page_number ASC",
+                (pdf_id,),
             )
-            word_counts = {}
-            for w in words:
-                wl = w.lower()
-                if wl not in stopwords:
-                    word_counts[wl] = word_counts.get(wl,0)+1
-            # Top 3 most frequent meaningful words
-            sorted_words = sorted(
-                word_counts.items(),
-                key=lambda x: x[1],
-                reverse=True
-            )
-            subject_keywords = [w for w,c in sorted_words[:3]]
+            rows = [dict(r) for r in cur.fetchall()]
+            cur.close()
+            conn.close()
+            return rows
+        except Exception as e:
+            print(f"[get_images_for_pdf] ERROR: {e}")
+            return []
 
-        keywords_hint = ", ".join(subject_keywords)
-        prompt_history = " → ".join(prompts)
-        text_snippet = ""
-        if original_text:
-            text_snippet = original_text[:120].replace('\n',' ')
-
-        prompt = f"""
-You are a precise topic labeler for academic notes.
-
-SELECTED TEXT SUBJECT (from keyword analysis):
-{keywords_hint}
-
-TEXT SNIPPET: {text_snippet}
-
-USER INSTRUCTION SEQUENCE: {prompt_history}
-
-YOUR JOB:
-Generate a SHORT topic label (maximum 5 words) that
-describes WHAT THE SELECTED TEXT IS ABOUT.
-The label should work as a section heading in a note.
-
-GOOD LABEL EXAMPLES:
-  Mitochondria Energy Production
-  Market Segmentation Strategies
-  Newton Laws of Motion
-  SQL Database Normalization
-  Photosynthesis Light Reactions
-
-BAD LABEL EXAMPLES:
-  Refined Text
-  AI Adjustment
-  Simplified Version
-  User Edit
-  Modified Content
-
-Output ONLY the topic label.
-No quotes. No punctuation at end.
-Capitalize each word. Nothing else.
-"""
-
+    def create_folder(self, user_id: str, name: str) -> dict | None:
         try:
-            response = self.llm.invoke(prompt)
-            return response.content.strip().strip('"').strip("'")
-        except Exception:
-            # Manual fallback using extracted keywords
-            if subject_keywords:
-                return " ".join(
-                    w.capitalize() for w in subject_keywords[:3]
-                )
-            return "Refined Study Content"
-
-    # --- Folder Management ---
-    def create_folder(self, user_id, name):
-        conn = get_db_connection()
-        if not conn:
-            return None
-        
-        try:
+            conn = _get_conn()
             cur = conn.cursor()
             folder_id = str(uuid.uuid4())
             cur.execute(
                 "INSERT INTO folders (id, user_id, name) VALUES (%s, %s, %s) RETURNING id",
-                (folder_id, user_id, name)
+                (folder_id, user_id, name),
             )
             conn.commit()
             cur.close()
             conn.close()
             return {"id": folder_id, "name": name}
         except Exception as e:
-            print(f"Error creating folder: {e}")
+            print(f"[create_folder] ERROR: {e}")
             return None
 
-    def get_all_folders(self, user_id):
-        conn = get_db_connection()
-        if not conn:
-            return []
-        
+    def get_all_folders(self, user_id: str) -> list[dict]:
         try:
-            cur = conn.cursor(cursor_factory=RealDictCursor) # Ensure dicts are returned
-            cur.execute("SELECT * FROM folders WHERE user_id = %s ORDER BY created_at DESC", (user_id,))
-            folders = cur.fetchall()
+            conn = _get_conn()
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            cur.execute(
+                "SELECT * FROM folders WHERE user_id = %s ORDER BY created_at DESC",
+                (user_id,),
+            )
+            rows = [dict(r) for r in cur.fetchall()]
             cur.close()
             conn.close()
-            return folders
+            return rows
         except Exception as e:
-            print(f"Error getting folders: {e}")
+            print(f"[get_all_folders] ERROR: {e}")
             return []
 
-    def update_note_folder(self, note_id, folder_id):
-        conn = get_db_connection()
-        if not conn:
-            return False
-            
+    def update_note_folder(self, note_id: str, folder_id: str) -> bool:
         try:
+            conn = _get_conn()
             cur = conn.cursor()
             cur.execute(
                 "UPDATE notes SET folder_id = %s, updated_at = NOW() WHERE note_id = %s",
-                (folder_id, note_id)
+                (folder_id, note_id),
             )
-            # Check if the note actually existed and was updated
-            success = cur.rowcount > 0 
-            
+            success = cur.rowcount > 0
             conn.commit()
             cur.close()
             conn.close()
             return success
         except Exception as e:
-            # Fixed the string formatting here (added the 'f' before the quotes)
-            print(f"Error updating note folder: {e}") 
-            if conn:
-                conn.close()
+            print(f"[update_note_folder] ERROR: {e}")
             return False
 
-    def get_all_notes(self, user_id, folder_id=None):
-        conn = get_db_connection()
-        if not conn:
-            print("DB Connection failed in get_all_notes")
-            return []
-        
+    def get_all_notes(
+        self, user_id: str, folder_id: str = None
+    ) -> list[dict]:
         try:
-            print(f"Fetching notes for user: {user_id}, folder: {folder_id}")
+            conn = _get_conn()
             cur = conn.cursor(cursor_factory=RealDictCursor)
-            
             query = """
-                SELECT note_id, title, created_at, note_type, is_in_folder, folder_id 
-                FROM notes 
-                WHERE user_id = %s
+                SELECT note_id, title, created_at, note_type, is_in_folder, folder_id
+                FROM notes WHERE user_id = %s
             """
             params = [user_id]
-            
             if folder_id:
                 query += " AND folder_id = %s"
                 params.append(folder_id)
-                
             query += " ORDER BY updated_at DESC"
-            
             cur.execute(query, tuple(params))
-            notes = cur.fetchall()
+            rows = [dict(r) for r in cur.fetchall()]
             cur.close()
             conn.close()
-            print(f"Found {len(notes)} notes")
-            return notes
+            return rows
         except Exception as e:
-            print(f"Error getting notes: {e}")
-            if conn:
-                conn.close()
+            print(f"[get_all_notes] ERROR: {e}")
             return []
 
-ai_service = AIService()
+
+# ─────────────────────────────────────────────────────────────
+#  SINGLETON — import this in router.py
+# ─────────────────────────────────────────────────────────────
+note_service = NoteService()
+
+

@@ -38,7 +38,7 @@ def create_app() -> FastAPI:
 
     # Include Member 3 Router (Smart Note Management)
     from m3_structurednotes.router import router as m3_router
-    app.include_router(m3_router)
+    app.include_router(m3_router, prefix="/api/m3")
     
     # Mount folders for serving files
     import os

@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_BASE_URL = 'http://127.0.0.1:8000';
+const API_BASE_URL = 'http://127.0.0.1:8000/api/m3';
 
 const api = axios.create({
     baseURL: API_BASE_URL,
@@ -64,12 +64,14 @@ export const refineText = async (pdfId, selectedText, instruction) => {
 export const discussNote = async (
     noteContent,
     userQuestion,
-    pdfId = null
+    pdfId = null,
+    conversationHistory = null
 ) => {
     const response = await api.post('/discuss-note', {
         note_content: noteContent,
         user_question: userQuestion,
-        pdf_id: pdfId
+        pdf_id: pdfId,
+        conversation_history: conversationHistory
     });
     return response.data;
 };
@@ -120,6 +122,11 @@ export const getNotes = async (userId, folderId = null) => {
     const response = await api.get('/notes', {
         params: params,
     });
+    return response.data;
+};
+
+export const getNote = async (noteId) => {
+    const response = await api.get(`/notes/${noteId}`);
     return response.data;
 };
 

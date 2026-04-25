@@ -1,113 +1,115 @@
-// frontend/src/services/api.js
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
-const API_BASE_URL = (import.meta.env && import.meta.env.VITE_API_BASE_URL) || 'http://localhost:8000';
+// ── Auth token helpers ────────────────────────────────────────────────────────
+// IMPORTANT: must read 'access_token' — the key used by tokenStorage.js / setTokens().
+// The old key 'auth_token' was never written by M1's login flow, so every request
+// sent no Authorization header and got "Missing authentication token" from the backend.
+const getAuthToken = () => localStorage.getItem('access_token');
 
+const authHeaders = () => {
+  const token = getAuthToken();
+  return token ? { 'Authorization': `Bearer ${token}` } : {};
+};
+
+// Handle 401 responses globally — redirect to login
+const handleResponse = async (response) => {
+  if (response.status === 401) {
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('refresh_token');
+    window.location.href = '/login';
+    throw new Error('Unauthorized — redirecting to login');
+  }
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    const message = Array.isArray(error.detail)
+      ? error.detail.map(e => e.msg || e).join(', ')
+      : error.detail || 'Request failed';
+    throw new Error(message);
+  }
+  return response.json();
+};
+
+// API Service
 class APIService {
-  /**
-   * Generate a new quiz
-   */
+
+  // Generate a new quiz
   async generateQuiz(formData) {
+    formData.delete('user_id');
+
     const response = await fetch(`${API_BASE_URL}/api/quizzes/generate`, {
       method: 'POST',
-      body: formData
+      headers: authHeaders(),
+      body: formData,
     });
-    
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.detail || 'Failed to generate quiz');
-    }
-    
-    return response.json();
+    return handleResponse(response);
   }
 
-  /**
-   * Submit quiz answers
-   */
+  // Submit quiz answers
   async submitQuiz(quizId, formData) {
+    formData.delete('user_id');
+
     const response = await fetch(`${API_BASE_URL}/api/quizzes/${quizId}/submit`, {
       method: 'POST',
-      body: formData
+      headers: authHeaders(),
+      body: formData,
     });
-    
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.detail || 'Failed to submit quiz');
-    }
-    
-    return response.json();
+    return handleResponse(response);
   }
 
-  /**
-   * Get quiz history
-   */
-  async getHistory(userId, limit = 10, offset = 0) {
+  // Get quiz history for the authenticated user
+  async getHistory(limit = 10, offset = 0) {
     const response = await fetch(
-      `${API_BASE_URL}/api/quizzes/history/${userId}?limit=${limit}&offset=${offset}`
+      `${API_BASE_URL}/api/quizzes/history/me?limit=${limit}&offset=${offset}`,
+      { headers: authHeaders() }
     );
-    
-    if (!response.ok) {
-      throw new Error('Failed to fetch history');
-    }
-    
-    return response.json();
+    return handleResponse(response);
   }
 
-  /**
-   * Get analytics
-   */
-  async getAnalytics(userId) {
-    const response = await fetch(`${API_BASE_URL}/api/quizzes/analytics/${userId}`);
-    
-    if (!response.ok) {
-      throw new Error('Failed to fetch analytics');
-    }
-    
-    return response.json();
-  }
-
-  /**
-   * Get attempt details
-   */
-  async getAttemptDetails(attemptId, userId) {
+  // Get analytics for the authenticated user
+  async getAnalytics() {
     const response = await fetch(
-      `${API_BASE_URL}/api/quizzes/attempt/${attemptId}/details?user_id=${userId}`
+      `${API_BASE_URL}/api/quizzes/analytics/me`,
+      { headers: authHeaders() }
     );
-    
-    if (!response.ok) {
-      throw new Error('Failed to fetch attempt details');
-    }
-    
-    return response.json();
+    return handleResponse(response);
   }
 
-  /**
-   * Delete quiz attempt
-   */
-  async deleteAttempt(attemptId, userId) {
+  // Get attempt details
+  async getAttemptDetails(attemptId) {
     const response = await fetch(
-      `${API_BASE_URL}/api/quizzes/history/${attemptId}?user_id=${userId}`,
-      { method: 'DELETE' }
+      `${API_BASE_URL}/api/quizzes/attempt/${attemptId}/details`,
+      { headers: authHeaders() }
     );
-    
-    if (!response.ok) {
-      throw new Error('Failed to delete attempt');
-    }
-    
-    return response.json();
+    return handleResponse(response);
   }
 
-  /**
-   * Download quiz results as PDF
-   */
+  // Delete a quiz attempt
+  async deleteAttempt(attemptId) {
+    const response = await fetch(
+      `${API_BASE_URL}/api/quizzes/history/${attemptId}`,
+      {
+        method: 'DELETE',
+        headers: authHeaders(),
+      }
+    );
+    return handleResponse(response);
+  }
+
+  // Download quiz results as PDF
   async downloadPDF(quizId, attemptId) {
     const response = await fetch(
-      `${API_BASE_URL}/api/quizzes/${quizId}/results/${attemptId}/pdf`
+      `${API_BASE_URL}/api/quizzes/${quizId}/results/${attemptId}/pdf`,
+      { headers: authHeaders() }
     );
-    
+    if (response.status === 401) {
+      localStorage.removeItem('access_token');
+      localStorage.removeItem('refresh_token');
+      window.location.href = '/login';
+      throw new Error('Unauthorized');
+    }
     if (!response.ok) {
       throw new Error('Failed to download PDF');
     }
-    
     return response.blob();
   }
 }

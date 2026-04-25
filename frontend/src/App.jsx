@@ -27,8 +27,9 @@ import NoteEditor from './m3_structurednotes/pages/NoteEditor';
 import QuizPage from '@/components/quiz/QuizPage';
 import QuizHistory from '@/components/quiz/QuizHistory';
 
-// ===== MEMBER 5 - Tasks =====
-import TaskDashboard from '@/components/tasks/TaskDashboard';
+// ===== MEMBER 5 - Tasks & Second Brain =====
+import TaskDashboard    from '@/components/tasks/TaskDashboard';
+import SecondBrainPage from '@/pages/SecondBrainPage';
 
 // ===== DEV NAVIGATION (auto-hidden in production) =====
 import DevNav from '@/components/DevNav';
@@ -53,8 +54,10 @@ const AppLayout = () => {
       setActiveView('tasks');
     } else if (location.pathname === '/quiz' || location.pathname === '/quiz/history') {
       setActiveView('quiz');
-    } else if (location.pathname === '/dashboard') {
+   } else if (location.pathname === '/dashboard') {
       setActiveView('dashboard');
+    } else if (location.pathname === '/second-brain') {
+      setActiveView('second-brain');
     }
   }, [location.pathname]);
 
@@ -95,7 +98,8 @@ const AppLayout = () => {
           <Route path="/quiz/history" element={<QuizHistory />} />
 
           {/* Member 5 - Tasks */}
-          <Route path="/tasks" element={<TaskDashboard />} />
+          <Route path="/tasks"        element={<TaskDashboard />}    />
+<Route path="/second-brain" element={<SecondBrainPage />}  />
 
           {/* Fallback */}
           <Route path="*" element={<Navigate to="/" replace />} />

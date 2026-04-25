@@ -20,6 +20,7 @@ import Rail from '@/components/filemanager/Rail';
 import Dashboard from '@/pages/Dashboard';
 
 // ===== MEMBER 3 (Sandavi) - Structured Notes =====
+// Temporarily restoring M3 dashboard route for testing material upload
 import M3Dashboard from './m3_structurednotes/pages/Dashboard';
 import NoteEditor from './m3_structurednotes/pages/NoteEditor';
 
@@ -27,12 +28,8 @@ import NoteEditor from './m3_structurednotes/pages/NoteEditor';
 import QuizPage from '@/components/quiz/QuizPage';
 import QuizHistory from '@/components/quiz/QuizHistory';
 
-// ===== MEMBER 5 - Tasks & Second Brain =====
-import TaskDashboard    from '@/components/tasks/TaskDashboard';
-import SecondBrainPage from '@/pages/SecondBrainPage';
-
-// ===== ADMIN =====
-import AdminDashboard from '@/pages/AdminDashboard';
+// ===== MEMBER 5 - Tasks =====
+import TaskDashboard from '@/components/tasks/TaskDashboard';
 
 // ===== DEV NAVIGATION (auto-hidden in production) =====
 import DevNav from '@/components/DevNav';
@@ -57,10 +54,8 @@ const AppLayout = () => {
       setActiveView('tasks');
     } else if (location.pathname === '/quiz' || location.pathname === '/quiz/history') {
       setActiveView('quiz');
-   } else if (location.pathname === '/dashboard') {
+    } else if (location.pathname === '/dashboard') {
       setActiveView('dashboard');
-    } else if (location.pathname === '/second-brain') {
-      setActiveView('second-brain');
     }
   }, [location.pathname]);
 
@@ -73,7 +68,7 @@ const AppLayout = () => {
       )}
 
       {/* Page content */}
-      <div style={{ flex: 1, height: '100vh', overflowY: 'auto' }}>
+      <div style={{ flex: 1, overflow: 'hidden' }}>
         <Routes>
           {/* Member 1 - Auth */}
           <Route path="/"               element={<LandingPage />} />
@@ -101,11 +96,7 @@ const AppLayout = () => {
           <Route path="/quiz/history" element={<QuizHistory />} />
 
           {/* Member 5 - Tasks */}
-          <Route path="/tasks"        element={<TaskDashboard />}    />
-<Route path="/second-brain" element={<SecondBrainPage />}  />
-
-          {/* Admin Dashboard */}
-          <Route path="/admin" element={<AdminDashboard />} />
+          <Route path="/tasks" element={<TaskDashboard />} />
 
           {/* Fallback */}
           <Route path="*" element={<Navigate to="/" replace />} />

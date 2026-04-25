@@ -76,6 +76,30 @@ export default function TaskDashboard() {
     }
   };
 
+  // ── REMINDER NOTIFICATIONS ─────────────────────────────────────────────────
+  useEffect(() => {
+    if (typeof Notification === 'undefined') return;
+    if (Notification.permission === 'default') Notification.requestPermission();
+
+    const interval = setInterval(() => {
+      if (Notification.permission !== 'granted') return;
+      const now = new Date();
+      Object.values(tasksByCategory).flat().forEach(task => {
+        if (!task.due_date || !task.reminder_minutes_before || task.status === 'done') return;
+        const due = new Date(task.due_date);
+        const diff = (due - now) / 60000;
+        if (diff > 0 && diff <= task.reminder_minutes_before && diff > task.reminder_minutes_before - 1) {
+          new Notification(`⏰ Task Reminder: ${task.title}`, {
+            body: `Due in ${Math.round(diff)} minute${Math.round(diff) !== 1 ? 's' : ''}`,
+            icon: '/logo.png',
+          });
+        }
+      });
+    }, 60000);
+
+    return () => clearInterval(interval);
+  }, [tasksByCategory]);
+
   // ── CATEGORY HANDLERS ──────────────────────────────────────────────────────
   const handleAddCategory = async (data) => {
     try {
@@ -165,6 +189,13 @@ export default function TaskDashboard() {
     } catch (e) { console.error(e); }
   };
 
+  const handleUpdateEvent = async (eventId, eventData) => {
+    try {
+      const res = await axiosInstance.patch(`/api/v1/calendar/events/${eventId}`, eventData);
+      setCalendarEvents(prev => prev.map(e => e.id === eventId ? res.data : e));
+    } catch (e) { console.error(e); }
+  };
+
   // ── RENDER ─────────────────────────────────────────────────────────────────
   if (loading) return (
     <Box className="zen-container" display="flex" alignItems="center" justifyContent="center">
@@ -250,12 +281,13 @@ export default function TaskDashboard() {
 
       {/* ── EXPANDED CALENDAR OVERLAY ── */}
       {calendarExpanded && (
-        <ExpandedCalendar
+       <ExpandedCalendar
           tasks={allTasks}
           events={calendarEvents}
           onClose={() => setCalendarExpanded(false)}
           onAddEvent={handleAddEvent}
           onDeleteEvent={handleDeleteEvent}
+          onUpdateEvent={handleUpdateEvent}
         />
       )}
 

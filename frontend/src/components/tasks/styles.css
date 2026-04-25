@@ -215,15 +215,17 @@
 }
 .exp-cal-grid {
   display: grid; grid-template-columns: repeat(7, 1fr);
+  grid-template-rows: auto repeat(6, 1fr);
   gap: 1px; background: rgba(255,255,255,0.04);
   border-radius: 8px; overflow: hidden;
+  flex: 1; min-height: 0;
 }
 .exp-day-name {
   text-align: center; font-size: 10px; color: #4b5563; font-weight: 700;
   padding: 8px 0; background: #0c1018; text-transform: uppercase;
 }
 .exp-day-cell {
-  background: #0c1018; min-height: 88px;
+  background: #0c1018;
   padding: 7px 5px; cursor: default; transition: background 0.15s;
 }
 .exp-day-cell.active-cell { cursor: pointer; }

@@ -8,6 +8,7 @@ import ChevronLeftIcon  from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import AddIcon          from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import EditOutlinedIcon  from '@mui/icons-material/EditOutlined';
 
 const MONTHS   = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const DAYS     = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -18,13 +19,15 @@ const FIELD_SX = {
 };
 const MENU_SX = { PaperProps: { sx: { bgcolor: '#1a1f2e', color: '#f3f4f6' } } };
 
-export default function ExpandedCalendar({ tasks, events, onClose, onAddEvent, onDeleteEvent }) {
+export default function ExpandedCalendar({ tasks, events, onClose, onAddEvent, onDeleteEvent, onUpdateEvent }) {
   const today = new Date();
   const [year,         setYear]         = useState(today.getFullYear());
   const [month,        setMonth]        = useState(today.getMonth());
   const [selectedDay,  setSelectedDay]  = useState(today.getDate());
-  const [addOpen,      setAddOpen]      = useState(false);
+const [addOpen,      setAddOpen]      = useState(false);
   const [ev, setEv] = useState({ title: '', description: '', start: '', end: '', color: '#6366f1' });
+  const [editOpen,     setEditOpen]     = useState(false);
+  const [editEv,       setEditEv]       = useState({ id: '', title: '', description: '', start: '', end: '', color: '#6366f1' });
 
   const prev = () => month === 0  ? (setMonth(11), setYear(y => y - 1)) : setMonth(m => m - 1);
   const next = () => month === 11 ? (setMonth(0),  setYear(y => y + 1)) : setMonth(m => m + 1);
@@ -50,6 +53,18 @@ export default function ExpandedCalendar({ tasks, events, onClose, onAddEvent, o
 
   const cells = [...Array(firstDay).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)];
   const selectedItems = selectedDay ? (dayMap[selectedDay] || []) : [];
+
+ const handleEdit = async () => {
+    if (!editEv.title.trim() || !editEv.start) return;
+    await onUpdateEvent(editEv.id, {
+      title: editEv.title,
+      description: editEv.description || null,
+      start_time: new Date(editEv.start).toISOString(),
+      end_time: new Date(editEv.end || editEv.start).toISOString(),
+      color: editEv.color,
+    });
+    setEditOpen(false);
+  };
 
   const handleAdd = async () => {
     if (!ev.title.trim() || !ev.start) return;
@@ -88,7 +103,7 @@ export default function ExpandedCalendar({ tasks, events, onClose, onAddEvent, o
       <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 270px', flex: 1, overflow: 'hidden' }}>
 
         {/* Calendar grid */}
-        <Box sx={{ overflow: 'auto', p: 2 }}>
+        <Box sx={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', p: 2 }}>
           <Box className="exp-cal-grid">
             {DAYS.map(d => <Box key={d} className="exp-day-name">{d}</Box>)}
             {cells.map((day, i) => (
@@ -144,16 +159,56 @@ export default function ExpandedCalendar({ tasks, events, onClose, onAddEvent, o
                   </Typography>
                 </Box>
                 {item._type === 'event' && (
-                  <IconButton size="small" onClick={() => onDeleteEvent(item.id)}
-                    sx={{ color: '#4b5563', '&:hover': { color: '#ef4444' }, flexShrink: 0 }}>
-                    <DeleteOutlineIcon fontSize="small" />
-                  </IconButton>
+                  <Box sx={{ display: 'flex', flexShrink: 0 }}>
+                    <IconButton size="small"
+                      onClick={() => {
+                        const pad = d => new Date(d).toISOString().slice(0, 16);
+                        setEditEv({ id: item.id, title: item.title, description: item.description || '', start: pad(item.start_time), end: pad(item.end_time), color: item._color });
+                        setEditOpen(true);
+                      }}
+                      sx={{ color: '#4b5563', '&:hover': { color: '#6366f1' } }}>
+                      <EditOutlinedIcon fontSize="small" />
+                    </IconButton>
+                    <IconButton size="small" onClick={() => onDeleteEvent(item.id)}
+                      sx={{ color: '#4b5563', '&:hover': { color: '#ef4444' } }}>
+                      <DeleteOutlineIcon fontSize="small" />
+                    </IconButton>
+                  </Box>
                 )}
               </Box>
             </Box>
           ))}
         </Box>
       </Box>
+
+    {/* ── EDIT EVENT DIALOG ── */}
+      <Dialog open={editOpen} onClose={() => setEditOpen(false)} maxWidth="sm" fullWidth
+        PaperProps={{ sx: { bgcolor: '#1a1f2e', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 3 } }}>
+        <DialogTitle sx={{ color: '#f3f4f6', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>Edit Event</DialogTitle>
+        <DialogContent sx={{ pt: 3, display: 'flex', flexDirection: 'column', gap: 2.5 }}>
+          <TextField label="Title *" value={editEv.title} onChange={e => setEditEv(p => ({ ...p, title: e.target.value }))} fullWidth sx={FIELD_SX} />
+          <TextField label="Description" value={editEv.description} onChange={e => setEditEv(p => ({ ...p, description: e.target.value }))} fullWidth multiline rows={2} sx={FIELD_SX} />
+          <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
+            <TextField label="Start *" type="datetime-local" value={editEv.start} onChange={e => setEditEv(p => ({ ...p, start: e.target.value }))} InputLabelProps={{ shrink: true }} sx={FIELD_SX} inputProps={{ style: { colorScheme: 'dark' } }} />
+            <TextField label="End" type="datetime-local" value={editEv.end} onChange={e => setEditEv(p => ({ ...p, end: e.target.value }))} InputLabelProps={{ shrink: true }} sx={FIELD_SX} inputProps={{ style: { colorScheme: 'dark' } }} />
+          </Box>
+          <Box>
+            <Typography sx={{ color: '#9ca3af', fontSize: 11, mb: 1, fontWeight: 700, letterSpacing: '0.08em' }}>COLOR</Typography>
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              {COLORS.map(c => (
+                <Box key={c} onClick={() => setEditEv(p => ({ ...p, color: c }))}
+                  sx={{ width: 28, height: 28, borderRadius: '50%', bgcolor: c, cursor: 'pointer',
+                        border: editEv.color === c ? '3px solid #fff' : '3px solid transparent',
+                        boxShadow: editEv.color === c ? `0 0 0 2px ${c}` : 'none', transition: 'all 0.15s' }} />
+              ))}
+            </Box>
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ borderTop: '1px solid rgba(255,255,255,0.08)', px: 3, py: 2 }}>
+          <Button onClick={() => setEditOpen(false)} sx={{ color: '#9ca3af' }}>Cancel</Button>
+          <Button onClick={handleEdit} variant="contained" sx={{ bgcolor: '#6366f1', '&:hover': { bgcolor: '#4f46e5' } }}>Save Changes</Button>
+        </DialogActions>
+      </Dialog>
 
       {/* ── ADD EVENT DIALOG ── */}
       <Dialog open={addOpen} onClose={() => setAddOpen(false)} maxWidth="sm" fullWidth

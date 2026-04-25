@@ -50,7 +50,7 @@ const AppLayout = () => {
   const [selectedWorkspaceFolder, setSelectedWorkspaceFolder] = useState(null);
   const lastSavedCompletionVersionRef = useRef(0);
   const showRail = !noRailPages.includes(location.pathname);
-  const showWorkspacePanel = showRail && location.pathname !== '/dashboard' && location.pathname !== '/files' && location.pathname !== '/notes/create';
+  const showWorkspacePanel = showRail && location.pathname !== '/dashboard' && location.pathname !== '/files' && location.pathname !== '/files/create-note';
 
   // Sync activeView with current URL
   useEffect(() => {
@@ -70,7 +70,7 @@ const AppLayout = () => {
       setActiveView('flashcards');
     } else if (location.pathname === '/second-brain') {
       setActiveView('second-brain');
-    } else if (location.pathname === '/files') {
+    } else if (location.pathname.startsWith('/files')) {
       setActiveView('files');
     }
   }, [location.pathname]);
@@ -143,7 +143,8 @@ const AppLayout = () => {
 
           {/* Member 3 - Structured Notes */}
           <Route path="/notes"                element={<M3Dashboard />} />
-          <Route path="/notes/create"         element={<ManualNoteEditor />} />
+          <Route path="/files/create-note"    element={<ManualNoteEditor />} />
+          <Route path="/notes/create"         element={<Navigate to="/files/create-note" replace />} />
           <Route path="/notes/editor/:noteId" element={<NoteEditor />} />
 
           {/* Member 4 - Quiz */}

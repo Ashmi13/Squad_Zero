@@ -199,7 +199,7 @@ const FileManagerPage = ({ activeView, setActiveView }) => {
 
             <button
               type="button"
-              onClick={() => navigate('/notes/create')}
+              onClick={() => navigate('/files/create-note')}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',

@@ -30,6 +30,9 @@ import QuizHistory from '@/components/quiz/QuizHistory';
 // ===== MEMBER 5 - Tasks =====
 import TaskDashboard from '@/components/tasks/TaskDashboard';
 
+// ===== ADMIN =====
+import AdminDashboard from '@/pages/AdminDashboard';
+
 // ===== DEV NAVIGATION (auto-hidden in production) =====
 import DevNav from '@/components/DevNav';
 
@@ -67,7 +70,7 @@ const AppLayout = () => {
       )}
 
       {/* Page content */}
-      <div style={{ flex: 1, overflow: 'hidden' }}>
+      <div style={{ flex: 1, height: '100vh', overflowY: 'auto' }}>
         <Routes>
           {/* Member 1 - Auth */}
           <Route path="/"               element={<LandingPage />} />
@@ -96,6 +99,9 @@ const AppLayout = () => {
 
           {/* Member 5 - Tasks */}
           <Route path="/tasks" element={<TaskDashboard />} />
+
+          {/* Admin Dashboard */}
+          <Route path="/admin" element={<AdminDashboard />} />
 
           {/* Fallback */}
           <Route path="*" element={<Navigate to="/" replace />} />

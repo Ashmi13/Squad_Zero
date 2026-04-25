@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
-import { Home, FolderOpen, BrainCircuit, CheckSquare, Edit3, Settings } from 'lucide-react';
+import { Home, FolderOpen, BrainCircuit, CheckSquare, Edit3, Settings, Shield } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import SettingsPanel from './SettingsPanel';
+import { useAuth } from '@/hooks/useAuth';
 
 const Rail = ({ activeView, setActiveView }) => {
   const navigate = useNavigate();
   const location = useLocation();
+  const { user } = useAuth();
   const [showSettings, setShowSettings] = useState(false);
 
   return (
@@ -83,6 +85,25 @@ const Rail = ({ activeView, setActiveView }) => {
     <Icon size={22} strokeWidth={1.5} />
   </div>
 ))}
+
+      {/* Admin Icon (Visible only to admins) */}
+      {user?.role === 'admin' && (
+        <div
+          onClick={() => { navigate('/admin'); setActiveView('admin'); }}
+          style={{
+            width: '44px', height: '44px', borderRadius: '12px',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            cursor: 'pointer',
+            backgroundColor: activeView === 'admin' ? '#f59e0b' : 'transparent',
+            color: activeView === 'admin' ? 'white' : '#888',
+            transition: 'all 0.2s',
+            border: activeView === 'admin' ? 'none' : '1px solid rgba(245, 158, 11, 0.2)',
+          }}
+          title="Admin Dashboard"
+        >
+          <Shield size={22} strokeWidth={1.5} />
+        </div>
+      )}
 
       {/* Settings icon */}
       <div

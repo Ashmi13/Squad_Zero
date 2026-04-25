@@ -28,6 +28,7 @@ export const useAuth = () => {
               id: decoded.sub,
               email: decoded.email,
               fullName: decoded.full_name,
+              role: decoded.role || 'user',
             });
             setIsAuthenticated(true);
           } else {

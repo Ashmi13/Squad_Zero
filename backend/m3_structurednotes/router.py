@@ -73,7 +73,7 @@ async def refine_text(req: RefineRequest):
 # --- Database Routes (Forwarding to Database functions if needed or Mock for now) ---
 # Assuming database.py exists in m3_structurednotes
 try:
-    from m3_structurednotes.database import get_db_connection
+    from m3_structurednotes.database import get_db_connection, release_db_connection
 except ImportError:
     pass
 
@@ -85,9 +85,12 @@ async def get_folders(user_id: str):
         cur = conn.cursor()
         cur.execute("SELECT folder_id, name FROM folders WHERE user_id = %s", (user_id,))
         res = [{"id": row[0], "name": row[1]} for row in cur.fetchall()]
-        cur.close(); conn.close()
+        cur.close()
+        release_db_connection(conn)
         return res
-    except: return []
+    except: 
+        if conn: release_db_connection(conn)
+        return []
 
 @router.post("/folders")
 async def create_folder(req: FolderRequest):
@@ -95,9 +98,15 @@ async def create_folder(req: FolderRequest):
     folder_id = str(uuid.uuid4())
     if not conn: return {"id": folder_id, "name": req.name} # Fallback
     
-    cur = conn.cursor()
-    cur.execute("INSERT INTO folders (folder_id, user_id, name) VALUES (%s, %s, %s)", (folder_id, req.user_id, req.name))
-    conn.commit(); cur.close(); conn.close()
+    try:
+        cur = conn.cursor()
+        cur.execute("INSERT INTO folders (folder_id, user_id, name) VALUES (%s, %s, %s)", (folder_id, req.user_id, req.name))
+        conn.commit()
+        cur.close()
+        release_db_connection(conn)
+    except:
+        if conn: release_db_connection(conn)
+    
     return {"id": folder_id, "name": req.name}
 
 @router.get("/notes")
@@ -111,9 +120,12 @@ async def get_notes(user_id: str, folder_id: Optional[str] = None):
         else:
             cur.execute("SELECT note_id, title, content FROM notes WHERE user_id = %s AND folder_id IS NULL", (user_id,))
         res = [{"id": row[0], "title": row[1], "content": row[2][:100]} for row in cur.fetchall()]
-        cur.close(); conn.close()
+        cur.close()
+        release_db_connection(conn)
         return res
-    except: return []
+    except: 
+        if conn: release_db_connection(conn)
+        return []
 
 @router.post("/notes")
 async def create_note(req: NoteCreate):
@@ -125,9 +137,12 @@ async def create_note(req: NoteCreate):
         cur = conn.cursor()
         cur.execute("INSERT INTO notes (note_id, user_id, title, content, pdf_id) VALUES (%s, %s, %s, %s, %s)", 
             (note_id, req.user_id, req.title, req.content, req.pdf_id))
-        conn.commit(); cur.close(); conn.close()
+        conn.commit()
+        cur.close()
+        release_db_connection(conn)
     except Exception as e:
         print("DB Note Save Error:", e)
+        if conn: release_db_connection(conn)
     return {"note_id": note_id, "title": req.title, "content": req.content}
 
 @router.put("/notes/{note_id}/folder")
@@ -137,8 +152,11 @@ async def update_note_folder(note_id: str, req: NoteUpdateFolder):
     try:
         cur = conn.cursor()
         cur.execute("UPDATE notes SET folder_id = %s WHERE note_id = %s", (req.folder_id, note_id))
-        conn.commit(); cur.close(); conn.close()
-    except: pass
+        conn.commit()
+        cur.close()
+        release_db_connection(conn)
+    except: 
+        if conn: release_db_connection(conn)
     return {"status": "success"}
 
 @router.put("/notes/{note_id}")

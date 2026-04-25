@@ -16,7 +16,7 @@ import OAuthCallback from '@/pages/OAuthCallback';
 // ===== MEMBER 2 (Ashmitha) - File Manager =====
 import FileManagerPage from '@/pages/FileManagerPage';
 import Rail from '@/components/filemanager/Rail';
-import WorkspaceFolderPanel from '@/components/workspace/WorkspaceFolderPanel';
+import FolderPanel from '@/components/filemanager/FolderPanel';
 
 // ===== MEMBER 3 (Sandavi) - Structured Notes =====
 import M3Dashboard from './m3_structurednotes/pages/Dashboard';
@@ -40,6 +40,8 @@ import { workspaceApi } from '@/services/workspaceApi';
 
 import './index.css';
 
+const ACTIVE_WORKSPACE_FOLDER_KEY = 'neuranote_active_workspace_folder';
+
 // Pages that should NOT show the Rail
 const noRailPages = ['/', '/login', '/signup', '/oauth/callback'];
 
@@ -47,10 +49,25 @@ const AppLayout = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const [activeView, setActiveView] = useState('home');
-  const [selectedWorkspaceFolder, setSelectedWorkspaceFolder] = useState(null);
+  const [selectedWorkspaceFolder, setSelectedWorkspaceFolder] = useState(() => {
+    try {
+      const savedFolder = localStorage.getItem(ACTIVE_WORKSPACE_FOLDER_KEY);
+      return savedFolder ? JSON.parse(savedFolder) : null;
+    } catch {
+      return null;
+    }
+  });
   const lastSavedCompletionVersionRef = useRef(0);
   const showRail = !noRailPages.includes(location.pathname);
   const showWorkspacePanel = showRail && location.pathname !== '/dashboard' && location.pathname !== '/files' && location.pathname !== '/files/create-note';
+
+  useEffect(() => {
+    if (selectedWorkspaceFolder) {
+      localStorage.setItem(ACTIVE_WORKSPACE_FOLDER_KEY, JSON.stringify(selectedWorkspaceFolder));
+      return;
+    }
+    localStorage.removeItem(ACTIVE_WORKSPACE_FOLDER_KEY);
+  }, [selectedWorkspaceFolder]);
 
   // Sync activeView with current URL
   useEffect(() => {
@@ -111,13 +128,23 @@ const AppLayout = () => {
       )}
 
       {showWorkspacePanel && (
-        <WorkspaceFolderPanel
-          selectedFolderId={selectedWorkspaceFolder?.id}
-          onSelectFolder={(folder) => {
-            setSelectedWorkspaceFolder(folder);
-            if (folder) {
-              setActiveView('files');
-              navigate('/files', { state: { navigatedFromRecent: true, targetFolder: folder } });
+        <FolderPanel
+          selectedFolder={selectedWorkspaceFolder}
+          onSelectFolder={setSelectedWorkspaceFolder}
+          onSelectFile={(file) => {
+            if (!file || !selectedWorkspaceFolder) return;
+            setActiveView('files');
+            navigate('/files', {
+              state: {
+                navigatedFromRecent: true,
+                targetFolder: selectedWorkspaceFolder,
+                targetFile: file,
+              },
+            });
+          }}
+          onFolderDelete={(folderName) => {
+            if (selectedWorkspaceFolder?.name === folderName) {
+              setSelectedWorkspaceFolder(null);
             }
           }}
         />

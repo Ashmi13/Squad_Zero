@@ -17,19 +17,18 @@ export const useAuth = () => {
         if (token) {
           const decoded = decodeToken(token);
 
-          if (decoded) {
-            const currentTime = Date.now() / 1000;
-            if (decoded.exp && decoded.exp > currentTime) {
-              setUser({
-                id: decoded.sub,
-                email: decoded.email,
-                fullName: decoded.full_name,
-              });
-              setIsAuthenticated(true);
-            } else {
-              // Token expired — clear and fall to unauthenticated state
-              clearTokens();
-            }
+if (decoded) {
+          const currentTime = Date.now() / 1000;
+          if (decoded.exp && decoded.exp > currentTime) {
+            setUser({
+              id: decoded.sub,
+              email: decoded.email,
+              fullName: decoded.full_name,
+              role: decoded.role || 'user',
+            });
+            setIsAuthenticated(true);
+          } else {
+            clearTokens();
           }
         }
       } catch (err) {

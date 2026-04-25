@@ -108,6 +108,7 @@ class AuthService:
                     "email": auth_response.user.email,
                     "full_name": user.get("full_name"),
                     "avatar_url": user.get("avatar_url"),
+                    "role": user.get("role", "user"),
                 },
                 "access_token": auth_response.session.access_token,
                 "refresh_token": auth_response.session.refresh_token,

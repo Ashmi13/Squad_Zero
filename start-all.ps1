@@ -34,20 +34,20 @@ if ((-not (Test-Path "backend/.env")) -or (-not (Test-Path "frontend/.env"))) {
 
 # Start Backend in new window
 Write-Host "Starting FastAPI Backend..." -ForegroundColor Cyan
-Start-Process powershell -ArgumentList "-NoExit", "-File", "start-backend.ps1"
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd backend; ..\.venv\Scripts\Activate.ps1; uvicorn app.main:app --reload"
 
 # Wait a moment for backend to start
 Start-Sleep -Seconds 3
 
 # Start Frontend in new window  
 Write-Host "Starting React Frontend..." -ForegroundColor Cyan
-Start-Process powershell -ArgumentList "-NoExit", "-File", "start-frontend.ps1"
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd frontend; npm run dev"
 
 Write-Host ""
 Write-Host "Both servers are starting!" -ForegroundColor Green
 Write-Host ""
 Write-Host "Access Points:" -ForegroundColor Yellow
-Write-Host "  Frontend:  http://localhost:3000" -ForegroundColor Cyan
+Write-Host "  Frontend:  http://localhost:5173" -ForegroundColor Cyan
 Write-Host "  Backend:   http://localhost:8000" -ForegroundColor Cyan
 Write-Host "  API Docs:  http://localhost:8000/docs" -ForegroundColor Cyan
 Write-Host ""

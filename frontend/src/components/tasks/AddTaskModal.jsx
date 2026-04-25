@@ -4,6 +4,7 @@ import {
   TextField, Select, MenuItem, FormControl, InputLabel,
   Button, Box, Typography, ToggleButtonGroup, ToggleButton,
 } from '@mui/material';
+import MenuBookOutlinedIcon from '@mui/icons-material/MenuBookOutlined';
 
 const PRIORITIES = [
   { value: 'low',    label: 'Low',    color: '#10b981' },
@@ -146,6 +147,37 @@ export default function AddTaskModal({ open, onClose, onSave, categories, defaul
             ))}
           </Box>
         </Box>
+      {/* Notebook tag scaffold — enable after notebook sprint merges */}
+        <Box>
+          <Typography sx={{
+            color: '#9ca3af', fontSize: 11, mb: 1, fontWeight: 700,
+            letterSpacing: '0.08em', display: 'flex', alignItems: 'center', gap: 0.5,
+          }}>
+            <MenuBookOutlinedIcon sx={{ fontSize: 13 }} />
+            NOTEBOOK
+            <Box component="span" sx={{
+              ml: 1, fontSize: 9, px: 0.7, py: 0.2,
+              bgcolor: 'rgba(99,102,241,0.15)', color: '#818cf8',
+              border: '1px solid rgba(99,102,241,0.3)',
+              borderRadius: 1, fontWeight: 700, letterSpacing: '0.06em',
+            }}>
+              COMING SOON
+            </Box>
+          </Typography>
+          <Box sx={{
+            display: 'flex', alignItems: 'center', gap: 1,
+            padding: '10px 12px', borderRadius: 2,
+            border: '1px solid rgba(255,255,255,0.07)',
+            background: 'rgba(255,255,255,0.02)',
+            opacity: 0.45, cursor: 'not-allowed',
+          }}>
+            <MenuBookOutlinedIcon sx={{ fontSize: 16, color: '#6b7280' }} />
+            <Typography sx={{ color: '#6b7280', fontSize: '0.85rem' }}>
+              Link a notebook to this task…
+            </Typography>
+          </Box>
+        </Box>
+
       </DialogContent>
 
       <DialogActions sx={{ borderTop: '1px solid rgba(255,255,255,0.08)', px: 3, py: 2 }}>

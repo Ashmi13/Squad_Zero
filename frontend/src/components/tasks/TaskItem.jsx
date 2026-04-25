@@ -6,6 +6,7 @@ import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
 import CheckCircleRoundedIcon   from '@mui/icons-material/CheckCircleRounded';
 import AccessTimeIcon           from '@mui/icons-material/AccessTime';
 import NotificationsNoneIcon    from '@mui/icons-material/NotificationsNone';
+import MenuBookOutlinedIcon     from '@mui/icons-material/MenuBookOutlined';
 
 const P_COLORS = { high: '#ef4444', medium: '#f59e0b', low: '#10b981' };
 
@@ -26,9 +27,14 @@ export default function TaskItem({ task, onToggle, onEdit, onDelete }) {
 
   return (
     <Box className={`task-item ${done ? 'completed' : ''}`} style={{ borderLeftColor: color }}>
-      <Checkbox checked={done} onChange={() => onToggle(task.id)} size="small"
-        icon={<RadioButtonUncheckedIcon />} checkedIcon={<CheckCircleRoundedIcon />}
-        sx={{ color, '&.Mui-checked': { color } }} />
+      <Checkbox
+        checked={done}
+        onChange={() => onToggle(task.id)}
+        size="small"
+        icon={<RadioButtonUncheckedIcon />}
+        checkedIcon={<CheckCircleRoundedIcon />}
+        sx={{ color, '&.Mui-checked': { color } }}
+      />
 
       <Box className="task-content">
         <Typography className={`task-title ${done ? 'done' : ''}`}>{task.title}</Typography>
@@ -38,20 +44,46 @@ export default function TaskItem({ task, onToggle, onEdit, onDelete }) {
         <Box className="task-meta">
           {due && (
             <Box className={`due-badge ${due.overdue && !done ? 'overdue' : ''}`}>
-              <AccessTimeIcon sx={{ fontSize: 11 }} /><span>{due.label}</span>
+              <AccessTimeIcon sx={{ fontSize: 11 }} />
+              <span>{due.label}</span>
             </Box>
           )}
           {task.reminder_minutes_before && (
             <Box className="reminder-badge">
               <NotificationsNoneIcon sx={{ fontSize: 11 }} />
-              <span>{task.reminder_minutes_before >= 60
-                ? `${task.reminder_minutes_before / 60}h before`
-                : `${task.reminder_minutes_before}m before`}</span>
+              <span>
+                {task.reminder_minutes_before >= 60
+                  ? `${task.reminder_minutes_before / 60}h before`
+                  : `${task.reminder_minutes_before}m before`}
+              </span>
             </Box>
           )}
-          <Chip label={task.priority} size="small" variant="outlined" className="priority-chip"
-            sx={{ bgcolor: `${P_COLORS[task.priority]}18`, color: P_COLORS[task.priority],
-                  borderColor: P_COLORS[task.priority], height: 20, fontSize: 10 }} />
+          <Chip
+            label={task.priority}
+            size="small"
+            variant="outlined"
+            className="priority-chip"
+            sx={{
+              bgcolor: `${P_COLORS[task.priority]}18`,
+              color: P_COLORS[task.priority],
+              borderColor: P_COLORS[task.priority],
+              height: 20,
+              fontSize: 10,
+            }}
+          />
+          {/* Notebook tag — shows automatically once notebook sprint is merged */}
+          {task.notebook_title && (
+            <Box sx={{
+              display: 'flex', alignItems: 'center', gap: '3px',
+              fontSize: 10, color: '#818cf8',
+              padding: '2px 6px', borderRadius: '5px',
+              background: 'rgba(99,102,241,0.12)',
+              border: '1px solid rgba(99,102,241,0.2)',
+            }}>
+              <MenuBookOutlinedIcon sx={{ fontSize: 11 }} />
+              <span>{task.notebook_title}</span>
+            </Box>
+          )}
         </Box>
       </Box>
 

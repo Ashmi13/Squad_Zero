@@ -1,5 +1,7 @@
 ﻿import React, { useState, useEffect } from 'react';
-import { Box, Paper, CircularProgress, Typography } from '@mui/material';
+import { Box, Paper, CircularProgress, Typography, IconButton } from '@mui/material';
+import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
+import DeleteOutlineRoundedIcon from '@mui/icons-material/DeleteOutlineRounded';
 import './styles.css';
 import TaskList from './TaskList';
 import MiniCalendar from './MiniCalendar';
@@ -186,8 +188,8 @@ export default function TaskDashboard() {
 
         {/* ── LEFT SIDEBAR ── */}
         <Paper className="zen-sidebar" elevation={0}>
-          <Box className="sidebar-header">
-            <Typography className="sidebar-title">LISTS</Typography>
+          <Box className="task-sidebar-header">
+            <Typography className="task-sidebar-title">LISTS</Typography>
             <button className="add-cat-btn" title="New list"
               onClick={() => { setEditingCategory(null); setCategoryModal(true); }}>+</button>
           </Box>
@@ -204,11 +206,19 @@ export default function TaskDashboard() {
                   <span className="cat-name">{cat.name}</span>
                   <span className="cat-count">{tasksByCategory[cat.id]?.length || 0} tasks</span>
                 </div>
-                <div className="cat-actions" onClick={e => e.stopPropagation()}>
-                  <button className="cat-action-btn" title="Edit"
-                    onClick={() => { setEditingCategory(cat); setCategoryModal(true); }}>✏️</button>
-                  <button className="cat-action-btn" title="Delete"
-                    onClick={() => handleDeleteCategory(cat.id)}>🗑️</button>
+               <div className="cat-actions" onClick={e => e.stopPropagation()}>
+                  <IconButton size="small" title="Edit"
+                    onClick={() => { setEditingCategory(cat); setCategoryModal(true); }}
+                    sx={{ padding: '2px', color: '#4b5563',
+                          '&:hover': { color: '#6366f1', background: 'rgba(99,102,241,0.1)' } }}>
+                    <EditOutlinedIcon sx={{ fontSize: 13 }} />
+                  </IconButton>
+                  <IconButton size="small" title="Delete"
+                    onClick={() => handleDeleteCategory(cat.id)}
+                    sx={{ padding: '2px', color: '#4b5563',
+                          '&:hover': { color: '#ef4444', background: 'rgba(239,68,68,0.08)' } }}>
+                    <DeleteOutlineRoundedIcon sx={{ fontSize: 13 }} />
+                  </IconButton>
                 </div>
               </div>
             ))}

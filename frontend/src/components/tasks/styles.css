@@ -37,13 +37,13 @@
 .zen-right   { padding: 18px !important; display: flex; flex-direction: column; }
 
 /* ── SIDEBAR ─────────────────────────────────────────────────────────────── */
-.sidebar-header {
+.task-sidebar-header {
   display: flex;
   align-items: center;
   padding: 0 8px;
   margin-bottom: 14px;
 }
-.sidebar-title {
+.task-sidebar-title {
   color: #6b7280 !important;
   font-weight: 700 !important;
   font-size: 0.68rem !important;
@@ -107,7 +107,7 @@
   font-size: 0.75rem !important;
   border: 1px solid rgba(99,102,241,0.25) !important;
 }
-.progress-section { margin-bottom: 6px; }
+.task-progress-section { margin-bottom: 6px; }
 .progress-bar     { height: 4px !important; border-radius: 4px !important; background-color: rgba(255,255,255,0.06) !important; }
 .progress-text    { color: #6b7280 !important; font-size: 0.72rem !important; }
 

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Clock, Calendar, TrendingUp, Award, BarChart3, Eye, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
-import './styles/history.css';
+import './styles/QuizHistory.css';
 
 import { API } from '@/config/api';
 import { getAuthHeaders } from '@/utils/tokenStorage';

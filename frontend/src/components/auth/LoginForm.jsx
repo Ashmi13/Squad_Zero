@@ -26,8 +26,8 @@ export function LoginForm() {
     mode: 'onBlur',
     // Pre-filling test credentials as per sprint planning
     defaultValues: {
-      email: 'testjay@neuranote.com',
-      password: 'password123'
+      email: '',
+      password: ''
     }
   });
 
@@ -50,24 +50,6 @@ export function LoginForm() {
     setIsSuccess(false);
 
     try {
-      // 🚀 M3 SPRINT DEMO BYPASS: Mock auth for Testjay if Supabase is offline
-      if (data.email === 'testjay@neuranote.com' && data.password === 'password123') {
-        console.log("Mocking Demo Auth for testjay@neuranote.com");
-        
-        // Feed fake Supabase tokens so App.jsx doesn't kick us out
-        setTokens("mock_access_token_jd82nd28dj29", "mock_refresh_token_u29j1jd");
-        localStorage.setItem('user', JSON.stringify({ 
-          email: 'testjay@neuranote.com', 
-          full_name: 'Test Jay' 
-        }));
-
-        setIsSuccess(true);
-        setTimeout(() => {
-          window.location.href = '/dashboard';
-        }, 800);
-        return; // Skip actual API call
-      }
-
       // Standard API Call
       const response = await axiosInstance.post(config.endpoints.login, {
         email: data.email,
@@ -99,9 +81,7 @@ export function LoginForm() {
       {/* Admin / Test Credentials Notice */}
       <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg flex items-center gap-3">
         <AlertCircle className="text-blue-600" size={20} />
-        <p className="text-blue-800 text-sm">
-          <strong>Test Account:</strong> testjay@neuranote.com / password123
-        </p>
+        <p className="text-blue-800 text-sm"></p>
       </div>
 
       {isSuccess && (

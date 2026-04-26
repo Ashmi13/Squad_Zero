@@ -1,0 +1,175 @@
+/* ═══════════════════════════════════════════════════
+   base.css — Design tokens, global resets, shared
+   utilities (spinner, toast) and responsive rules.
+   Imported once via styles/index.css.
+   ═══════════════════════════════════════════════════ */
+
+:root {
+  /* Brand */
+  --color-primary:        #9333ea;
+  --color-primary-dark:   #7e22ce;
+  --color-primary-light:  #f3e8ff;
+  --color-primary-ring:   #e9d5ff;
+
+  /* Semantic */
+  --color-correct:        #10b981;
+  --color-correct-bg:     #f0fdf4;
+  --color-correct-border: #a7f3d0;
+  --color-incorrect:      #ef4444;
+  --color-incorrect-bg:   #fef2f2;
+  --color-incorrect-border:#fca5a5;
+
+  /* Neutrals */
+  --color-text:           #111827;
+  --color-text-muted:     #6b7280;
+  --color-text-subtle:    #9ca3af;
+  --color-border:         #e5e7eb;
+  --color-bg:             #ffffff;
+  --color-bg-muted:       #f9fafb;
+  --color-bg-subtle:      #f3f4f6;
+
+  /* Shadows */
+  --shadow-sm:  0 1px 3px rgba(0,0,0,0.08);
+  --shadow-md:  0 4px 12px rgba(0,0,0,0.1);
+
+  /* Radii */
+  --radius-sm:  8px;
+  --radius-md:  12px;
+  --radius-lg:  16px;
+  --radius-xl:  20px;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+/* ── Page shell ─────────────────────────────────── */
+.quiz-page {
+  min-height: 100vh;
+  background: #f5f5f7;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+               'Helvetica Neue', Arial, sans-serif;
+}
+
+/* ══════════════════════════════════════════════════
+   SPINNER
+   ══════════════════════════════════════════════════ */
+.spinner {
+  width: 18px;
+  height: 18px;
+  border: 2.5px solid rgba(255, 255, 255, 0.35);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.75s linear infinite;
+  flex-shrink: 0;
+}
+
+.spinner--sm {
+  width: 14px;
+  height: 14px;
+  border-width: 2px;
+}
+
+.spinner--lg {
+  width: 40px;
+  height: 40px;
+  border-width: 4px;
+  border-color: rgba(147, 51, 234, 0.2);
+  border-top-color: var(--color-primary);
+  margin-top: 1.5rem;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ══════════════════════════════════════════════════
+   TOAST
+   ══════════════════════════════════════════════════ */
+.toast-container {
+  position: fixed;
+  top: 1.25rem;
+  right: 1.25rem;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* ══════════════════════════════════════════════════
+   RESPONSIVE OVERRIDES
+   ══════════════════════════════════════════════════ */
+@media (max-width: 900px) {
+  .quiz-workspace {
+    flex-direction: column;
+  }
+
+  .settings-sidebar {
+    width: 100%;
+    min-width: unset;
+    height: auto;
+    position: static;
+    border-right: none;
+    border-bottom: 1px solid var(--color-border);
+    padding-bottom: 1rem;
+  }
+
+  .sidebar-header {
+    position: static;
+  }
+
+  .sidebar-pill-group {
+    flex-wrap: wrap;
+  }
+
+  .quiz-main-content {
+    padding: 1.5rem;
+  }
+
+  .quiz-layout {
+    grid-template-columns: 1fr;
+    padding: 1rem;
+  }
+
+  .quiz-sidebar {
+    position: static;
+  }
+
+  .score-card-new {
+    padding: 2rem 1.25rem 1.5rem;
+  }
+}
+
+@media (max-width: 600px) {
+  .quiz-main-content {
+    padding: 1rem;
+  }
+
+  .results-container {
+    padding: 1rem;
+  }
+
+  .stat-cards-row {
+    grid-template-columns: 1fr;
+  }
+
+  .results-actions {
+    flex-direction: column;
+  }
+
+  .action-btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .nav-right {
+    flex-direction: column;
+    gap: 0.5rem;
+    width: 100%;
+  }
+
+  .submit-btn {
+    width: 100%;
+    text-align: center;
+  }
+}

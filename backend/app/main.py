@@ -62,6 +62,7 @@ app.add_middleware(
         "Accept",
         "Origin",
         "User-Agent",
+        "X-Guest-Session-ID",
     ],
     expose_headers=["Content-Disposition"],  # needed for PDF downloads
     max_age=600,                             # cache preflight for 10 minutes

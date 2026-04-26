@@ -4,7 +4,7 @@ from app.api.v1.endpoints import auth, user, tasks, admin, announcements
 from app.api.v1.endpoints.calendar import router as calendar_router
 from app.api.v1.endpoints.notifications import router as notifications_router
 
-router = APIRouter(prefix="/api/v1")
+router = APIRouter()
 
 @router.get("/health")
 async def health_check():

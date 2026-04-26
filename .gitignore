@@ -110,3 +110,16 @@ backend/dump.sql
 __pycache__/
 *.pyc
 *.pyo
+
+# Accidental shell files
+git
+tatus
+cd
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# History files
+.history/

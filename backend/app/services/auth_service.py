@@ -34,13 +34,13 @@ class AuthService:
         """
         try:
             # Create user in Supabase Auth
-            # Adding specific redirect URL for email verification
+            # Add specific redirect URL for email verification
             auth_response = self.db.auth.sign_up(
                 {
                     "email": email, 
                     "password": password,
                     "options": {
-                        "email_redirect_to": "http://localhost:5173/account-verified"
+                        "email_redirect_to": f"{settings.frontend_url}/account-verified"
                     }
                 }
             )
@@ -50,8 +50,7 @@ class AuthService:
             
             user_id = auth_response.user.id
             
-            # Use UPSERT logic or check existence to prevent "duplicate key" error
-            # This handles cases where the SQL trigger might have already created the record
+            # Use UPSERT logic/ check existence to prevent "duplicate key" error for cases when SQL trigger might have already created a record
             user_data = {
                 "id": user_id,
                 "email": email,
@@ -210,8 +209,7 @@ class AuthService:
                 create_res = self.db.table("users").upsert(new_user_data).execute()
                 return create_res.data[0]
 
-            # 3. Create a new user in Auth if not found (Manual flow for Google)
-            # This follows your existing trigger setup
+            # Create new user in Auth if not found (Manual flow for Google)
             import secrets
             import string
             random_password = ''.join(secrets.choice(string.ascii_letters + string.digits) for i in range(20))
@@ -227,8 +225,7 @@ class AuthService:
             })
             
             if new_auth and new_auth.user:
-                # The trigger handle_new_user() will likely build the users profile, 
-                # but we'll return it manually to be safe.
+                # Trigger handle_new_user(). build the users profile, 
                 return {
                     "id": new_auth.user.id,
                     "email": email,

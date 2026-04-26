@@ -1,5 +1,3 @@
--- backend/schemas/schema.sql
-
 -- Drop tables if exist (for fresh setup)
 DROP TABLE IF EXISTS quiz_attempts CASCADE;
 DROP TABLE IF EXISTS answer_options CASCADE;

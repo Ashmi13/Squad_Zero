@@ -1,10 +1,10 @@
-# app/core/config.py
 """Application configuration using pydantic-settings"""
 from typing import List, Optional
 from pathlib import Path
 import os
 from pydantic_settings import BaseSettings
 from pydantic import Field
+from pydantic import field_validator
 
 
 class Settings(BaseSettings):
@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     api_version: str = Field(default="v1", env="API_VERSION")
     backend_url: str = Field(default="http://127.0.0.1:8000", env="BACKEND_URL")
 
-    # Supabase
+    # Supabase — Optional
     supabase_url: Optional[str] = Field(default=None, env="SUPABASE_URL")
     supabase_anon_key: Optional[str] = Field(default=None, env="SUPABASE_ANON_KEY")
     supabase_service_role_key: Optional[str] = Field(default=None, env="SUPABASE_SERVICE_ROLE_KEY")
@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     algorithm: str = Field(default="HS256", env="ALGORITHM")
     access_token_expire_minutes: int = Field(default=30, env="ACCESS_TOKEN_EXPIRE_MINUTES")
     refresh_token_expire_days: int = Field(default=7, env="REFRESH_TOKEN_EXPIRE_DAYS")
+
+    # OpenAI / OpenRouter
+    openai_api_key: str = Field(default="", env="OPENAI_API_KEY")
+    openrouter_api_key: str = Field(default="", env="OPENROUTER_API_KEY")
 
     # Cookie
     cookie_name: str = Field(default="session", env="COOKIE_NAME")
@@ -54,7 +58,7 @@ class Settings(BaseSettings):
         env="GOOGLE_REDIRECT_URI"
     )
 
-    # AWS S3
+    # AWS S3 — Optional
     aws_s3_bucket: Optional[str] = Field(default=None, env="AWS_S3_BUCKET")
     aws_access_key_id: Optional[str] = Field(default=None, env="AWS_ACCESS_KEY_ID")
     aws_secret_access_key: Optional[str] = Field(default=None, env="AWS_SECRET_ACCESS_KEY")
@@ -65,21 +69,22 @@ class Settings(BaseSettings):
         default=60, env="PASSWORD_RESET_TOKEN_EXPIRE_MINUTES"
     )
 
-    # OpenAI
-    OPENAI_API_KEY: str = Field(default="", env="OPENAI_API_KEY")
+    @field_validator("secret_key")
+    def secret_key_must_be_set(cls, v):
+        if v == "dev-secret-change-me":
+            import warnings
+            warnings.warn("SECRET_KEY is using the insecure default. Set it in .env!")
+        return v
 
-    # OpenRouter
-    OPENROUTER_API_KEY: str = Field(default="", env="OPENROUTER_API_KEY")
+    @property
+    def cors_origins_list(self) -> List[str]:
+        return [origin.strip() for origin in self.cors_origins.split(",")]
 
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
         case_sensitive = False
         extra = "ignore"
-
-    @property
-    def cors_origins_list(self) -> List[str]:
-        return [origin.strip() for origin in self.cors_origins.split(",")]
 
 
 settings = Settings()

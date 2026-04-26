@@ -244,7 +244,7 @@ async def google_callback(
     if not settings.google_client_id or not settings.google_client_secret:
         raise HTTPException(status_code=400, detail="Google OAuth not configured")
 
-    # 1. Exchange the code for an access token
+    # Exchange the code for access token
     token_url = "https://oauth2.googleapis.com/token"
     token_data = {
         "code": code,
@@ -265,7 +265,7 @@ async def google_callback(
         tokens = token_response.json()
         access_token = tokens.get("access_token")
         
-        # 2. Use the access token to get user info from Google
+        # Use access token to get user info from Google
         user_info_response = await client.get(
             "https://www.googleapis.com/oauth2/v3/userinfo", 
             headers={"Authorization": f"Bearer {access_token}"}
@@ -275,12 +275,12 @@ async def google_callback(
         
         google_user = user_info_response.json()
         
-    # 3. Handle user in our auth system
+    # Handle user in our auth system
     auth_service = AuthService(supabase_client)
     try:
         user_record = await auth_service.get_or_create_google_user(google_user)
         
-        # 4. Create internal JWT tokens
+        # Create internal JWT tokens
         token_payload = {
             "sub": user_record["id"],
             "email": user_record["email"],
@@ -291,10 +291,10 @@ async def google_callback(
         
         internal_access_token = create_access_token(data=token_payload)
         
-        # 5. Set session cookie
+        # Set session cookie
         set_session_cookie(response, internal_access_token)
         
-        # 6. Redirect back to frontend
+        # Redirect back to frontend
         # Instead of just /dashboard, we pass the user data and token in the URL fragment 
         # so the frontend can "see" it and initialize localStorage properly.
         # This is the "Bridge" between Cookie-based Backend and LocalStorage-based Frontend.

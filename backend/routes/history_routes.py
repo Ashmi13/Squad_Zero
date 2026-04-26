@@ -1,47 +1,52 @@
-# backend/routes/history_routes.py
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
+
 from database import get_db
+from middleware.auth import get_current_user
 from services.quiz_service import QuizService
 
 router = APIRouter(prefix="/api/quizzes", tags=["history"])
 
-@router.get("/history/{user_id}")
+
+@router.get("/history/me")
 async def get_quiz_history(
-    user_id: int,
-    limit: int = 10,
-    offset: int = 0,
-    db: Session = Depends(get_db)
+    limit:  int = Query(default=10, ge=1, le=100),
+    offset: int = Query(default=0,  ge=0),
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_current_user),   # from verified JWT — not URL
 ):
-    """Get quiz history for a user"""
+    """Get paginated quiz history for the authenticated user"""
     service = QuizService(db)
     return await service.get_history(user_id, limit, offset)
 
-@router.get("/analytics/{user_id}")
+
+@router.get("/analytics/me")
 async def get_quiz_analytics(
-    user_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_current_user),
 ):
-    """Get analytics for a user"""
+    """Get quiz analytics for the authenticated user"""
     service = QuizService(db)
     return await service.get_analytics(user_id)
+
 
 @router.get("/attempt/{attempt_id}/details")
 async def get_attempt_details(
     attempt_id: int,
-    user_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_current_user),
 ):
-    """Get detailed information about a specific attempt"""
+    """Get detailed information about a specific attempt (must belong to caller)"""
     service = QuizService(db)
     return await service.get_attempt_details(attempt_id, user_id)
+
 
 @router.delete("/history/{attempt_id}")
 async def delete_quiz_attempt(
     attempt_id: int,
-    user_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_current_user),
 ):
-    """Delete a quiz attempt"""
+    """Delete a quiz attempt (only the owning user can delete)"""
     service = QuizService(db)
     return await service.delete_attempt(attempt_id, user_id)

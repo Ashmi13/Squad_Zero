@@ -105,3 +105,8 @@ Squad_Zero_Sync/
 run_servers.batbackend/.env
 backend/dump.sql
 .env.backup
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo

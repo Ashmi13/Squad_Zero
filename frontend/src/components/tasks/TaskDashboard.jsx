@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Box, Paper, CircularProgress, Typography, IconButton } from '@mui/material';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import DeleteOutlineRoundedIcon from '@mui/icons-material/DeleteOutlineRounded';
@@ -16,6 +16,7 @@ const DEFAULT_CATEGORIES = [
   { name: 'Study',    icon: 'study',    color: '#10b981' },
   { name: 'Personal', icon: 'personal', color: '#ec4899' },
 ];
+
 export default function TaskDashboard() {
   const [categories,       setCategories]       = useState([]);
   const [tasksByCategory,  setTasksByCategory]  = useState({});
@@ -230,14 +231,14 @@ export default function TaskDashboard() {
                 className={`list-item-row ${activeCategory === cat.id ? 'active' : ''}`}
                 style={{ '--cat-color': cat.color }}
                 onClick={() => setActiveCategory(cat.id)}>
-               <span className="cat-icon">
+                <span className="cat-icon">
                   <TaskIcon name={cat.icon} sx={{ fontSize: 18, color: activeCategory === cat.id ? cat.color : '#6b7280' }} />
                 </span>
                 <div className="cat-text">
                   <span className="cat-name">{cat.name}</span>
                   <span className="cat-count">{tasksByCategory[cat.id]?.length || 0} tasks</span>
                 </div>
-               <div className="cat-actions" onClick={e => e.stopPropagation()}>
+                <div className="cat-actions" onClick={e => e.stopPropagation()}>
                   <IconButton size="small" title="Edit"
                     onClick={() => { setEditingCategory(cat); setCategoryModal(true); }}
                     sx={{ padding: '2px', color: '#4b5563',
@@ -281,7 +282,7 @@ export default function TaskDashboard() {
 
       {/* ── EXPANDED CALENDAR OVERLAY ── */}
       {calendarExpanded && (
-       <ExpandedCalendar
+        <ExpandedCalendar
           tasks={allTasks}
           events={calendarEvents}
           onClose={() => setCalendarExpanded(false)}

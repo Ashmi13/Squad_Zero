@@ -54,7 +54,7 @@ axiosInstance.interceptors.response.use(
         }
 
         const refreshResponse = await axiosInstance.post(
-          '/refresh-token',
+          '/api/v1/auth/refresh-token',
           { refresh_token: refreshToken },
           { headers: { 'Content-Type': 'application/json' } }
         );

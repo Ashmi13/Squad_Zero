@@ -3,11 +3,11 @@ from typing import List, Optional
 from pathlib import Path
 import os
 from pydantic_settings import BaseSettings
-from pydantic import Field
-from pydantic import field_validator
+from pydantic import Field, field_validator
 
 
 class Settings(BaseSettings):
+
     # Application
     app_name: str = Field(default="SquadZero API", env="APP_NAME")
     debug: bool = Field(default=False, env="DEBUG")
@@ -16,11 +16,13 @@ class Settings(BaseSettings):
     # Server
     api_version: str = Field(default="v1", env="API_VERSION")
     backend_url: str = Field(default="http://127.0.0.1:8000", env="BACKEND_URL")
+    frontend_url: str = Field(default="http://localhost:5173", env="FRONTEND_URL")
 
-    # Supabase — Optional
+    # Supabase — Optional so backend starts without keys in dev
     supabase_url: Optional[str] = Field(default=None, env="SUPABASE_URL")
     supabase_anon_key: Optional[str] = Field(default=None, env="SUPABASE_ANON_KEY")
     supabase_service_role_key: Optional[str] = Field(default=None, env="SUPABASE_SERVICE_ROLE_KEY")
+    supabase_storage_bucket: str = Field(default="workspace-files", env="SUPABASE_STORAGE_BUCKET")
 
     # JWT and Session
     secret_key: str = Field(default="dev-secret-change-me", env="SECRET_KEY")
@@ -34,7 +36,7 @@ class Settings(BaseSettings):
 
     # Cookie
     cookie_name: str = Field(default="session", env="COOKIE_NAME")
-    cookie_secure: bool = Field(default=False, env="COOKIE_SECURE")
+    cookie_secure: bool = Field(default=False, env="COOKIE_SECURE")  # False for local dev
     cookie_httponly: bool = Field(default=True, env="COOKIE_HTTPONLY")
     cookie_samesite: str = Field(default="lax", env="COOKIE_SAMESITE")
     cookie_domain: Optional[str] = Field(default=None, env="COOKIE_DOMAIN")
@@ -58,7 +60,7 @@ class Settings(BaseSettings):
         env="GOOGLE_REDIRECT_URI"
     )
 
-    # AWS S3 — Optional
+    # AWS S3 — Optional so backend starts without keys in dev
     aws_s3_bucket: Optional[str] = Field(default=None, env="AWS_S3_BUCKET")
     aws_access_key_id: Optional[str] = Field(default=None, env="AWS_ACCESS_KEY_ID")
     aws_secret_access_key: Optional[str] = Field(default=None, env="AWS_SECRET_ACCESS_KEY")
@@ -81,7 +83,7 @@ class Settings(BaseSettings):
         return [origin.strip() for origin in self.cors_origins.split(",")]
 
     class Config:
-        env_file = ".env"
+        env_file = str(Path(__file__).parent.parent.parent / ".env")
         env_file_encoding = "utf-8"
         case_sensitive = False
         extra = "ignore"

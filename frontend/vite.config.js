@@ -18,13 +18,18 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
+      // M2 - File manager direct routes
+      '/upload':        'http://127.0.0.1:8000',
+      '/generate-note': 'http://127.0.0.1:8000',
+      '/refine-text':   'http://127.0.0.1:8000',
+      '/folders':       'http://127.0.0.1:8000',
+      '/notes':         'http://127.0.0.1:8000',
 
+      // All /api routes
       '/api': {
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
     },
   },
-
-  // Deleted envDir: '../' to search in frontend root instead
 });

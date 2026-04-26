@@ -29,6 +29,13 @@ anyio
 typing_extensions
 tzdata
 tzlocal
+slowapi
+
+# ===== FILE MANAGER (Member 2 - Ashmitha) =====
+PyMuPDF>=1.23.8
+openai>=1.3.0
+reportlab>=4.0.9
+python-docx>=0.8.11
 
 # ===== TESTING =====
 pytest>=7.4.4

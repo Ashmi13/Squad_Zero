@@ -3,7 +3,6 @@ import os
 import importlib
 
 # Adding backend/ to sys.path so all imports are resolved
-# Launch directory of uvicorn
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi import FastAPI
@@ -40,6 +39,8 @@ app = FastAPI(
     title=app_name,
     version="1.0.0",
     debug=debug,
+    docs_url="/docs",
+    redoc_url="/redoc",
 )
 
 # Request size limit (DOS protection)
@@ -50,12 +51,12 @@ try:
 except Exception as e:
     print(f"⚠️  Size limit middleware skipped: {e}")
 
-# CORS (explicit methods and headers)
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],  # explicit, not "*"
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=[
         "Content-Type",
         "Authorization",
@@ -63,11 +64,11 @@ app.add_middleware(
         "Origin",
         "User-Agent",
     ],
-    expose_headers=["Content-Disposition"],  # needed for PDF downloads
-    max_age=600,                             # cache preflight for 10 minutes
+    expose_headers=["Content-Disposition"],
+    max_age=600,
 )
 
-# Rate limiting (slowapi)
+# Rate limiting
 try:
     from slowapi import Limiter, _rate_limit_exceeded_handler
     from slowapi.util import get_remote_address
@@ -95,18 +96,18 @@ try:
 except Exception as e:
     print(f"⚠️  Custom error handlers skipped: {e}")
 
-# Core v1 router (Auth/User)
+# Core v1 router (Auth/User/FileManager)
 try:
     from app.api.v1.router import router as v1_router
     app.include_router(v1_router, prefix="/api/v1")
     print("✅ Auth/user routes loaded")
 except ImportError as e:
     missing = str(e).replace("No module named ", "").strip("'")
-    print(f"⚠️  Auth/user routes skipped (missing dependency: {missing}). Run: pip install supabase")
+    print(f"⚠️  Auth/user routes skipped (missing: {missing}). Run: pip install supabase")
 except Exception as e:
     print(f"⚠️  Auth/user routes skipped: {e}")
 
-# Quiz routes (Quiz module)
+# Quiz routes (M4)
 try:
     from routes.quiz_routes import router as quiz_router
     from routes.history_routes import router as history_router
@@ -117,22 +118,22 @@ try:
     print("✅ Quiz routes loaded")
 except ImportError as e:
     missing = str(e).replace("No module named ", "").strip("'")
-    print(f"⚠️  Quiz routes skipped (missing dependency: {missing}). Run: pip install -r requirements-m4quiz.txt")
+    print(f"⚠️  Quiz routes skipped (missing: {missing}). Run: pip install -r requirements-m4quiz.txt")
 except Exception as e:
     print(f"⚠️  Quiz routes skipped: {e}")
 
-# Structured Notes routes
+# Structured Notes routes (M3)
 try:
     from m3_structurednotes.router import router as notes_router
     app.include_router(notes_router, prefix="/api/notes", tags=["notes"])
     print("✅ Structured notes routes loaded")
 except ImportError as e:
     missing = str(e).replace("No module named ", "").strip("'")
-    print(f"⚠️  Notes routes skipped (missing dependency: {missing}). Run: pip install -r requirements-m3m4.txt")
+    print(f"⚠️  Notes routes skipped (missing: {missing}). Run: pip install -r requirements-m3m4.txt")
 except Exception as e:
     print(f"⚠️  Notes routes skipped: {e}")
 
-# ✅ FIX — routes land at /api/v1/tasks/, /api/v1/calendar/, etc.
+# Optional routes (Tasks, Calendar, Notifications — M5 + M2)
 _optional_routes = [
     ("routes.tasks",         "router", "/api/v1/tasks",         ["tasks"]),
     ("routes.calendar",      "router", "/api/v1/calendar",      ["calendar"]),
@@ -147,7 +148,27 @@ for _module, _attr, _prefix, _tags in _optional_routes:
     except Exception as e:
         print(f"⚠️  {_module} skipped: {e}")
 
+@app.get("/")
+async def root():
+    return {
+        "message": f"Welcome to {app_name}",
+        "version": "1.0.0",
+        "docs": "/docs",
+    }
+
+@app.on_event("startup")
+async def startup_event():
+    print(f"🚀 Starting {app_name}")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    print(f"🛑 Shutting down {app_name}")
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run(
+        "app.main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=debug,
+    )

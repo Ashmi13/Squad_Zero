@@ -47,8 +47,7 @@ const MEMBERS = [
     name: 'You (M5)',
     color: '#ec4899',
     routes: [
-      { label: 'Task Dashboard', path: '/tasks'        },
-      { label: 'Second Brain',   path: '/second-brain' },
+      { label: 'Task Dashboard', path: '/tasks' },
     ],
   },
 ];

@@ -44,7 +44,7 @@ import { Document, Packer, Paragraph } from 'docx';
 import { authFetch } from '@/utils/authSession';
 import { workspaceApi } from '@/services/workspaceApi';
 import { config } from '@/config/env';
-import { ensureReadWritePermission, getFolderHandleBinding } from '@/utils/localFsSync';
+import { ensureReadWritePermission, getFolderHandleBinding, removeFileFromLocalFolder } from '@/utils/localFsSync';
 import SummaryPanel from './SummaryPanel';
 
 const API_BASE = config.apiBaseUrl || '';
@@ -573,6 +573,17 @@ const FileViewer = ({ selectedFile, onClose, onFilesUpdate, currentFolder, curre
       if (selectedFile.backendFile && selectedFile.id) {
         await workspaceApi.deleteFile(selectedFile.id);
       }
+
+      const resolvedFolder = {
+        id: selectedFile.folderId || selectedFile.folder_id || currentFolderId || null,
+        name: selectedFile.name,
+        originalFilename: selectedFile.originalFilename || selectedFile.original_filename || null,
+        original_filename: selectedFile.originalFilename || selectedFile.original_filename || null,
+      };
+      await removeFileFromLocalFolder(
+        resolvedFolder,
+        selectedFile.originalFilename || selectedFile.original_filename || selectedFile.name,
+      );
 
       // Call parent component's delete handler through onFilesUpdate
       onFilesUpdate((prevFiles) => {

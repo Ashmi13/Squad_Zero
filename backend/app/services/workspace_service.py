@@ -1,4 +1,4 @@
-"""Workspace service for persistent folder hierarchy and database-first files."""
+"""Workspace service for persistent folder hierarchy and Supabase-backed files."""
 
 from __future__ import annotations
 
@@ -9,8 +9,6 @@ from datetime import datetime, timezone
 from urllib.parse import urlparse
 from typing import Any, Dict, List, Optional
 
-import boto3
-from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import HTTPException, UploadFile
 from supabase import Client
 
@@ -18,7 +16,7 @@ from app.core.config import settings
 
 
 class WorkspaceService:
-    """Handles folder and file operations using Supabase, with optional AWS cleanup."""
+    """Handles folder and file operations using Supabase database + storage."""
 
     def __init__(self, supabase: Client):
         self.supabase = supabase
@@ -65,7 +63,7 @@ class WorkspaceService:
         self._files_has_updated_at = self._column_exists("files", "updated_at")
 
     def _extract_storage_key(self, file_row: Dict[str, Any]) -> Optional[str]:
-        """Derive S3 object key from known metadata fields."""
+        """Derive object key from known metadata fields."""
         for key_field in ("storage_path", "s3_key", "object_key", "path"):
             value = file_row.get(key_field)
             if value:
@@ -74,7 +72,20 @@ class WorkspaceService:
         storage_url = file_row.get("storage_url")
         if storage_url:
             parsed = urlparse(str(storage_url))
-            return parsed.path.lstrip("/") if parsed.path else None
+            path = parsed.path.lstrip("/") if parsed.path else ""
+            if "/storage/v1/object/public/" in path:
+                marker = "storage/v1/object/public/"
+                public_object_path = path.split(marker, 1)[1]
+                parts = public_object_path.split("/", 1)
+                if len(parts) == 2:
+                    return parts[1]
+            if "/storage/v1/object/sign/" in path:
+                marker = "storage/v1/object/sign/"
+                signed_object_path = path.split(marker, 1)[1]
+                parts = signed_object_path.split("/", 1)
+                if len(parts) == 2:
+                    return parts[1]
+            return path or None
 
         return None
 
@@ -89,57 +100,62 @@ class WorkspaceService:
 
         return False
 
-    def _s3_client(self):
-        def _looks_like_placeholder(value: Optional[str]) -> bool:
-            if not value:
-                return True
-            lowered = value.strip().lower()
-            placeholder_markers = [
-                "your-",
-                "example",
-                "placeholder",
-                "changeme",
-                "dummy",
-            ]
-            if any(marker in lowered for marker in placeholder_markers):
-                return True
-            # Common fake key used in sample env files.
-            if value.strip() == "AKIA1234567890ABCDEF":
-                return True
-            return False
+    def _workspace_bucket_name(self) -> str:
+        return str(settings.supabase_storage_bucket or "workspace-files").strip() or "workspace-files"
 
-        if not settings.aws_access_key_id or not settings.aws_secret_access_key or not settings.aws_s3_bucket:
-            raise HTTPException(
-                status_code=500,
-                detail="AWS S3 is not configured. Set AWS_S3_BUCKET, AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY.",
-            )
-
-        if (
-            _looks_like_placeholder(settings.aws_access_key_id)
-            or _looks_like_placeholder(settings.aws_secret_access_key)
-            or _looks_like_placeholder(settings.aws_s3_bucket)
-        ):
-            raise HTTPException(
-                status_code=500,
-                detail=(
-                    "AWS S3 credentials look like placeholder values. "
-                    "Update AWS_S3_BUCKET, AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in backend/.env "
-                    "with real IAM credentials that have s3:PutObject and s3:DeleteObject permissions."
-                ),
-            )
-
-        return boto3.client(
-            "s3",
-            aws_access_key_id=settings.aws_access_key_id,
-            aws_secret_access_key=settings.aws_secret_access_key,
-            region_name=settings.aws_region,
-        )
-
-    def _maybe_s3_client(self):
+    def _create_workspace_bucket_if_missing(self, bucket: str) -> None:
         try:
-            return self._s3_client()
-        except HTTPException:
+            self.supabase.storage.create_bucket(bucket, options={"public": True})
+        except Exception as exc:
+            details = str(exc).lower()
+            if "already" in details and "exist" in details:
+                return
+            raise
+
+    def _upload_to_supabase_storage(self, bucket: str, object_key: str, content: bytes, mime_type: str) -> str:
+        try:
+            self.supabase.storage.from_(bucket).upload(
+                path=object_key,
+                file=content,
+                file_options={"content-type": mime_type, "upsert": "false"},
+            )
+        except Exception as exc:
+            details = str(exc).lower()
+            if "bucket" in details and "not found" in details:
+                self._create_workspace_bucket_if_missing(bucket)
+                self.supabase.storage.from_(bucket).upload(
+                    path=object_key,
+                    file=content,
+                    file_options={"content-type": mime_type, "upsert": "false"},
+                )
+            else:
+                raise
+
+        return self.supabase.storage.from_(bucket).get_public_url(object_key)
+
+    def _delete_from_supabase_storage(self, bucket: str, object_key: Optional[str]) -> None:
+        if not object_key:
+            return
+        if isinstance(object_key, str) and object_key.startswith("data:"):
+            return
+        try:
+            self.supabase.storage.from_(bucket).remove([object_key])
+        except Exception:
+            # Continue DB cleanup even when storage object is already gone.
+            pass
+
+    def _signed_url_from_supabase_storage(self, bucket: str, object_key: str, expires_in: int) -> Optional[str]:
+        try:
+            signed = self.supabase.storage.from_(bucket).create_signed_url(object_key, expires_in)
+            if isinstance(signed, dict):
+                signed_url = signed.get("signedURL") or signed.get("signedUrl") or signed.get("signed_url")
+                if signed_url:
+                    return signed_url
+            if isinstance(signed, str) and signed:
+                return signed
+        except Exception:
             return None
+        return None
 
     @staticmethod
     def _build_tree(flat_folders: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -302,17 +318,10 @@ class WorkspaceService:
                     if any(self._row_matches_folder(row, candidate) for candidate in to_delete)
                 ]
 
-            s3 = self._maybe_s3_client()
-            bucket = settings.aws_s3_bucket
-            if s3 and bucket:
-                for file_row in files:
-                    storage_key = self._extract_storage_key(file_row)
-                    if storage_key:
-                        try:
-                            s3.delete_object(Bucket=bucket, Key=storage_key)
-                        except (BotoCoreError, ClientError):
-                            # Continue database cleanup even if one object fails.
-                            pass
+            bucket = self._workspace_bucket_name()
+            for file_row in files:
+                storage_key = self._extract_storage_key(file_row)
+                self._delete_from_supabase_storage(bucket, storage_key)
 
             # Never run an unscoped DELETE; delete by explicit IDs if available.
             file_ids_to_delete = [str(row.get("id")) for row in files if row.get("id")]
@@ -351,19 +360,20 @@ class WorkspaceService:
 
             ext = os.path.splitext(file.filename)[1].lower()
             file_key = f"workspace/{user_id}/{folder_id}/{uuid.uuid4().hex}{ext}"
-            s3 = self._maybe_s3_client()
-            bucket = settings.aws_s3_bucket
+            mime_type = file.content_type or "application/octet-stream"
+            bucket = self._workspace_bucket_name()
+            storage_url: Optional[str] = None
+            storage_upload_error: Optional[str] = None
 
-            if s3 and bucket:
-                try:
-                    s3.put_object(
-                        Bucket=bucket,
-                        Key=file_key,
-                        Body=content,
-                        ContentType=file.content_type or "application/octet-stream",
-                    )
-                except (BotoCoreError, ClientError) as exc:
-                    raise HTTPException(status_code=500, detail=f"Failed to store uploaded file: {exc}") from exc
+            try:
+                storage_url = self._upload_to_supabase_storage(
+                    bucket=bucket,
+                    object_key=file_key,
+                    content=content,
+                    mime_type=mime_type,
+                )
+            except Exception as exc:
+                storage_upload_error = str(exc)
 
             self._detect_files_columns()
 
@@ -391,20 +401,19 @@ class WorkspaceService:
                 metadata["last_accessed"] = now_iso
             if self._files_has_updated_at:
                 metadata["updated_at"] = now_iso
-            if self._files_has_storage_url and s3 and bucket:
-                region = settings.aws_region
-                metadata["storage_url"] = f"https://{bucket}.s3.{region}.amazonaws.com/{file_key}"
+            if self._files_has_storage_url and storage_url:
+                metadata["storage_url"] = storage_url
             if self._files_has_file_content and file.content_type and file.content_type.startswith("text/"):
                 metadata["file_content"] = content.decode("utf-8", errors="ignore")
             elif self._files_has_file_content and ext in {".txt", ".md", ".csv", ".json", ".log"}:
                 metadata["file_content"] = content.decode("utf-8", errors="ignore")
-            elif self._files_has_file_content and not (s3 and bucket):
+            elif self._files_has_file_content and not storage_url:
                 mime_type = file.content_type or "application/octet-stream"
                 encoded = base64.b64encode(content).decode("ascii")
                 metadata["file_content"] = f"data:{mime_type};base64,{encoded}"
 
-            # No-AWS fallback: ensure at least one previewable payload exists in DB metadata.
-            if not (s3 and bucket):
+            # Storage fallback: ensure at least one previewable payload exists in DB metadata.
+            if not storage_url:
                 mime_type = file.content_type or "application/octet-stream"
                 encoded = base64.b64encode(content).decode("ascii")
                 data_url = f"data:{mime_type};base64,{encoded}"
@@ -427,27 +436,18 @@ class WorkspaceService:
             saved = self.supabase.table("files").insert(metadata).execute()
             if not saved.data:
                 raise HTTPException(status_code=500, detail="File metadata insert failed")
-            return saved.data[0]
+            inserted = saved.data[0]
+
+            # Surface storage failures explicitly in response without breaking core upload.
+            if storage_upload_error:
+                inserted = {
+                    **inserted,
+                    "storage_warning": f"Supabase Storage upload fallback used: {storage_upload_error}",
+                }
+
+            return inserted
         except HTTPException:
             raise
-        except ClientError as exc:
-            error_code = exc.response.get("Error", {}).get("Code", "")
-            if error_code == "InvalidAccessKeyId":
-                raise HTTPException(
-                    status_code=500,
-                    detail=(
-                        "AWS rejected the access key (InvalidAccessKeyId). "
-                        "File uploads currently save metadata to the database only, so you can ignore AWS for now."
-                    ),
-                ) from exc
-            if error_code == "SignatureDoesNotMatch":
-                raise HTTPException(
-                    status_code=500,
-                    detail=(
-                        "AWS signature mismatch. File uploads currently save metadata to the database only, so AWS is optional for now."
-                    ),
-                ) from exc
-            raise HTTPException(status_code=500, detail=f"File upload failed: {exc}") from exc
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"File upload failed: {exc}") from exc
 
@@ -565,7 +565,7 @@ class WorkspaceService:
             folders_query = self.supabase.table("folders").select("*").eq("user_id", user_id)
             folders = folders_query.execute().data or []
             folder_lookup = {str(folder["id"]): folder for folder in folders if folder.get("id")}
-            bucket = settings.aws_s3_bucket
+            bucket = self._workspace_bucket_name()
 
             limited = sorted(files, key=self._row_recent_timestamp, reverse=True)[: max(1, min(int(limit or 5), 50))]
             recent_files = []
@@ -635,39 +635,24 @@ class WorkspaceService:
                     "source": "storage_path_data_url",
                 }
 
-            s3 = self._maybe_s3_client()
-            bucket = settings.aws_s3_bucket
-            if storage_key and s3 and bucket:
-                safe_expiry = max(60, min(int(expires_in or 3600), 86400))
-                try:
-                    preview_url = s3.generate_presigned_url(
-                        "get_object",
-                        Params={"Bucket": bucket, "Key": storage_key},
-                        ExpiresIn=safe_expiry,
-                    )
-                except (BotoCoreError, ClientError) as exc:
-                    raise HTTPException(status_code=500, detail=f"Failed to create preview URL: {exc}") from exc
-
-                return {
-                    "file_id": file_id,
-                    "preview_url": preview_url,
-                    "content": None,
-                    "mime_type": row.get("mime_type"),
-                    "source": "presigned_url",
-                }
-
-            # Fallback when AWS credentials are unavailable but bucket/key metadata exists.
-            # If objects are publicly readable this enables preview without presign support.
+            bucket = self._workspace_bucket_name()
             if storage_key and bucket:
-                region = settings.aws_region
-                derived_public_url = f"https://{bucket}.s3.{region}.amazonaws.com/{storage_key}"
-                return {
-                    "file_id": file_id,
-                    "preview_url": derived_public_url,
-                    "content": None,
-                    "mime_type": row.get("mime_type"),
-                    "source": "derived_storage_url",
-                }
+                safe_expiry = max(60, min(int(expires_in or 3600), 86400))
+                preview_url = self._signed_url_from_supabase_storage(bucket, storage_key, safe_expiry)
+                if not preview_url:
+                    try:
+                        preview_url = self.supabase.storage.from_(bucket).get_public_url(storage_key)
+                    except Exception:
+                        preview_url = None
+
+                if preview_url:
+                    return {
+                        "file_id": file_id,
+                        "preview_url": preview_url,
+                        "content": None,
+                        "mime_type": row.get("mime_type"),
+                        "source": "supabase_storage",
+                    }
 
             storage_url = row.get("storage_url")
             if storage_url:
@@ -776,9 +761,7 @@ class WorkspaceService:
                     stack.append(child_id)
 
             storage_key = self._extract_storage_key(existing.data[0])
-            s3 = self._maybe_s3_client()
-            if storage_key and s3 and settings.aws_s3_bucket:
-                s3.delete_object(Bucket=settings.aws_s3_bucket, Key=storage_key)
+            self._delete_from_supabase_storage(self._workspace_bucket_name(), storage_key)
 
             delete_query = self.supabase.table("files").delete().in_("id", to_delete)
             if self._files_has_user_id:

@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     supabase_url: Optional[str] = Field(default=None, env="SUPABASE_URL")
     supabase_anon_key: Optional[str] = Field(default=None, env="SUPABASE_ANON_KEY")
     supabase_service_role_key: Optional[str] = Field(default=None, env="SUPABASE_SERVICE_ROLE_KEY")
+    supabase_storage_bucket: str = Field(default="workspace-files", env="SUPABASE_STORAGE_BUCKET")
 
     # JWT and Session
     secret_key: str = Field(default="dev-secret-change-me", env="SECRET_KEY")

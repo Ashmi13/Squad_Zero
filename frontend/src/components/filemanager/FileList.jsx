@@ -73,6 +73,19 @@ const buildContentLookup = (nodes, lookup = {}) => {
   return lookup;
 };
 
+const findFileInTreeById = (nodes, targetId) => {
+  for (const node of nodes || []) {
+    if (String(node?.id) === String(targetId)) {
+      return node;
+    }
+    if (node?.children?.length) {
+      const nested = findFileInTreeById(node.children, targetId);
+      if (nested) return nested;
+    }
+  }
+  return null;
+};
+
 const FileList = ({ selectedFolder, files, onSelectFile, onFilesUpdate }) => {
   const [folderFiles, setFolderFiles] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -246,9 +259,17 @@ const FileList = ({ selectedFolder, files, onSelectFile, onFilesUpdate }) => {
     if (!window.confirm('Delete this file? This action cannot be undone.')) return;
 
     try {
-      const targetFile = folderFiles.find((item) => String(item.id) === String(fileId));
+      const targetFile = findFileInTreeById(folderFiles, fileId);
       await workspaceApi.deleteFile(fileId);
-      await removeFileFromLocalFolder(selectedFolder, targetFile?.originalFilename || targetFile?.name);
+      await removeFileFromLocalFolder(
+        {
+          ...selectedFolder,
+          name: targetFile?.name,
+          originalFilename: targetFile?.originalFilename,
+          original_filename: targetFile?.originalFilename,
+        },
+        targetFile?.originalFilename || targetFile?.name,
+      );
       await loadFiles();
       window.dispatchEvent(new Event('neuranote:files-updated'));
     } catch (err) {

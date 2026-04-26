@@ -341,11 +341,21 @@ const FolderPanel = ({ selectedFolder, onSelectFolder, onSelectFile, onFolderDel
     };
 
     try {
+      let preselectedParentHandle = null;
+
       // Preflight permission request while this click still has user activation.
       try {
         const record = await getFolderHandleBinding(folder.id);
         if (record?.parentHandle) {
           await ensureReadWritePermission(record.parentHandle, { requestIfNeeded: true });
+          preselectedParentHandle = record.parentHandle;
+        } else if (!record?.parentHandle) {
+          // Fallback for older bindings that only stored child folder handles.
+          preselectedParentHandle = await pickDirectoryHandle();
+          const granted = await ensureReadWritePermission(preselectedParentHandle);
+          if (!granted) {
+            preselectedParentHandle = null;
+          }
         }
       } catch {
         // Best-effort preflight only.
@@ -354,7 +364,10 @@ const FolderPanel = ({ selectedFolder, onSelectFolder, onSelectFile, onFolderDel
       await workspaceApi.deleteFolder(folder.id);
       let localDeleteIssue = null;
       try {
-        const localDeleteResult = await removeFolderFromLocalMachine(folder, { requestIfNeeded: false });
+        const localDeleteResult = await removeFolderFromLocalMachine(folder, {
+          requestIfNeeded: false,
+          preselectedParentHandle,
+        });
         if (!localDeleteResult?.removed && localDeleteResult?.code !== 'NOT_FOUND') {
           localDeleteIssue = localDeleteResult?.reason || 'Local folder deletion failed.';
         }

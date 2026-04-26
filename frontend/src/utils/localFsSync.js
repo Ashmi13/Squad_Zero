@@ -193,7 +193,41 @@ export const removeFileFromLocalFolder = async (folder, fileName) => {
     const record = await getFolderHandleBinding(folder.id);
     if (!record?.handle) return;
     if (!(await ensureReadWritePermission(record.handle))) return;
-    await record.handle.removeEntry(fileName);
+
+    const candidates = Array.from(new Set([
+      String(fileName || '').trim(),
+      String(folder?.originalFilename || '').trim(),
+      String(folder?.original_filename || '').trim(),
+      String(folder?.name || '').trim(),
+    ].filter(Boolean)));
+
+    for (const candidate of candidates) {
+      try {
+        await record.handle.removeEntry(candidate);
+        return;
+      } catch {
+        // Try next candidate and then fallback by basename.
+      }
+    }
+
+    const normalizeBase = (value) => String(value || '').trim().toLowerCase().replace(/\.[^./\\]+$/, '');
+    const wantedBaseNames = candidates.map(normalizeBase).filter(Boolean);
+
+    if (!wantedBaseNames.length) return;
+
+    // eslint-disable-next-line no-restricted-syntax
+    for await (const [entryName, entryHandle] of record.handle.entries()) {
+      if (entryHandle.kind !== 'file') continue;
+      const entryBase = normalizeBase(entryName);
+      if (!wantedBaseNames.includes(entryBase)) continue;
+
+      try {
+        await record.handle.removeEntry(entryName);
+        return;
+      } catch {
+        // Keep searching for a match.
+      }
+    }
   } catch {
     // Best-effort rollback only.
   }

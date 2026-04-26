@@ -51,10 +51,6 @@ Write-Host "  Frontend:  http://localhost:5173" -ForegroundColor Cyan
 Write-Host "  Backend:   http://localhost:8000" -ForegroundColor Cyan
 Write-Host "  API Docs:  http://localhost:8000/docs" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Test Account:" -ForegroundColor Yellow
-Write-Host "  Email:    test@example.com" -ForegroundColor White
-Write-Host "  Password: password123" -ForegroundColor White
-Write-Host ""
 Write-Host "Project Structure:" -ForegroundColor Yellow
 Write-Host "  frontend/  - React application" -ForegroundColor White
 Write-Host "  backend/   - FastAPI server" -ForegroundColor White

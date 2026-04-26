@@ -16,15 +16,18 @@ const MEMBERS = [
       { label: 'Dashboard',         path: '/dashboard' },
       { label: 'Forgot Password',   path: '/forgot-password' },
       { label: 'Account Verified',  path: '/account-verified' },
+      { label: '⚡ Go to Tasks',     path: '/login' },
     ],
   },
-  {
+ {
     id: 2,
     name: 'Ashmitha',
     color: '#0ea5e9',
     routes: [
       { label: 'File Manager',      path: '/files' },
       { label: 'Dashboard Home',    path: '/dashboard' },
+      { label: 'Pomodoro',          path: '/pomodoro' },
+      { label: 'Flashcards',        path: '/flashcards' },
     ],
   },
   {
@@ -50,11 +53,9 @@ const MEMBERS = [
     id: 5,
     name: 'Anoj (M5)',
     color: '#ec4899',
-    routes: [
+   routes: [
       { label: 'Task Dashboard',    path: '/tasks' },
       { label: 'Second Brain',      path: '/second-brain' },
-      { label: 'Pomodoro',          path: '/pomodoro' },
-      { label: 'Flashcards',        path: '/flashcards' },
     ],
   },
 ];

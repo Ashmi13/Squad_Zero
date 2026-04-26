@@ -9,6 +9,49 @@ from datetime import datetime, timezone
 router = APIRouter(prefix="/tasks", tags=["Tasks"])
 
 
+@router.get("/categories", response_model=List[dict])
+async def get_categories(current_user: dict = Depends(get_current_user)):
+    supabase = get_supabase().service_client
+    user_id = current_user.get("sub")
+    res = supabase.table("task_categories").select("*").eq("user_id", user_id).order("created_at").execute()
+    return res.data or []
+
+
+@router.post("/categories", response_model=dict)
+async def create_category(data: dict, current_user: dict = Depends(get_current_user)):
+    supabase = get_supabase().service_client
+    user_id = current_user.get("sub")
+    payload = {
+        "user_id": user_id,
+        "name": data.get("name"),
+        "icon": data.get("icon", "default"),
+        "color": data.get("color", "#6366f1"),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    res = supabase.table("task_categories").insert(payload).execute()
+    if not res.data:
+        raise HTTPException(status_code=400, detail="Failed to create category")
+    return res.data[0]
+
+
+@router.patch("/categories/{cat_id}", response_model=dict)
+async def update_category(cat_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    supabase = get_supabase().service_client
+    user_id = current_user.get("sub")
+    res = supabase.table("task_categories").update(data).eq("id", cat_id).eq("user_id", user_id).execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Category not found")
+    return res.data[0]
+
+
+@router.delete("/categories/{cat_id}")
+async def delete_category(cat_id: str, current_user: dict = Depends(get_current_user)):
+    supabase = get_supabase().service_client
+    user_id = current_user.get("sub")
+    supabase.table("task_categories").delete().eq("id", cat_id).eq("user_id", user_id).execute()
+    return {"message": "Deleted"}
+
+
 @router.get("/", response_model=List[dict])
 async def get_tasks(
     category: str = None,

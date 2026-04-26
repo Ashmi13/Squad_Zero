@@ -19,7 +19,7 @@ export default function MiniCalendar({ tasks, events, onExpand }) {
   const firstDay    = new Date(year, month, 1).getDay();
   const isToday     = d => d === today.getDate() && month === today.getMonth() && year === today.getFullYear();
 
-  // dots per day
+  // build a map of day -> colored dots (max 3 per day)
   const dots = {};
   const addDot = (isoDate, color) => {
     const d = new Date(isoDate);
@@ -29,21 +29,23 @@ export default function MiniCalendar({ tasks, events, onExpand }) {
       if (dots[day].length < 3) dots[day].push(color);
     }
   };
-  tasks.forEach(t  => t.due_date   && addDot(t.due_date,    t.color      || '#6366f1'));
-  events.forEach(e => e.start_time && addDot(e.start_time,  e.color      || '#ec4899'));
+  tasks.forEach(t  => t.due_date   && addDot(t.due_date,   t.color || '#6366f1'));
+  events.forEach(e => e.start_time && addDot(e.start_time, e.color || '#ec4899'));
 
+  // pad the start of the grid with empty cells so day 1 lands on the right weekday
   const cells = [...Array(firstDay).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)];
 
-  // upcoming (next 3 items)
+  // grab the next 4 upcoming tasks and events combined, sorted by date
   const now = new Date();
   const upcoming = [
-    ...tasks.filter(t  => t.due_date   && new Date(t.due_date)   >= now).map(t  => ({ title: t.title,  date: t.due_date,    color: t.color  || '#6366f1' })),
-    ...events.filter(e => e.start_time && new Date(e.start_time) >= now).map(e  => ({ title: e.title,  date: e.start_time,  color: e.color  || '#ec4899' })),
+    ...tasks.filter(t  => t.due_date   && new Date(t.due_date)   >= now)
+            .map(t  => ({ title: t.title, date: t.due_date,   color: t.color  || '#6366f1' })),
+    ...events.filter(e => e.start_time && new Date(e.start_time) >= now)
+             .map(e  => ({ title: e.title, date: e.start_time, color: e.color  || '#ec4899' })),
   ].sort((a, b) => new Date(a.date) - new Date(b.date)).slice(0, 4);
 
   return (
     <Box className="mini-cal">
-      {/* Header */}
       <Box className="mini-cal-header">
         <Typography className="panel-title">CALENDAR</Typography>
         <IconButton size="small" onClick={onExpand} sx={{ color: '#6366f1', ml: 'auto', p: 0.5 }} title="Expand">
@@ -51,14 +53,14 @@ export default function MiniCalendar({ tasks, events, onExpand }) {
         </IconButton>
       </Box>
 
-      {/* Month nav */}
+      {/* month navigation */}
       <Box className="mini-cal-nav">
         <IconButton size="small" onClick={prev} sx={{ color: '#6b7280', p: 0.25 }}><ChevronLeftIcon fontSize="small" /></IconButton>
         <Typography sx={{ color: '#e5e7eb', fontWeight: 600, fontSize: 12 }}>{MONTHS[month]} {year}</Typography>
         <IconButton size="small" onClick={next} sx={{ color: '#6b7280', p: 0.25 }}><ChevronRightIcon fontSize="small" /></IconButton>
       </Box>
 
-      {/* Grid */}
+      {/* day grid */}
       <Box className="mini-cal-grid">
         {DAYS.map(d => <Box key={d} className="mini-day-name">{d}</Box>)}
         {cells.map((day, i) => (
@@ -75,7 +77,7 @@ export default function MiniCalendar({ tasks, events, onExpand }) {
         ))}
       </Box>
 
-      {/* Upcoming */}
+      {/* upcoming items list below the grid */}
       <Box className="mini-cal-upcoming">
         <Typography sx={{ color: '#4b5563', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', mb: 1 }}>UPCOMING</Typography>
         {upcoming.length === 0

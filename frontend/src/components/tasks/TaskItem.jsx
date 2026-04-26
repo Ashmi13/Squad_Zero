@@ -8,8 +8,10 @@ import AccessTimeIcon           from '@mui/icons-material/AccessTime';
 import NotificationsNoneIcon    from '@mui/icons-material/NotificationsNone';
 import MenuBookOutlinedIcon     from '@mui/icons-material/MenuBookOutlined';
 
+// color per priority level
 const P_COLORS = { high: '#ef4444', medium: '#f59e0b', low: '#10b981' };
 
+// format the due date and check if it's already past
 function formatDue(raw) {
   if (!raw) return null;
   const d   = new Date(raw);
@@ -38,16 +40,21 @@ export default function TaskItem({ task, onToggle, onEdit, onDelete }) {
 
       <Box className="task-content">
         <Typography className={`task-title ${done ? 'done' : ''}`}>{task.title}</Typography>
+
         {task.description && (
           <Typography className="task-desc">{task.description}</Typography>
         )}
+
         <Box className="task-meta">
+          {/* due date badge — goes red if overdue */}
           {due && (
             <Box className={`due-badge ${due.overdue && !done ? 'overdue' : ''}`}>
               <AccessTimeIcon sx={{ fontSize: 11 }} />
               <span>{due.label}</span>
             </Box>
           )}
+
+          {/* reminder badge */}
           {task.reminder_minutes_before && (
             <Box className="reminder-badge">
               <NotificationsNoneIcon sx={{ fontSize: 11 }} />
@@ -58,6 +65,7 @@ export default function TaskItem({ task, onToggle, onEdit, onDelete }) {
               </span>
             </Box>
           )}
+
           <Chip
             label={task.priority}
             size="small"
@@ -67,18 +75,16 @@ export default function TaskItem({ task, onToggle, onEdit, onDelete }) {
               bgcolor: `${P_COLORS[task.priority]}18`,
               color: P_COLORS[task.priority],
               borderColor: P_COLORS[task.priority],
-              height: 20,
-              fontSize: 10,
+              height: 20, fontSize: 10,
             }}
           />
-          {/* Notebook tag — shows automatically once notebook sprint is merged */}
+
+          {/* notebook tag — appears once the notes sprint is merged */}
           {task.notebook_title && (
             <Box sx={{
               display: 'flex', alignItems: 'center', gap: '3px',
-              fontSize: 10, color: '#818cf8',
-              padding: '2px 6px', borderRadius: '5px',
-              background: 'rgba(99,102,241,0.12)',
-              border: '1px solid rgba(99,102,241,0.2)',
+              fontSize: 10, color: '#818cf8', padding: '2px 6px', borderRadius: '5px',
+              background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.2)',
             }}>
               <MenuBookOutlinedIcon sx={{ fontSize: 11 }} />
               <span>{task.notebook_title}</span>

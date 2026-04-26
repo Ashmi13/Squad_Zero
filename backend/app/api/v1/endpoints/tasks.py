@@ -1,4 +1,3 @@
-"""Task endpoints for Member 5"""
 from fastapi import APIRouter, Depends, HTTPException
 from app.api.deps import get_current_user
 from app.db.supabase import get_supabase
@@ -9,6 +8,9 @@ from datetime import datetime, timezone
 router = APIRouter(prefix="/tasks", tags=["Tasks"])
 
 
+# --- CATEGORIES ---
+
+# get all task lists (categories) for the logged-in user
 @router.get("/categories", response_model=List[dict])
 async def get_categories(current_user: dict = Depends(get_current_user)):
     supabase = get_supabase().service_client
@@ -17,6 +19,7 @@ async def get_categories(current_user: dict = Depends(get_current_user)):
     return res.data or []
 
 
+# create a new task list (category)
 @router.post("/categories", response_model=dict)
 async def create_category(data: dict, current_user: dict = Depends(get_current_user)):
     supabase = get_supabase().service_client
@@ -34,6 +37,7 @@ async def create_category(data: dict, current_user: dict = Depends(get_current_u
     return res.data[0]
 
 
+# update a category's name, icon, or color
 @router.patch("/categories/{cat_id}", response_model=dict)
 async def update_category(cat_id: str, data: dict, current_user: dict = Depends(get_current_user)):
     supabase = get_supabase().service_client
@@ -44,6 +48,7 @@ async def update_category(cat_id: str, data: dict, current_user: dict = Depends(
     return res.data[0]
 
 
+# delete a category — tasks inside it are handled by the frontend before calling this
 @router.delete("/categories/{cat_id}")
 async def delete_category(cat_id: str, current_user: dict = Depends(get_current_user)):
     supabase = get_supabase().service_client
@@ -52,6 +57,9 @@ async def delete_category(cat_id: str, current_user: dict = Depends(get_current_
     return {"message": "Deleted"}
 
 
+# --- TASKS ---
+
+# get all tasks for the user, optionally filtered by category or status
 @router.get("/", response_model=List[dict])
 async def get_tasks(
     category: str = None,
@@ -72,11 +80,9 @@ async def get_tasks(
     return response.data or []
 
 
+# create a new task under the logged-in user
 @router.post("/", response_model=dict)
-async def create_task(
-    task: TaskCreate,
-    current_user: dict = Depends(get_current_user)
-):
+async def create_task(task: TaskCreate, current_user: dict = Depends(get_current_user)):
     supabase = get_supabase().service_client
     user_id = current_user.get("sub")
 
@@ -95,21 +101,18 @@ async def create_task(
     }
 
     response = supabase.table("tasks").insert(task_data).execute()
-
     if not response.data:
         raise HTTPException(status_code=400, detail="Failed to create task")
     return response.data[0]
 
 
+# update task fields (title, description, status, priority, due date, etc.)
 @router.patch("/{task_id}", response_model=dict)
-async def update_task(
-    task_id: str,
-    task: TaskUpdate,
-    current_user: dict = Depends(get_current_user)
-):
+async def update_task(task_id: str, task: TaskUpdate, current_user: dict = Depends(get_current_user)):
     supabase = get_supabase().service_client
     user_id = current_user.get("sub")
 
+    # only include fields that were actually sent
     update_data = {k: v for k, v in task.dict().items() if v is not None}
     update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
 
@@ -129,11 +132,9 @@ async def update_task(
     return response.data[0]
 
 
+# delete a task permanently
 @router.delete("/{task_id}")
-async def delete_task(
-    task_id: str,
-    current_user: dict = Depends(get_current_user)
-):
+async def delete_task(task_id: str, current_user: dict = Depends(get_current_user)):
     supabase = get_supabase().service_client
     user_id = current_user.get("sub")
 
@@ -150,14 +151,13 @@ async def delete_task(
     return {"message": "Task deleted successfully"}
 
 
+# flip a task between done and todo
 @router.patch("/{task_id}/toggle")
-async def toggle_task(
-    task_id: str,
-    current_user: dict = Depends(get_current_user)
-):
+async def toggle_task(task_id: str, current_user: dict = Depends(get_current_user)):
     supabase = get_supabase().service_client
     user_id = current_user.get("sub")
 
+    # check current status first
     current = (
         supabase.table("tasks")
         .select("status")
@@ -173,10 +173,7 @@ async def toggle_task(
 
     response = (
         supabase.table("tasks")
-        .update({
-            "status": new_status,
-            "updated_at": datetime.now(timezone.utc).isoformat()
-        })
+        .update({"status": new_status, "updated_at": datetime.now(timezone.utc).isoformat()})
         .eq("id", task_id)
         .eq("user_id", user_id)
         .execute()

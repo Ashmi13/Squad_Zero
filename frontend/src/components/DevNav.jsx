@@ -9,19 +9,22 @@ const MEMBERS = [
     name: 'Nihaaj',
     color: '#6366f1',
     routes: [
-      { label: 'Landing Page',   path: '/' },
-      { label: 'Sign In',        path: '/login' },
-      { label: 'Sign Up',        path: '/signup' },
-      { label: 'OAuth Callback', path: '/oauth/callback' },
-      { label: 'Dashboard',      path: '/dashboard' },
+      { label: 'Landing Page',      path: '/' },
+      { label: 'Sign In',           path: '/login' },
+      { label: 'Sign Up',           path: '/signup' },
+      { label: 'OAuth Callback',    path: '/oauth/callback' },
+      { label: 'Dashboard',         path: '/dashboard' },
+      { label: 'Forgot Password',   path: '/forgot-password' },
+      { label: 'Account Verified',  path: '/account-verified' },
     ],
   },
   {
     id: 2,
-    name: 'Member 2',
+    name: 'Ashmitha',
     color: '#0ea5e9',
     routes: [
-      { label: 'Dashboard (temp)', path: '/dashboard' },
+      { label: 'File Manager',      path: '/files' },
+      { label: 'Dashboard Home',    path: '/dashboard' },
     ],
   },
   {
@@ -29,8 +32,9 @@ const MEMBERS = [
     name: 'Sandavi',
     color: '#10b981',
     routes: [
-      { label: 'Notes Dashboard', path: '/notes' },
-      { label: 'Note Editor',     path: '/notes/editor/test-note' },
+      { label: 'Notes Dashboard',   path: '/notes' },
+      { label: 'Note Editor',       path: '/notes/editor/test-note' },
+      { label: 'Create Note',       path: '/files/create-note' },
     ],
   },
   {
@@ -38,16 +42,19 @@ const MEMBERS = [
     name: 'Member 4',
     color: '#f59e0b',
     routes: [
-      { label: 'Quiz',         path: '/quiz' },
-      { label: 'Quiz History', path: '/quiz/history' },
+      { label: 'Quiz',              path: '/quiz' },
+      { label: 'Quiz History',      path: '/quiz/history' },
     ],
   },
   {
     id: 5,
-    name: 'You (M5)',
+    name: 'Anoj (M5)',
     color: '#ec4899',
     routes: [
-      { label: 'Task Dashboard', path: '/tasks' },
+      { label: 'Task Dashboard',    path: '/tasks' },
+      { label: 'Second Brain',      path: '/second-brain' },
+      { label: 'Pomodoro',          path: '/pomodoro' },
+      { label: 'Flashcards',        path: '/flashcards' },
     ],
   },
 ];
@@ -70,21 +77,21 @@ export default function DevNav() {
         onClick={() => setOpen(o => !o)}
         title="Dev Navigation"
         style={{
-          position:     'fixed',
-          bottom:       '24px',
-          right:        '24px',
-          zIndex:       9999,
-          width:        '48px',
-          height:       '48px',
-          borderRadius: '50%',
-          background:   '#1e1e2e',
-          color:        '#cdd6f4',
-          border:       '2px solid #45475a',
-          fontSize:     '20px',
-          cursor:       'pointer',
-          boxShadow:    '0 4px 20px rgba(0,0,0,0.4)',
-          display:      'flex',
-          alignItems:   'center',
+          position:       'fixed',
+          bottom:         '24px',
+          right:          '24px',
+          zIndex:         9999,
+          width:          '48px',
+          height:         '48px',
+          borderRadius:   '50%',
+          background:     '#1e1e2e',
+          color:          '#cdd6f4',
+          border:         '2px solid #45475a',
+          fontSize:       '20px',
+          cursor:         'pointer',
+          boxShadow:      '0 4px 20px rgba(0,0,0,0.4)',
+          display:        'flex',
+          alignItems:     'center',
           justifyContent: 'center',
         }}
       >
@@ -107,7 +114,7 @@ export default function DevNav() {
           fontFamily:   'monospace',
         }}>
 
-          {/* Header — shows current route */}
+          {/* Header */}
           <div style={{
             padding:        '10px 14px',
             borderBottom:   '1px solid #45475a',
@@ -120,11 +127,11 @@ export default function DevNav() {
           }}>
             <span>🛠 DEV PANEL</span>
             <span style={{
-              color:      '#585b70',
-              background: '#313244',
-              padding:    '2px 8px',
+              color:        '#585b70',
+              background:   '#313244',
+              padding:      '2px 8px',
               borderRadius: '4px',
-              fontSize:   '10px',
+              fontSize:     '10px',
             }}>
               {location.pathname}
             </span>
@@ -137,19 +144,19 @@ export default function DevNav() {
                 key={m.id}
                 onClick={() => setActiveTab(m.id)}
                 style={{
-                  flex:        1,
-                  padding:     '8px 0',
-                  background:  activeTab === m.id ? m.color + '22' : 'transparent',
-                  color:       activeTab === m.id ? m.color : '#585b70',
-                  border:      'none',
+                  flex:         1,
+                  padding:      '8px 0',
+                  background:   activeTab === m.id ? m.color + '22' : 'transparent',
+                  color:        activeTab === m.id ? m.color : '#585b70',
+                  border:       'none',
                   borderBottom: activeTab === m.id
                     ? `2px solid ${m.color}`
                     : '2px solid transparent',
-                  cursor:      'pointer',
-                  fontSize:    '11px',
-                  fontFamily:  'monospace',
-                  fontWeight:  activeTab === m.id ? 'bold' : 'normal',
-                  transition:  'all 0.15s',
+                  cursor:       'pointer',
+                  fontSize:     '11px',
+                  fontFamily:   'monospace',
+                  fontWeight:   activeTab === m.id ? 'bold' : 'normal',
+                  transition:   'all 0.15s',
                 }}
               >
                 M{m.id}
@@ -175,20 +182,20 @@ export default function DevNav() {
                   key={route.path + route.label}
                   onClick={() => { navigate(route.path); setOpen(false); }}
                   style={{
-                    display:        'flex',
-                    alignItems:     'center',
-                    gap:            '8px',
-                    width:          '100%',
-                    padding:        '8px 10px',
-                    background:     isActive ? activeMember.color + '18' : 'transparent',
-                    color:          isActive ? activeMember.color : '#cdd6f4',
-                    border:         'none',
-                    borderRadius:   '6px',
-                    cursor:         'pointer',
-                    fontSize:       '12px',
-                    fontFamily:     'monospace',
-                    textAlign:      'left',
-                    transition:     'background 0.15s',
+                    display:      'flex',
+                    alignItems:   'center',
+                    gap:          '8px',
+                    width:        '100%',
+                    padding:      '8px 10px',
+                    background:   isActive ? activeMember.color + '18' : 'transparent',
+                    color:        isActive ? activeMember.color : '#cdd6f4',
+                    border:       'none',
+                    borderRadius: '6px',
+                    cursor:       'pointer',
+                    fontSize:     '12px',
+                    fontFamily:   'monospace',
+                    textAlign:    'left',
+                    transition:   'background 0.15s',
                   }}
                   onMouseEnter={e => {
                     if (!isActive) e.currentTarget.style.background = '#313244';
@@ -202,10 +209,10 @@ export default function DevNav() {
                   </span>
                   {route.label}
                   <span style={{
-                    marginLeft:   'auto',
-                    color:        '#45475a',
-                    fontSize:     '10px',
-                    whiteSpace:   'nowrap',
+                    marginLeft: 'auto',
+                    color:      '#45475a',
+                    fontSize:   '10px',
+                    whiteSpace: 'nowrap',
                   }}>
                     {route.path}
                   </span>
@@ -216,11 +223,11 @@ export default function DevNav() {
 
           {/* Footer */}
           <div style={{
-            padding:      '8px 14px',
-            borderTop:    '1px solid #45475a',
-            color:        '#45475a',
-            fontSize:     '10px',
-            display:      'flex',
+            padding:        '8px 14px',
+            borderTop:      '1px solid #45475a',
+            color:          '#45475a',
+            fontSize:       '10px',
+            display:        'flex',
             justifyContent: 'space-between',
           }}>
             <span>develop branch</span>

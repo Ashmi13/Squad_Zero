@@ -41,6 +41,16 @@ const setLocalFolderMap = (map) => {
   localStorage.setItem(LOCAL_FOLDER_MAP_KEY, JSON.stringify(map));
 };
 
+const resolveTextPayload = (file) => {
+  const candidates = [file?.file_content, file?.raw_text, file?.summary, file?.content, file?.text];
+  for (const value of candidates) {
+    if (typeof value === 'string' && value.trim() !== '') {
+      return value;
+    }
+  }
+  return null;
+};
+
 const FolderPanel = ({ selectedFolder, onSelectFolder, onSelectFile, onFolderDelete }) => {
   const { theme } = useTheme();
   const [folders, setFolders] = useState([]);
@@ -54,6 +64,8 @@ const FolderPanel = ({ selectedFolder, onSelectFolder, onSelectFile, onFolderDel
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
   const [statusType, setStatusType] = useState('info');
+  const [dragOverFolderId, setDragOverFolderId] = useState(null);
+  const [isMovingFile, setIsMovingFile] = useState(false);
 
   const showStatus = (message, type = 'info') => {
     setStatusMessage(message);
@@ -102,8 +114,9 @@ const FolderPanel = ({ selectedFolder, onSelectFolder, onSelectFile, onFolderDel
     try {
       const data = await workspaceApi.getFiles(folderId);
       const normalized = (data.files || []).map((f) => {
-        const inlineAsset = typeof f.file_content === 'string' && f.file_content.startsWith('data:')
-          ? f.file_content
+        const resolvedPayload = resolveTextPayload(f);
+        const inlineAsset = typeof resolvedPayload === 'string' && resolvedPayload.startsWith('data:')
+          ? resolvedPayload
           : null;
 
         return {
@@ -115,7 +128,7 @@ const FolderPanel = ({ selectedFolder, onSelectFolder, onSelectFile, onFolderDel
           folderId: f.folder_id,
           parent_file_id: f.parent_file_id,
           fileUrl: f.storage_url || inlineAsset,
-          content: inlineAsset ? null : f.file_content,
+          content: inlineAsset ? null : resolvedPayload,
           isParentPDF: (f.file_type || '').toUpperCase() === 'PDF',
         };
       });
@@ -390,17 +403,117 @@ const FolderPanel = ({ selectedFolder, onSelectFolder, onSelectFile, onFolderDel
     }
   };
 
+  const handleFolderDragOver = (e, folderId) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverFolderId(folderId);
+  };
+
+  const handleFolderDragLeave = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverFolderId(null);
+  };
+
+  const handleFolderDrop = async (e, targetFolderId) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverFolderId(null);
+
+    try {
+      const dragData = e.dataTransfer.getData('application/json');
+      if (!dragData) return;
+
+      const { fileId, sourceFolderId } = JSON.parse(dragData);
+      if (!fileId || !targetFolderId || fileId === targetFolderId) return;
+
+      // Prevent moving to the same folder
+      if (sourceFolderId === targetFolderId) {
+        showStatus('File is already in this folder', 'info');
+        return;
+      }
+
+      setIsMovingFile(true);
+      showStatus('Moving file...', 'info');
+
+      // Call the backend to move the file
+      await workspaceApi.moveFile(fileId, targetFolderId);
+
+      showStatus('File moved successfully!', 'success');
+      
+      // Reload files for both source and target folders
+      await Promise.all([
+        loadFolderFiles(sourceFolderId, { force: true }),
+        loadFolderFiles(targetFolderId, { force: true }),
+      ]);
+
+      // Dispatch event for file manager to refresh
+      window.dispatchEvent(new Event('neuranote:files-updated'));
+    } catch (err) {
+      console.error('Error moving file:', err);
+      showStatus(`Error moving file: ${err.message}`, 'error');
+    } finally {
+      setIsMovingFile(false);
+    }
+  };
+
   const renderFolder = (folder, depth = 0) => {
     const hasChildren = !!folder.children?.length;
     const isExpanded = !!expanded[folder.id];
     const folderFiles = filesByFolder[folder.id] || [];
     const isFilesLoading = !!filesLoadingByFolder[folder.id];
+    const isDragOver = dragOverFolderId === folder.id;
 
     const renderFileNode = (fileNode, fileDepth = 0) => {
       const isPdf = String(fileNode.file_type || '').toUpperCase() === 'PDF';
+      let isDraggingNode = false;
+      let mouseDownPosNode = null;
+
+      const onNodeMouseDown = (e) => {
+        mouseDownPosNode = { x: e.clientX, y: e.clientY };
+        e.currentTarget.draggable = false;
+      };
+
+      const onNodeMouseMove = (e) => {
+        if (!mouseDownPosNode) return;
+        const dx = Math.abs(e.clientX - mouseDownPosNode.x);
+        const dy = Math.abs(e.clientY - mouseDownPosNode.y);
+        if (dx > 5 || dy > 5) {
+          e.currentTarget.draggable = true;
+        }
+      };
+
+      const onNodeMouseUp = (e) => {
+        mouseDownPosNode = null;
+        e.currentTarget.draggable = false;
+      };
+
       return (
         <div key={fileNode.id}>
           <div
+            onMouseDown={onNodeMouseDown}
+            onMouseMove={onNodeMouseMove}
+            onMouseUp={onNodeMouseUp}
+            onDragStart={(e) => {
+              if (!e.currentTarget.draggable) {
+                e.preventDefault();
+                return;
+              }
+              e.dataTransfer.effectAllowed = 'move';
+              e.dataTransfer.setData('application/json', JSON.stringify({
+                fileId: fileNode.id,
+                fileName: fileNode.name,
+                fileType: fileNode.file_type,
+                sourceFolderId: folder.id,
+              }));
+              e.currentTarget.style.opacity = '0.5';
+            }}
+            onDragEnd={(e) => {
+              e.currentTarget.style.opacity = '1';
+              e.currentTarget.draggable = false;
+              mouseDownPosNode = null;
+            }}
             onClick={() => {
               if (onSelectFile) {
                 onSelectFile({
@@ -418,6 +531,7 @@ const FolderPanel = ({ selectedFolder, onSelectFolder, onSelectFile, onFolderDel
               color: '#555',
               fontSize: '13px',
               cursor: onSelectFile ? 'pointer' : 'default',
+              userSelect: 'none',
             }}
           >
             {isPdf ? <FileText size={14} color="#7b61ff" /> : <File size={14} color="#999" />}
@@ -431,6 +545,9 @@ const FolderPanel = ({ selectedFolder, onSelectFolder, onSelectFile, onFolderDel
     return (
       <div key={folder.id}>
         <div
+          onDragOver={(e) => handleFolderDragOver(e, folder.id)}
+          onDragLeave={handleFolderDragLeave}
+          onDrop={(e) => handleFolderDrop(e, folder.id)}
           onClick={() => {
             if (hasChildren) {
               toggleExpand(folder.id);
@@ -440,8 +557,9 @@ const FolderPanel = ({ selectedFolder, onSelectFolder, onSelectFile, onFolderDel
           style={{
             display: 'flex', alignItems: 'center', gap: '8px',
             padding: '9px 16px', paddingLeft: `${16 + depth * 14}px`, cursor: 'pointer',
-            backgroundColor: selectedFolder?.id === folder.id ? '#f0eeff' : 'transparent',
+            backgroundColor: isDragOver ? '#e8deff' : selectedFolder?.id === folder.id ? '#f0eeff' : 'transparent',
             borderLeft: selectedFolder?.id === folder.id ? '3px solid #6C5DD3' : '3px solid transparent',
+            transition: 'background-color 150ms',
           }}
         >
           <button
@@ -463,15 +581,15 @@ const FolderPanel = ({ selectedFolder, onSelectFolder, onSelectFile, onFolderDel
           >
             {isExpanded ? <ChevronDown size={14} color="#888" /> : <ChevronRight size={14} color="#888" />}
           </button>
-          <Folder size={16} color="#6C5DD3" />
-          <span style={{ flex: 1, fontSize: '14px', color: '#1a1a2e' }}>{folder.name}</span>
-          <button onClick={(e) => { e.stopPropagation(); addFolder(folder.id); }} disabled={creatingFolder} style={{ border: 'none', background: 'transparent', cursor: 'pointer' }}>
+          <Folder size={16} color={isDragOver ? '#7c3aed' : '#6C5DD3'} style={{ transition: 'color 150ms' }} />
+          <span style={{ flex: 1, fontSize: '14px', color: '#1a1a2e', fontWeight: isDragOver ? 600 : 400 }}>{folder.name}</span>
+          <button onClick={(e) => { e.stopPropagation(); addFolder(folder.id); }} disabled={creatingFolder || isMovingFile} style={{ border: 'none', background: 'transparent', cursor: 'pointer', opacity: isMovingFile ? 0.5 : 1 }}>
             <FolderPlus size={13} color="#888" />
           </button>
-          <button onClick={(e) => { e.stopPropagation(); renameFolder(folder); }} style={{ border: 'none', background: 'transparent', cursor: 'pointer' }}>
+          <button onClick={(e) => { e.stopPropagation(); renameFolder(folder); }} disabled={isMovingFile} style={{ border: 'none', background: 'transparent', cursor: 'pointer', opacity: isMovingFile ? 0.5 : 1 }}>
             <Pencil size={13} color="#888" />
           </button>
-          <button onClick={(e) => { e.stopPropagation(); removeFolder(folder); }} style={{ border: 'none', background: 'transparent', cursor: 'pointer' }}>
+          <button onClick={(e) => { e.stopPropagation(); removeFolder(folder); }} disabled={isMovingFile} style={{ border: 'none', background: 'transparent', cursor: 'pointer', opacity: isMovingFile ? 0.5 : 1 }}>
             <Trash2 size={13} color="#d14343" />
           </button>
         </div>

@@ -194,8 +194,23 @@ const FileViewer = ({ selectedFile, onClose, onFilesUpdate, currentFolder, curre
       !isGeneratedTextFile &&
       !String(selectedFile?.mimeType || selectedFile?.mime_type || '').toLowerCase().startsWith('text/');
 
-    const needsFallbackPreview = !!selectedFile?.id && !selectedFile?.fileUrl && !resolvedContent;
-    if (!needsFallbackPreview) {
+    // Only call getFilePreview when we genuinely have nothing to show.
+    // - Files with plain text inline content → show immediately, no round-trip needed
+    // - Files with a non-Supabase URL (e.g. local object URL) → already usable
+    // - Files stored in Supabase (storage_url) OR with no content → fetch fresh signed URL
+    const hasInlineTextContent = !!(resolvedContent && !resolvedContentIsDataUrl);
+    const hasLocalUrl = !!(selectedFile?.fileUrl && !String(selectedFile.fileUrl || '').includes('supabase.co'));
+
+    // Skip API call if we already have displayable content/url
+    if (hasInlineTextContent || hasLocalUrl) {
+      return () => {
+        disposed = true;
+      };
+    }
+
+    // Need to call the backend preview endpoint
+    const shouldRefreshPreview = !!selectedFile?.id;
+    if (!shouldRefreshPreview) {
       return () => {
         disposed = true;
       };
@@ -271,11 +286,24 @@ const FileViewer = ({ selectedFile, onClose, onFilesUpdate, currentFolder, curre
       .then((data) => {
         if (disposed) return;
         const preview = data?.preview || {};
+        // preview.preview_url: signed/public URL for PDFs and stored files
+        // preview.content: inline text content for text files
         if (preview.preview_url) {
           setPreviewUrl(preview.preview_url);
-        }
-        if (preview.content) {
-          setPreviewContent(preview.content);
+        } else if (preview.content) {
+          // Text content returned — display as text
+          const content = preview.content;
+          if (typeof content === 'string' && content.startsWith('data:')) {
+            // Decode data URL to display as text
+            try {
+              const base64 = content.split(',')[1];
+              setPreviewContent(atob(base64));
+            } catch {
+              setPreviewContent(content);
+            }
+          } else {
+            setPreviewContent(content);
+          }
         }
       })
       .catch(async () => {

@@ -52,11 +52,79 @@ export const workspaceApi = {
     return request(`/api/v1/workspace/files${query}`);
   },
 
-  getRecentFiles(limit = 5) {
-    return request(`/api/v1/workspace/files/recent?limit=${encodeURIComponent(limit)}`);
+  async getRecentFiles(limit = 5) {
+    try {
+      const [filesRes, foldersRes] = await Promise.all([
+        request('/api/v1/workspace/files'),
+        request('/api/v1/workspace/folders')
+      ]);
+
+      const historyJson = localStorage.getItem('neuranote_file_history');
+      const localHistory = historyJson ? JSON.parse(historyJson) : {};
+
+      const folders = foldersRes?.folders || [];
+      const folderMap = {};
+      folders.forEach(f => folderMap[f.id] = f);
+
+      const buildFolderPath = (folderId) => {
+        const parts = [];
+        let curr = folderMap[folderId];
+        while (curr) {
+          if (curr.name) parts.push(curr.name);
+          curr = folderMap[curr.parent_folder_id || curr.parent_id];
+        }
+        return parts.length ? parts.reverse().join(' → ') : null;
+      };
+
+      let files = filesRes?.files || [];
+
+      files = files.map(f => {
+        const localTime = localHistory[f.id];
+        const recentTime = localTime || f.created_at || new Date().toISOString();
+        
+        let folderName = null;
+        let folderPath = null;
+        let parentFolderPath = null;
+
+        if (f.folder_id && folderMap[f.folder_id]) {
+          const folder = folderMap[f.folder_id];
+          folderName = folder.name;
+          folderPath = buildFolderPath(f.folder_id);
+          const parentId = folder.parent_folder_id || folder.parent_id;
+          if (parentId) {
+            parentFolderPath = buildFolderPath(parentId);
+          }
+        }
+
+        return {
+          ...f,
+          recent_timestamp: recentTime,
+          folder_name: folderName,
+          folder_path: folderPath,
+          parent_folder_path: parentFolderPath,
+          preview_available: Boolean(f.file_url || f.storage_url || f.storage_path || f.file_content || f.summary)
+        };
+      });
+
+      files.sort((a, b) => new Date(b.recent_timestamp) - new Date(a.recent_timestamp));
+
+      return { files: files.slice(0, limit) };
+    } catch (err) {
+      console.warn("Failed to sort recent files locally, falling back to backend", err);
+      return request(`/api/v1/workspace/files/recent?limit=${encodeURIComponent(limit)}`);
+    }
   },
 
   markFileAccess(fileId) {
+    try {
+      const historyJson = localStorage.getItem('neuranote_file_history');
+      const history = historyJson ? JSON.parse(historyJson) : {};
+      history[fileId] = new Date().toISOString();
+      localStorage.setItem('neuranote_file_history', JSON.stringify(history));
+    } catch (e) {
+      console.error("Failed to save local file history", e);
+    }
+    
     return request(`/api/v1/workspace/files/${fileId}/access`, {
       method: 'PATCH',
     });
@@ -133,6 +201,28 @@ export const workspaceApi = {
   deleteFile(fileId) {
     return request(`/api/v1/workspace/files/${fileId}`, {
       method: 'DELETE',
+    });
+  },
+
+  searchFiles(query = '', fileType = null, limit = 20) {
+    const params = new URLSearchParams();
+    if (query) params.append('query', query);
+    if (fileType) params.append('file_type', fileType);
+    params.append('limit', limit);
+    
+    return request(`/api/v1/workspace/files/search?${params.toString()}`);
+  },
+
+  exportFileToModule(fileId, moduleName, moduleRefId = null) {
+    const formData = new FormData();
+    formData.append('module_name', moduleName);
+    if (moduleRefId) {
+      formData.append('module_ref_id', moduleRefId);
+    }
+
+    return request(`/api/v1/workspace/files/${fileId}/export-to-module`, {
+      method: 'POST',
+      body: formData,
     });
   },
 

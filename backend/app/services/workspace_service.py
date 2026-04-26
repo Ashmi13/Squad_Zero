@@ -6,13 +6,19 @@ import os
 import uuid
 import base64
 from datetime import datetime, timezone
-from urllib.parse import urlparse
-from typing import Any, Dict, List, Optional
+from urllib.parse import unquote, urlparse
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import HTTPException, UploadFile
 from supabase import Client
 
 from app.core.config import settings
+
+# Module-level cache for column detection — persists for the lifetime of the process.
+# This avoids re-probing 18 columns on EVERY request (was the main performance bottleneck).
+_COLUMNS_CACHE: Dict[str, Optional[bool]] = {}
+_PARENT_COLUMN_CACHE: Optional[str] = None
+_COLUMNS_DETECTED: bool = False
 
 
 class WorkspaceService:
@@ -20,20 +26,11 @@ class WorkspaceService:
 
     def __init__(self, supabase: Client):
         self.supabase = supabase
-        self._parent_column: Optional[str] = None
-        self._files_has_storage_path: Optional[bool] = None
-        self._files_has_storage_url: Optional[bool] = None
-        self._files_has_size_bytes: Optional[bool] = None
-        self._files_has_mime_type: Optional[bool] = None
-        self._files_has_original_filename: Optional[bool] = None
-        self._files_has_file_type: Optional[bool] = None
-        self._files_has_user_id: Optional[bool] = None
-        self._files_has_folder_id: Optional[bool] = None
-        self._files_has_name: Optional[bool] = None
-        self._files_has_parent_file_id: Optional[bool] = None
-        self._files_has_file_content: Optional[bool] = None
-        self._files_has_last_accessed: Optional[bool] = None
-        self._files_has_updated_at: Optional[bool] = None
+
+    # ------------------------------------------------------------------
+    # Column-detection helpers — use module-level cache so probes only
+    # happen ONCE per process lifetime (not on every request).
+    # ------------------------------------------------------------------
 
     def _column_exists(self, table: str, column: str) -> bool:
         """Check whether a column exists by probing with a safe select."""
@@ -44,50 +41,153 @@ class WorkspaceService:
             return False
 
     def _detect_files_columns(self) -> None:
-        """Cache optional files-table column availability."""
-        if self._files_has_storage_path is not None:
+        """Populate the module-level column cache (runs exactly once per process)."""
+        global _COLUMNS_DETECTED, _COLUMNS_CACHE
+        if _COLUMNS_DETECTED:
             return
 
-        self._files_has_storage_path = self._column_exists("files", "storage_path")
-        self._files_has_storage_url = self._column_exists("files", "storage_url")
-        self._files_has_size_bytes = self._column_exists("files", "size_bytes")
-        self._files_has_mime_type = self._column_exists("files", "mime_type")
-        self._files_has_original_filename = self._column_exists("files", "original_filename")
-        self._files_has_file_type = self._column_exists("files", "file_type")
-        self._files_has_user_id = self._column_exists("files", "user_id")
-        self._files_has_folder_id = self._column_exists("files", "folder_id")
-        self._files_has_name = self._column_exists("files", "name")
-        self._files_has_parent_file_id = self._column_exists("files", "parent_file_id")
-        self._files_has_file_content = self._column_exists("files", "file_content")
-        self._files_has_last_accessed = self._column_exists("files", "last_accessed")
-        self._files_has_updated_at = self._column_exists("files", "updated_at")
+        columns = [
+            "storage_path", "storage_url", "file_url", "size_bytes", "mime_type",
+            "original_filename", "file_type", "user_id", "folder_id", "name",
+            "parent_file_id", "file_content", "raw_text", "summary",
+            "content", "text", "last_accessed", "updated_at",
+        ]
+        for col in columns:
+            _COLUMNS_CACHE[col] = self._column_exists("files", col)
+
+        _COLUMNS_DETECTED = True
+
+    # Convenience properties that read from the module-level cache.
+    @property
+    def _files_has_storage_path(self) -> bool: return _COLUMNS_CACHE.get("storage_path", False)
+    @property
+    def _files_has_storage_url(self) -> bool: return _COLUMNS_CACHE.get("storage_url", False)
+    @property
+    def _files_has_file_url(self) -> bool: return _COLUMNS_CACHE.get("file_url", False)
+    @property
+    def _files_has_size_bytes(self) -> bool: return _COLUMNS_CACHE.get("size_bytes", False)
+    @property
+    def _files_has_mime_type(self) -> bool: return _COLUMNS_CACHE.get("mime_type", False)
+    @property
+    def _files_has_original_filename(self) -> bool: return _COLUMNS_CACHE.get("original_filename", False)
+    @property
+    def _files_has_file_type(self) -> bool: return _COLUMNS_CACHE.get("file_type", False)
+    @property
+    def _files_has_user_id(self) -> bool: return _COLUMNS_CACHE.get("user_id", False)
+    @property
+    def _files_has_folder_id(self) -> bool: return _COLUMNS_CACHE.get("folder_id", False)
+    @property
+    def _files_has_name(self) -> bool: return _COLUMNS_CACHE.get("name", False)
+    @property
+    def _files_has_parent_file_id(self) -> bool: return _COLUMNS_CACHE.get("parent_file_id", False)
+    @property
+    def _files_has_file_content(self) -> bool: return _COLUMNS_CACHE.get("file_content", False)
+    @property
+    def _files_has_raw_text(self) -> bool: return _COLUMNS_CACHE.get("raw_text", False)
+    @property
+    def _files_has_summary(self) -> bool: return _COLUMNS_CACHE.get("summary", False)
+    @property
+    def _files_has_content(self) -> bool: return _COLUMNS_CACHE.get("content", False)
+    @property
+    def _files_has_text(self) -> bool: return _COLUMNS_CACHE.get("text", False)
+    @property
+    def _files_has_last_accessed(self) -> bool: return _COLUMNS_CACHE.get("last_accessed", False)
+    @property
+    def _files_has_updated_at(self) -> bool: return _COLUMNS_CACHE.get("updated_at", False)
 
     def _extract_storage_key(self, file_row: Dict[str, Any]) -> Optional[str]:
         """Derive object key from known metadata fields."""
+        _, storage_key = self._extract_storage_location(file_row)
+        return storage_key
+
+    @staticmethod
+    def _extract_bucket_and_key_from_url(value: str) -> Tuple[Optional[str], Optional[str]]:
+        parsed = urlparse(str(value))
+        path = parsed.path or ""
+        for marker in (
+            "/storage/v1/object/public/",
+            "/storage/v1/object/sign/",
+            "/storage/v1/object/authenticated/",
+        ):
+            if marker in path:
+                object_path = unquote(path.split(marker, 1)[1].lstrip("/"))
+                parts = object_path.split("/", 1)
+                if len(parts) == 2 and parts[0] and parts[1]:
+                    return parts[0], parts[1]
+        return None, None
+
+    def _normalize_storage_reference(self, value: Any) -> Tuple[Optional[str], Optional[str]]:
+        """Normalize storage metadata into (bucket, object_key) when possible."""
+        normalized = str(value or "").strip()
+        if not normalized:
+            return None, None
+
+        if normalized.startswith("data:"):
+            return None, normalized
+
+        if normalized.startswith("http://") or normalized.startswith("https://"):
+            bucket, object_key = self._extract_bucket_and_key_from_url(normalized)
+            if object_key:
+                return bucket, object_key
+
+        path = normalized
+        if "?" in path:
+            path = path.split("?", 1)[0]
+        if "#" in path:
+            path = path.split("#", 1)[0]
+        path = unquote(path).lstrip("/")
+
+        if not path:
+            return None, None
+
+        if path.startswith("storage/v1/object/"):
+            parts = path.split("/")
+            if len(parts) >= 6:
+                bucket = parts[4].strip()
+                object_key = "/".join(parts[5:]).strip("/")
+                if bucket and object_key:
+                    return bucket, object_key
+
+        for bucket in self._candidate_buckets(parsed_bucket=None):
+            prefix = f"{bucket}/"
+            if path.startswith(prefix):
+                object_key = path[len(prefix):].strip("/")
+                if object_key:
+                    return bucket, object_key
+
+        return None, path
+
+    def _extract_storage_location(self, file_row: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
+        """Derive (bucket, object_key) from common metadata patterns."""
         for key_field in ("storage_path", "s3_key", "object_key", "path"):
             value = file_row.get(key_field)
-            if value:
-                return str(value)
+            if not value:
+                continue
+
+            bucket, object_key = self._normalize_storage_reference(value)
+            if object_key:
+                return bucket, object_key
 
         storage_url = file_row.get("storage_url")
         if storage_url:
-            parsed = urlparse(str(storage_url))
-            path = parsed.path.lstrip("/") if parsed.path else ""
-            if "/storage/v1/object/public/" in path:
-                marker = "storage/v1/object/public/"
-                public_object_path = path.split(marker, 1)[1]
-                parts = public_object_path.split("/", 1)
-                if len(parts) == 2:
-                    return parts[1]
-            if "/storage/v1/object/sign/" in path:
-                marker = "storage/v1/object/sign/"
-                signed_object_path = path.split(marker, 1)[1]
-                parts = signed_object_path.split("/", 1)
-                if len(parts) == 2:
-                    return parts[1]
-            return path or None
+            bucket, object_key = self._normalize_storage_reference(storage_url)
+            if object_key:
+                return bucket, object_key
 
-        return None
+        return None, None
+
+    def _candidate_buckets(self, parsed_bucket: Optional[str]) -> List[str]:
+        buckets: List[str] = []
+        for candidate in (
+            parsed_bucket,
+            self._workspace_bucket_name(),
+            str(settings.supabase_storage_bucket or "").strip() or None,
+            "workspace-files",
+            "files",
+        ):
+            if candidate and candidate not in buckets:
+                buckets.append(candidate)
+        return buckets
 
     def _row_matches_folder(self, row: Dict[str, Any], folder_id: str) -> bool:
         """Best-effort folder match for schemas missing folder_id."""
@@ -146,7 +246,11 @@ class WorkspaceService:
 
     def _signed_url_from_supabase_storage(self, bucket: str, object_key: str, expires_in: int) -> Optional[str]:
         try:
-            signed = self.supabase.storage.from_(bucket).create_signed_url(object_key, expires_in)
+            normalized_key = str(object_key or "").strip().lstrip("/")
+            if not normalized_key:
+                return None
+
+            signed = self.supabase.storage.from_(bucket).create_signed_url(normalized_key, expires_in)
             if isinstance(signed, dict):
                 signed_url = signed.get("signedURL") or signed.get("signedUrl") or signed.get("signed_url")
                 if signed_url:
@@ -182,22 +286,23 @@ class WorkspaceService:
 
     def _detect_parent_column(self) -> Optional[str]:
         """Detect which parent folder column exists in the folders table."""
-        if self._parent_column is not None:
-            return self._parent_column
+        global _PARENT_COLUMN_CACHE
+        if _PARENT_COLUMN_CACHE is not None:
+            return _PARENT_COLUMN_CACHE if _PARENT_COLUMN_CACHE != "__none__" else None
 
         try:
             self.supabase.table("folders").select("id,parent_folder_id").limit(1).execute()
-            self._parent_column = "parent_folder_id"
-            return self._parent_column
+            _PARENT_COLUMN_CACHE = "parent_folder_id"
+            return _PARENT_COLUMN_CACHE
         except Exception:
             pass
 
         try:
             self.supabase.table("folders").select("id,parent_id").limit(1).execute()
-            self._parent_column = "parent_id"
-            return self._parent_column
+            _PARENT_COLUMN_CACHE = "parent_id"
+            return _PARENT_COLUMN_CACHE
         except Exception:
-            self._parent_column = None
+            _PARENT_COLUMN_CACHE = "__none__"
             return None
 
     def list_folders(self, user_id: str) -> Dict[str, Any]:
@@ -320,8 +425,9 @@ class WorkspaceService:
 
             bucket = self._workspace_bucket_name()
             for file_row in files:
-                storage_key = self._extract_storage_key(file_row)
-                self._delete_from_supabase_storage(bucket, storage_key)
+                parsed_bucket, storage_key = self._extract_storage_location(file_row)
+                for candidate_bucket in self._candidate_buckets(parsed_bucket):
+                    self._delete_from_supabase_storage(candidate_bucket, storage_key)
 
             # Never run an unscoped DELETE; delete by explicit IDs if available.
             file_ids_to_delete = [str(row.get("id")) for row in files if row.get("id")]
@@ -401,8 +507,11 @@ class WorkspaceService:
                 metadata["last_accessed"] = now_iso
             if self._files_has_updated_at:
                 metadata["updated_at"] = now_iso
-            if self._files_has_storage_url and storage_url:
-                metadata["storage_url"] = storage_url
+            if storage_url:
+                if self._files_has_storage_url:
+                    metadata["storage_url"] = storage_url
+                elif self._files_has_file_url:
+                    metadata["file_url"] = storage_url
             if self._files_has_file_content and file.content_type and file.content_type.startswith("text/"):
                 metadata["file_content"] = content.decode("utf-8", errors="ignore")
             elif self._files_has_file_content and ext in {".txt", ".md", ".csv", ".json", ".log"}:
@@ -573,12 +682,12 @@ class WorkspaceService:
                 folder_id = row.get("folder_id")
                 folder = folder_lookup.get(str(folder_id)) if folder_id else None
                 parent_id = folder.get("parent_folder_id") if folder else None
-                storage_key = self._extract_storage_key(row)
+                _, storage_key = self._extract_storage_location(row)
                 preview_available = bool(
                     row.get("file_content")
                     or row.get("storage_url")
                     or (isinstance(row.get("storage_path"), str) and str(row.get("storage_path")).startswith("data:"))
-                    or (storage_key and bucket)
+                    or storage_key
                 )
                 recent_files.append({
                     **row,
@@ -607,8 +716,19 @@ class WorkspaceService:
 
             row = existing.data[0]
 
-            if row.get("file_content"):
-                content = row.get("file_content")
+            def _first_non_empty(*keys: str) -> Any:
+                for key in keys:
+                    value = row.get(key)
+                    if isinstance(value, str):
+                        if value.strip():
+                            return value
+                    elif value is not None:
+                        return value
+                return None
+
+            text_content = _first_non_empty("file_content", "raw_text", "summary", "content", "text")
+            if text_content is not None:
+                content = text_content
                 if isinstance(content, str) and content.startswith("data:"):
                     return {
                         "file_id": file_id,
@@ -625,7 +745,7 @@ class WorkspaceService:
                     "source": "database",
                 }
 
-            storage_key = self._extract_storage_key(row)
+            parsed_bucket, storage_key = self._extract_storage_location(row)
             if storage_key and isinstance(storage_key, str) and storage_key.startswith("data:"):
                 return {
                     "file_id": file_id,
@@ -635,26 +755,26 @@ class WorkspaceService:
                     "source": "storage_path_data_url",
                 }
 
-            bucket = self._workspace_bucket_name()
-            if storage_key and bucket:
+            if storage_key:
                 safe_expiry = max(60, min(int(expires_in or 3600), 86400))
-                preview_url = self._signed_url_from_supabase_storage(bucket, storage_key, safe_expiry)
-                if not preview_url:
-                    try:
-                        preview_url = self.supabase.storage.from_(bucket).get_public_url(storage_key)
-                    except Exception:
-                        preview_url = None
+                for candidate_bucket in self._candidate_buckets(parsed_bucket):
+                    preview_url = self._signed_url_from_supabase_storage(candidate_bucket, storage_key, safe_expiry)
+                    if not preview_url:
+                        try:
+                            preview_url = self.supabase.storage.from_(candidate_bucket).get_public_url(storage_key)
+                        except Exception:
+                            preview_url = None
 
-                if preview_url:
-                    return {
-                        "file_id": file_id,
-                        "preview_url": preview_url,
-                        "content": None,
-                        "mime_type": row.get("mime_type"),
-                        "source": "supabase_storage",
-                    }
+                    if preview_url:
+                        return {
+                            "file_id": file_id,
+                            "preview_url": preview_url,
+                            "content": None,
+                            "mime_type": row.get("mime_type"),
+                            "source": "supabase_storage",
+                        }
 
-            storage_url = row.get("storage_url")
+            storage_url = _first_non_empty("storage_url", "file_url", "url", "public_url")
             if storage_url:
                 return {
                     "file_id": file_id,
@@ -663,6 +783,13 @@ class WorkspaceService:
                     "mime_type": row.get("mime_type"),
                     "source": "storage_url",
                 }
+
+            # DEBUG LOGGING to diagnose why file has no content
+            import logging
+            logger = logging.getLogger(__name__)
+            keys = ["file_content", "raw_text", "summary", "content", "text", "storage_url", "storage_path"]
+            found = {k: bool(row.get(k)) for k in keys}
+            logger.error(f"Preview 404 for file {file_id}. Name: {row.get('name')}. Found keys: {found}")
 
             raise HTTPException(
                 status_code=404,
@@ -760,8 +887,9 @@ class WorkspaceService:
                     to_delete.append(child_id)
                     stack.append(child_id)
 
-            storage_key = self._extract_storage_key(existing.data[0])
-            self._delete_from_supabase_storage(self._workspace_bucket_name(), storage_key)
+            parsed_bucket, storage_key = self._extract_storage_location(existing.data[0])
+            for candidate_bucket in self._candidate_buckets(parsed_bucket):
+                self._delete_from_supabase_storage(candidate_bucket, storage_key)
 
             delete_query = self.supabase.table("files").delete().in_("id", to_delete)
             if self._files_has_user_id:
@@ -783,8 +911,15 @@ class WorkspaceService:
         file_type: str = "TXT",
         original_filename: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Persist an extracted text or summary file as a child file row."""
+        """Persist an extracted text or summary file as a child file row.
+        
+        Files are stored both in the database (file_content column) AND in
+        Supabase Storage, ensuring they survive across logins without expiry issues.
+        """
         self._detect_files_columns()
+
+        safe_content = str(content or "").replace("\x00", "")
+        content_bytes = safe_content.encode("utf-8")
 
         metadata: Dict[str, Any] = {}
         if self._files_has_user_id:
@@ -799,12 +934,61 @@ class WorkspaceService:
             metadata["original_filename"] = original_filename
         if self._files_has_file_type:
             metadata["file_type"] = file_type
-        if self._files_has_file_content:
-            metadata["file_content"] = content
         if self._files_has_mime_type:
             metadata["mime_type"] = "text/plain"
         if self._files_has_size_bytes:
-            metadata["size_bytes"] = len(content.encode("utf-8"))
+            metadata["size_bytes"] = len(content_bytes)
+
+        # Always store content in DB columns for instant preview without needing storage
+        if self._files_has_file_content:
+            metadata["file_content"] = safe_content
+        elif self._files_has_raw_text:
+            metadata["raw_text"] = safe_content
+        elif self._files_has_text:
+            metadata["text"] = safe_content
+        elif self._files_has_content:
+            metadata["content"] = safe_content
+        elif self._files_has_summary:
+            metadata["summary"] = safe_content
+
+        # ALSO upload to Supabase Storage for persistent URL access across sessions
+        safe_filename = (original_filename or name or "file").replace(" ", "_").replace("/", "_")
+        storage_key = f"workspace/{user_id}/{folder_id}/{uuid.uuid4().hex}_{safe_filename}"
+        bucket = self._workspace_bucket_name()
+
+        storage_url: Optional[str] = None
+        try:
+            storage_url = self._upload_to_supabase_storage(
+                bucket=bucket,
+                object_key=storage_key,
+                content=content_bytes,
+                mime_type="text/plain",
+            )
+        except Exception as storage_exc:
+            # Storage upload failure is non-fatal — content is still in DB
+            import logging
+            logging.getLogger(__name__).warning(
+                f"Storage upload for generated file failed (content saved in DB): {storage_exc}"
+            )
+
+        if storage_url:
+            if self._files_has_storage_url:
+                metadata["storage_url"] = storage_url
+            elif self._files_has_file_url:
+                metadata["file_url"] = storage_url
+            if self._files_has_storage_path:
+                metadata["storage_path"] = storage_key
+
+        # Last-resort fallback: no content column AND no storage → encode as data URL
+        content_saved = any(
+            k in metadata for k in ("file_content", "raw_text", "text", "content", "summary", "storage_url", "storage_path")
+        )
+        if not content_saved:
+            data_url = f"data:text/plain;base64,{base64.b64encode(content_bytes).decode('ascii')}"
+            if self._files_has_storage_url:
+                metadata["storage_url"] = data_url
+            elif self._files_has_storage_path:
+                metadata["storage_path"] = data_url
 
         if not metadata:
             raise HTTPException(status_code=500, detail="No writable file metadata columns found")
@@ -818,3 +1002,98 @@ class WorkspaceService:
             raise
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"Failed to save generated file: {exc}") from exc
+
+
+    def search_files(
+        self, user_id: str, query: str = "", file_type: Optional[str] = None, limit: int = 20
+    ) -> Dict[str, Any]:
+        """Search for files by name or type for cross-module access."""
+        try:
+            self._detect_files_columns()
+
+            # Build base query
+            q = self.supabase.table("files").select("*").eq("user_id", user_id).limit(limit)
+
+            # Apply filters
+            if query and query.strip():
+                # Search by name using ilike for case-insensitive partial matching
+                q = q.ilike("name", f"%{query}%")
+
+            if file_type and file_type.strip():
+                # Filter by file type
+                q = q.ilike("file_type", file_type.strip())
+
+            result = q.execute()
+            return {"files": result.data or [], "count": len(result.data or [])}
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Search failed: {exc}") from exc
+
+    def export_file_to_module(
+        self,
+        user_id: str,
+        file_id: str,
+        module_name: str,
+        module_ref_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Create a reference to a workspace file in another module without copying it."""
+        try:
+            self._detect_files_columns()
+
+            # Verify file exists and belongs to user
+            file_query = self.supabase.table("files").select("*").eq("id", file_id)
+            if self._files_has_user_id:
+                file_query = file_query.eq("user_id", user_id)
+            
+            file_result = file_query.limit(1).execute()
+            if not file_result.data:
+                raise HTTPException(status_code=404, detail="File not found")
+
+            file_data = file_result.data[0]
+
+            # Create module reference table entry if it doesn't exist
+            try:
+                ref_metadata = {
+                    "workspace_file_id": file_id,
+                    "user_id": user_id,
+                    "module_name": module_name,
+                    "module_ref_id": module_ref_id,
+                    "file_name": file_data.get("name", ""),
+                    "file_type": file_data.get("file_type", ""),
+                    "storage_url": file_data.get("storage_url"),
+                    "storage_path": file_data.get("storage_path"),
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                }
+
+                # Try to insert into module_file_references table
+                # This table should be created by each module or shared infrastructure
+                ref_result = self.supabase.table("module_file_references").insert(ref_metadata).execute()
+                
+                if ref_result.data:
+                    return {
+                        "status": "success",
+                        "message": f"File exported to {module_name}",
+                        "reference": ref_result.data[0],
+                    }
+            except Exception as ref_exc:
+                # If module_file_references table doesn't exist, return the file data directly
+                # Modules can access files directly via the files endpoint
+                pass
+
+            return {
+                "status": "success",
+                "message": f"File can be accessed by {module_name}",
+                "file": {
+                    "id": file_data.get("id"),
+                    "name": file_data.get("name"),
+                    "file_type": file_data.get("file_type"),
+                    "storage_url": file_data.get("storage_url"),
+                    "storage_path": file_data.get("storage_path"),
+                    "created_at": file_data.get("created_at"),
+                },
+            }
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Export failed: {exc}") from exc

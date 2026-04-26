@@ -25,6 +25,7 @@ INTEGRATION POINTS:
 
 from openai import OpenAI
 import os
+import re
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -161,20 +162,95 @@ def _generate_with_fallback(client: OpenAI, primary_model: str, fallback_model: 
         )
         return (response.choices[0].message.content or "").strip()
     except Exception as primary_err:
-        print(f"⚠️ [Warning] Primary model failed: {str(primary_err)}")
-        fallback_response = _chat_complete(
-            client=client,
-            model=fallback_model,
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=0.4,
-        )
-        return (fallback_response.choices[0].message.content or "").strip()
+        # Don't try the fallback model for auth errors — it will fail the same way.
+        if _looks_like_openrouter_auth_error(primary_err):
+            raise
+        print(f"⚠️ [Warning] Primary model ({primary_model}) failed: {str(primary_err)}")
+        try:
+            fallback_response = _chat_complete(
+                client=client,
+                model=fallback_model,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=0.4,
+            )
+            return (fallback_response.choices[0].message.content or "").strip()
+        except Exception as fallback_err:
+            print(f"⚠️ [Warning] Fallback model ({fallback_model}) also failed: {str(fallback_err)}")
+            raise
 
 
 def _looks_like_openrouter_auth_error(error: Exception) -> bool:
     message = str(error).lower()
-    return "user not found" in message or "openrouter" in message or "401" in message or "unauthorized" in message
+    auth_markers = (
+        "user not found",
+        "unauthorized",
+        "invalid api key",
+        "incorrect api key",
+        "authentication",
+        "invalid_token",
+        "forbidden",
+        "status code: 401",
+        "status code 401",
+    )
+    if any(marker in message for marker in auth_markers):
+        return True
+
+    status_code = getattr(error, "status_code", None)
+    if status_code in {401, 403}:
+        return True
+
+    return False
+
+
+def _normalize_qna_error_message(message: str) -> str:
+    """Return a clean message without repeated 'Error answering question:' prefixes."""
+    normalized = str(message or "").strip()
+    prefix = "Error answering question:"
+    while normalized.lower().startswith(prefix.lower()):
+        normalized = normalized[len(prefix):].strip()
+    return normalized
+
+
+def _build_context_fallback_answer(question: str, context: str, highlighted_text: str = None) -> str:
+    """Build a best-effort local answer when remote AI providers are unavailable."""
+    clean_question = (question or "").strip()
+    clean_context = (context or "").strip()
+    focus = (highlighted_text or "").strip()
+
+    if not clean_context:
+        if focus:
+            return (
+                f"{focus} refers to a concept in your document, but I could not load enough local context to explain it in detail. "
+                "Please provide more surrounding text."
+            )
+        return "I could not load enough local context to answer this question."
+
+    # Split into simple sentence-like chunks for concise extraction.
+    chunks = [part.strip() for part in re.split(r"(?<=[.!?])\s+|\n+", clean_context) if part.strip()]
+
+    def score_chunk(chunk: str) -> int:
+        lowered = chunk.lower()
+        score = 0
+        if focus and focus.lower() in lowered:
+            score += 6
+        for token in re.findall(r"[a-zA-Z0-9]+", clean_question.lower()):
+            if len(token) > 3 and token in lowered:
+                score += 1
+        return score
+
+    ranked = sorted(chunks, key=score_chunk, reverse=True)
+    selected = [c for c in ranked[:3] if score_chunk(c) > 0]
+    if not selected:
+        selected = chunks[:2]
+
+    if focus:
+        intro = f"{focus} can be understood from the document context as follows:"
+    else:
+        intro = "Based on your document context, here is a concise explanation:"
+
+    bullets = "\n".join([f"- {line}" for line in selected])
+    return f"{intro}\n{bullets}"
 
 
 def _has_valid_openai_fallback_key() -> bool:
@@ -522,9 +598,11 @@ Provide a clear, educational answer."""
         print(f"DEBUG: OpenRouter Q&A Error: {type(openrouter_err).__name__}: {str(openrouter_err)}")
         if _looks_like_openrouter_auth_error(openrouter_err):
             if not _has_valid_openai_fallback_key():
-                raise ValueError(
-                    "Error answering question: OpenRouter authentication failed and OPENAI_API_KEY is not configured for direct OpenAI fallback. "
-                    "Set a valid OPENAI_API_KEY for fallback or fix OPENROUTER_API_KEY."
+                print("DEBUG: Provider auth unavailable for Q&A, using local context fallback")
+                return _build_context_fallback_answer(
+                    question=question,
+                    context=context,
+                    highlighted_text=highlighted_text,
                 )
             try:
                 client = _get_client(provider="openai")
@@ -538,6 +616,6 @@ Provide a clear, educational answer."""
                 return (response.choices[0].message.content or "").strip()
             except Exception as openai_err:
                 print(f"DEBUG: OpenAI Q&A Error: {type(openai_err).__name__}: {str(openai_err)}")
-                raise ValueError(f"Error answering question: {str(openai_err)}")
+                raise ValueError(_normalize_qna_error_message(str(openai_err)))
 
-        raise ValueError(f"Error answering question: {str(openrouter_err)}")
+            raise ValueError(_normalize_qna_error_message(str(openrouter_err)))

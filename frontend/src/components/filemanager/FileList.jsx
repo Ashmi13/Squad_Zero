@@ -40,6 +40,16 @@ const inferFileType = (file) => {
   return 'FILE';
 };
 
+const resolveTextPayload = (file) => {
+  const candidates = [file?.file_content, file?.raw_text, file?.summary, file?.content, file?.text];
+  for (const value of candidates) {
+    if (typeof value === 'string' && value.trim() !== '') {
+      return value;
+    }
+  }
+  return null;
+};
+
 const buildFileTree = (files) => {
   const lookup = {};
   const roots = [];
@@ -93,6 +103,8 @@ const FileList = ({ selectedFolder, files, onSelectFile, onFilesUpdate }) => {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadSuccess, setUploadSuccess] = useState('');
   const [error, setError] = useState('');
+  const [dragOverFileId, setDragOverFileId] = useState(null);
+  const [isMoving, setIsMoving] = useState(false);
 
   const loadFiles = async () => {
     if (!selectedFolder?.id) {
@@ -108,13 +120,14 @@ const FileList = ({ selectedFolder, files, onSelectFile, onFilesUpdate }) => {
       const cachedContentById = buildContentLookup(cachedNodes);
       const normalizedWithTypes = (data.files || []).map((f) => {
         const computedType = inferFileType(f);
-        const inlineAsset = typeof f.file_content === 'string' && f.file_content.startsWith('data:')
-          ? f.file_content
+        const resolvedPayload = resolveTextPayload(f);
+        const inlineAsset = typeof resolvedPayload === 'string' && resolvedPayload.startsWith('data:')
+          ? resolvedPayload
           : null;
         const persistedTextContent =
           inlineAsset
             ? null
-            : (f.file_content ?? cachedContentById[String(f.id)] ?? null);
+            : (resolvedPayload ?? cachedContentById[String(f.id)] ?? null);
         return {
           id: f.id,
           name: f.name || f.original_filename,
@@ -163,8 +176,7 @@ const FileList = ({ selectedFolder, files, onSelectFile, onFilesUpdate }) => {
     loadFiles();
   }, [selectedFolder?.id]);
 
-  const handleUpload = async (event) => {
-    const file = event.target.files?.[0];
+  const processFileUpload = async (file) => {
     if (!file || !selectedFolder?.id) return;
 
     setIsUploading(true);
@@ -251,6 +263,15 @@ const FileList = ({ selectedFolder, files, onSelectFile, onFilesUpdate }) => {
     } finally {
       setIsUploading(false);
       setUploadProgress(0);
+    }
+  };
+
+  const handleUpload = async (event) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      await processFileUpload(file);
+    }
+    if (event.target) {
       event.target.value = '';
     }
   };
@@ -274,6 +295,35 @@ const FileList = ({ selectedFolder, files, onSelectFile, onFilesUpdate }) => {
       window.dispatchEvent(new Event('neuranote:files-updated'));
     } catch (err) {
       setError(err.message || 'Delete failed');
+    }
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer.types.includes('Files')) {
+      e.dataTransfer.dropEffect = 'copy';
+      setDragOverFileId('upload-zone');
+    }
+  };
+
+  const handleDragLeave = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (dragOverFileId === 'upload-zone') {
+      setDragOverFileId(null);
+    }
+  };
+
+  const handleDrop = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverFileId(null);
+
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      for (const file of e.dataTransfer.files) {
+        await processFileUpload(file);
+      }
     }
   };
 
@@ -330,13 +380,18 @@ const FileList = ({ selectedFolder, files, onSelectFile, onFilesUpdate }) => {
 
       <div
         style={{
-          backgroundColor: 'rgba(255,255,255,0.92)',
+          backgroundColor: dragOverFileId === 'upload-zone' ? '#e8deff' : 'rgba(255,255,255,0.92)',
           borderRadius: 16,
           boxShadow: '0 4px 24px rgba(0,0,0,0.08)',
           overflow: 'hidden',
           width: '100%',
           height: 'calc(100vh - 230px)',
+          transition: 'background-color 200ms, border 200ms',
+          border: dragOverFileId === 'upload-zone' ? '2px dashed #6C5DD3' : '2px solid transparent',
         }}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
       >
         <div
           style={{
@@ -371,9 +426,59 @@ const FileList = ({ selectedFolder, files, onSelectFile, onFilesUpdate }) => {
 
 const FileRow = ({ file, depth, onSelectFile, onDelete }) => {
   const isPdf = (file.type || '').toUpperCase() === 'PDF';
+  const [isDragging, setIsDragging] = useState(false);
+  const mouseDownPos = React.useRef(null);
+
+  const handleMouseDown = (e) => {
+    mouseDownPos.current = { x: e.clientX, y: e.clientY };
+    e.currentTarget.draggable = false;
+  };
+
+  const handleMouseMove = (e) => {
+    if (!mouseDownPos.current) return;
+    const dx = Math.abs(e.clientX - mouseDownPos.current.x);
+    const dy = Math.abs(e.clientY - mouseDownPos.current.y);
+    if (dx > 5 || dy > 5) {
+      e.currentTarget.draggable = true;
+    }
+  };
+
+  const handleMouseUp = (e) => {
+    mouseDownPos.current = null;
+    e.currentTarget.draggable = false;
+  };
+
+  const handleDragStart = (e) => {
+    if (!e.currentTarget.draggable) {
+      e.preventDefault();
+      return;
+    }
+    setIsDragging(true);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('application/json', JSON.stringify({
+      fileId: file.id,
+      fileName: file.name,
+      fileType: file.file_type || file.mime_type || file.type,
+      sourceFolderId: file.folderId,
+    }));
+    e.currentTarget.style.opacity = '0.5';
+  };
+
+  const handleDragEnd = (e) => {
+    setIsDragging(false);
+    mouseDownPos.current = null;
+    e.currentTarget.style.opacity = '1';
+    e.currentTarget.draggable = false;
+  };
+
   return (
     <div>
       <div
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
         onClick={() => onSelectFile(file)}
         style={{
           display: 'grid',
@@ -383,6 +488,10 @@ const FileRow = ({ file, depth, onSelectFile, onDelete }) => {
           borderBottom: '1px solid #f2f2f2',
           cursor: 'pointer',
           paddingLeft: `${20 + depth * 18}px`,
+          opacity: isDragging ? 0.5 : 1,
+          backgroundColor: isDragging ? '#f9f9f9' : 'transparent',
+          transition: 'opacity 200ms, background-color 200ms',
+          userSelect: 'none',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

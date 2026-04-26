@@ -198,9 +198,6 @@ function App() {
         <AppLayout />
       </Router>
     </ThemeProvider>
-    <Router>
-      <AppLayout />
-    </Router>
   );
 }
 

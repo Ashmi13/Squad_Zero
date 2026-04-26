@@ -35,28 +35,25 @@ const API_BASE = (import.meta.env && import.meta.env.VITE_API_BASE_URL)
  * Matches the status values written by services.py _update_job().
  */
 const STATUS_LABELS = {
-  queued:        'Preparing your materials…',
-  retrieving:    'Reading all lecture content…',
-  deduplicating: 'Removing repeated content…',
-  analyzing:     'Extracting key concepts…',
-  generating:    'Writing your study notes…',
-  finalising:    'Assembling final note…',
-  done:          'Done! Opening your notes…',
-  failed:        'Something went wrong.',
+  queued:      'Preparing your materials…',
+  retrieving:  'Reading lecture content…',
+  analyzing:   'Extracting topic structure…',
+  expanding:   'Writing detailed explanations…',
+  assembling:  'Building your note…',
+  generating:  'Creating structured note…',
+  done:        'Done! Opening your notes…',
+  failed:      'Something went wrong.',
 };
 
-/**
- * Progress percentage per status step (for the progress bar).
- */
 const STATUS_PROGRESS = {
-  queued: 5,
+  queued:     5,
   retrieving: 15,
-  deduplicating: 30,
-  analyzing: 45,
-  generating: 70,
-  finalising: 90,
-  done: 100,
-  failed: 100,
+  analyzing:  30,
+  expanding:  55,
+  assembling: 75,
+  generating: 88,
+  done:       100,
+  failed:     100,
 };
 
 const ALLOWED_EXTENSIONS = ['.pdf', '.pptx', '.md', '.txt'];
@@ -314,13 +311,17 @@ const UploadSection = ({ userId: userIdProp }) => {
 
       const allPdfIds = successfulUploads.map(f => f.pdf_id);
 
-      // Step 3 — Start background generation job
-      const { data: jobData } = await axios.post(`${API_BASE}/generate-note`, {
-        pdf_ids: allPdfIds,
+      // Step 3 — Start structured note background job
+      const inputItems = successfulUploads.map(f => ({
+        type: "pdf_id",
+        value: f.pdf_id
+      }));
+
+      const { data: jobData } = await axios.post(`${API_BASE}/generate-structured-note`, {
+        input_items: inputItems,
         user_id: userId,
-        instruction: instruction.trim(),
         language: selectedLanguage,
-        ordering,
+        module_name: "Study Notes" // title or default
       });
 
       const newJobId = jobData.job_id;

@@ -34,7 +34,7 @@ if ((-not (Test-Path "backend/.env")) -or (-not (Test-Path "frontend/.env"))) {
 
 # Start Backend in new window
 Write-Host "Starting FastAPI Backend..." -ForegroundColor Cyan
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd backend; ..\.venv\Scripts\Activate.ps1; uvicorn app.main:app --reload"
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd backend; ..\.venv\Scripts\Activate.ps1; python -m uvicorn app.main:app --reload"
 
 # Wait a moment for backend to start
 Start-Sleep -Seconds 3

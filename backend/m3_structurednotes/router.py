@@ -40,6 +40,9 @@ class RefineRequest(BaseModel):
     pdf_id: str
     selected_text: str = Field(..., min_length=5)
     instruction: str = Field(..., min_length=3)
+    loop_number: int = 1
+    allow_outside: bool = False
+    conversation_history: Optional[List[dict]] = None
 
 
 class DiscussRequest(BaseModel):
@@ -148,8 +151,183 @@ async def upload_files(files: List[UploadFile] = File(...)):
 
 
 # ─────────────────────────────────────────────────────────────
+#  SECTION 1b — TEMP TEST: MIND MAP EXTRACTION
+# ─────────────────────────────────────────────────────────────
+
+@router.post("/test-mindmap")
+async def test_mindmap(req: dict):
+    """
+    Temporary test route to verify mind map extraction.
+    Call with: {"pdf_id": "your_pdf_id_here"}
+    """
+    pdf_id = req.get("pdf_id")
+    if not pdf_id:
+        return {"error": "pdf_id required"}
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT content FROM document_chunks WHERE pdf_id = %s ORDER BY chunk_index ASC",
+        (pdf_id,)
+    )
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    if not rows:
+        return {"error": f"No chunks found for pdf_id={pdf_id}"}
+
+    full_text = " ".join(r[0] for r in rows)
+    print(f"[Test] full_text: {len(full_text)} chars")
+
+    result = note_service.extract_mindmap_chunked(full_text)
+
+    return {
+        "lecture_title": result["lecture_title"],
+        "chapter_count": len(result["chapters"]),
+        "chapters": [
+            {
+                "title": ch["title"],
+                "section_count": len(ch.get("sections", [])),
+                "sections": [
+                    {
+                        "title": s["title"],
+                        "line_count": len(s.get("content_lines", []))
+                    }
+                    for s in ch.get("sections", [])
+                ]
+            }
+            for ch in result["chapters"]
+        ]
+    }
+
+
+class DetailedNoteRequest(BaseModel):
+    pdf_id: str
+    user_id: str
+    language: str = "English"
+
+
+class StructuredNoteRequest(BaseModel):
+    input_items: List[dict]
+    user_id: str
+    language: str = "English"
+    module_name: Optional[str] = "Study Notes"
+
+
+# ─────────────────────────────────────────────────────────────
 #  SECTION 2 — NOTE GENERATION (ASYNC BACKGROUND JOB)
 # ─────────────────────────────────────────────────────────────
+
+@router.post("/generate-detailed-note", status_code=202)
+async def generate_detailed_note_route(req: DetailedNoteRequest, background_tasks: BackgroundTasks):
+    """Starts a detailed note generation job for a single PDF."""
+    job_id = str(uuid.uuid4())
+    try:
+        conn = get_db_connection()
+        if conn:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS generation_jobs (
+                    job_id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    status TEXT DEFAULT 'queued',
+                    note_id TEXT,
+                    error_msg TEXT,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            cur.execute(
+                "INSERT INTO generation_jobs (job_id, user_id, status) VALUES (%s, %s, 'queued')",
+                (job_id, req.user_id)
+            )
+            conn.commit()
+            cur.close()
+            conn.close()
+    except Exception as e:
+        print(f"[generate-detailed-note] Job row failed: {e}")
+
+    background_tasks.add_task(
+        _run_detailed_note_job,
+        job_id=job_id, pdf_id=req.pdf_id,
+        user_id=req.user_id, language=req.language
+    )
+    return {"job_id": job_id, "status": "queued"}
+
+
+async def _run_detailed_note_job(job_id: str, pdf_id: str, user_id: str, language: str):
+    try:
+        content = note_service.generate_detailed_note(
+            pdf_id=pdf_id, user_id=user_id, language=language, job_id=job_id
+        )
+        import re as _re
+        first_line = content.split('\n')[0]
+        title = _re.sub(r'^#+\s*', '', first_line).strip() or "Detailed Note"
+        note_id = note_service.save_note_to_db(user_id, pdf_id, title, content)
+        if note_id:
+            _set_note_type(note_id, 'detailed')
+        _update_job_row(job_id, "done", note_id=note_id)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        _fail_job(job_id, str(e))
+
+
+@router.post("/generate-structured-note", status_code=202)
+async def generate_structured_note_route(req: StructuredNoteRequest, background_tasks: BackgroundTasks):
+    """Starts a structured note generation job from multiple inputs."""
+    job_id = str(uuid.uuid4())
+    try:
+        conn = get_db_connection()
+        if conn:
+            cur = conn.cursor()
+            cur.execute(
+                "INSERT INTO generation_jobs (job_id, user_id, status) VALUES (%s, %s, 'queued') ON CONFLICT DO NOTHING",
+                (job_id, req.user_id)
+            )
+            conn.commit()
+            cur.close()
+            conn.close()
+    except Exception as e:
+        print(f"[generate-structured-note] Job row failed: {e}")
+
+    background_tasks.add_task(
+        _run_structured_note_job,
+        job_id=job_id, input_items=req.input_items,
+        user_id=req.user_id, language=req.language
+    )
+    return {"job_id": job_id, "status": "queued"}
+
+
+async def _run_structured_note_job(job_id: str, input_items: list, user_id: str, language: str):
+    try:
+        content = note_service.generate_structured_note(
+            input_items=input_items, user_id=user_id, language=language, job_id=job_id
+        )
+        note_id = note_service.save_note_to_db(user_id, None, "Structured Study Notes", content)
+        if note_id:
+            _set_note_type(note_id, 'structured')
+        _update_job_row(job_id, "done", note_id=note_id)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        _fail_job(job_id, str(e))
+
+
+def _set_note_type(note_id: str, note_type: str):
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return
+        cur = conn.cursor()
+        cur.execute("UPDATE notes SET note_type = %s WHERE note_id = %s", (note_type, note_id))
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print(f"[_set_note_type] {e}")
+
 
 @router.post("/generate-note", status_code=202)
 async def generate_note(req: NoteRequest, background_tasks: BackgroundTasks):
@@ -351,8 +529,15 @@ async def refine_text(req: RefineRequest):
             pdf_id=req.pdf_id,
             selected_text=req.selected_text,
             instruction=req.instruction,
+            loop_number=req.loop_number,
+            allow_outside=req.allow_outside,
+            conversation_history=req.conversation_history
         )
-        return {"refined_content": result.get("refined_content", "")}
+        return {
+            "refined_content": result.get("refined_content", ""),
+            "loop_number": req.loop_number,
+            "should_ask_outside": result.get("should_ask_outside", False)
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

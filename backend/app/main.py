@@ -66,6 +66,10 @@ def create_app() -> FastAPI:
         """Run on application startup"""
         print(f"[*] Starting {settings.app_name}")
         print(f"Environment: {settings.environment}")
+        from m3_structurednotes.services import note_service
+        print("[Startup] Pre-loading embeddings...")
+        _ = note_service._ai.embeddings
+        print("[Startup] Embeddings ready.")
     
     @app.on_event("shutdown")
     async def shutdown_event():

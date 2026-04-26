@@ -1,115 +1,156 @@
-import React, { useState, useRef } from 'react';
-import { Check, X, ArrowRight, Send, Loader2 } from 'lucide-react';
-import styles from './RefineModal.module.css';
-import { discussNote, refineText } from '../api';
+import React, { useState, useRef, useEffect } from 'react';
+import styles from './NoteEditor.module.css';
 
-const RefineModal = ({ originalText, initialRefinedText, onClose, onApply, pdfId, isFullNote, content, currentInstruction }) => {
-    const [currentRefined, setCurrentRefined] = useState(initialRefinedText);
-    const [history, setHistory] = useState([{ prompt: currentInstruction, result: initialRefinedText }]);
-    const [followUp, setFollowUp] = useState('');
-    const [isRefining, setIsRefining] = useState(false);
+export default function RefineModal({ isOpen, onClose, selectedText, onMerge, pdfId }) {
+  const [messages, setMessages] = useState([]);
+  const [inputText, setInputText] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
+  const [loopNumber, setLoopNumber] = useState(1);
+  const [allowOutside, setAllowOutside] = useState(false);
+  const [showOutsidePrompt, setShowOutsidePrompt] = useState(false);
+  const chatRef = useRef(null);
+  const conversationHistoryRef = useRef([]);
 
-    const conversationHistoryRef = useRef([
-        { role: 'user', content: currentInstruction },
-        { role: 'assistant', content: initialRefinedText }
-    ]);
+  useEffect(() => {
+    if (isOpen) {
+      setMessages([]);
+      setLoopNumber(1);
+      setAllowOutside(false);
+      setShowOutsidePrompt(false);
+      conversationHistoryRef.current = [];
+    }
+  }, [isOpen, selectedText]);
 
-    const handleFollowUp = async () => {
-        if (!followUp.trim()) return;
-        setIsRefining(true);
+  useEffect(() => {
+    if (chatRef.current) {
+      chatRef.current.scrollTop = chatRef.current.scrollHeight;
+    }
+  }, [messages, showOutsidePrompt]);
 
-        // Append user message before API call
-        conversationHistoryRef.current.push({ role: 'user', content: followUp });
+  if (!isOpen) return null;
 
-        try {
-            let result;
-            if (isFullNote) {
-                result = await discussNote(content, followUp, pdfId, conversationHistoryRef.current);
-            } else {
-                result = await refineText(pdfId, currentRefined, followUp);
-            }
+  const sendMessage = async (textOverride = null) => {
+    const text = textOverride || inputText;
+    if (!text.trim()) return;
 
-            const newRefined = result.refined_text?.refined_content || result.refined_content || result.refined_text;
-            if (newRefined) {
-                conversationHistoryRef.current.push({ role: 'assistant', content: newRefined });
-                setCurrentRefined(newRefined);
-                setHistory([...history, { prompt: followUp, result: newRefined }]);
-                setFollowUp('');
-            }
-        } catch (e) {
-            alert("Error trying to refine further.");
-            conversationHistoryRef.current.pop();
-        } finally {
-            setIsRefining(false);
-        }
-    };
+    const userMsg = { role: 'user', content: text };
+    setMessages(prev => [...prev, userMsg]);
+    conversationHistoryRef.current.push(userMsg);
+    setInputText('');
+    setIsTyping(true);
+    setShowOutsidePrompt(false);
 
-    return (
-        <div className={styles.overlay}>
-            <div className={styles.modal}>
-                <div className={styles.header}>
-                    <h3>Refinement Result</h3>
-                    <button className={styles.closeBtn} onClick={onClose}>×</button>
-                </div>
+    try {
+      const res = await fetch('http://localhost:8000/api/m3/refine-text', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pdf_id: pdfId,
+          selected_text: selectedText,
+          instruction: text,
+          loop_number: loopNumber,
+          allow_outside: allowOutside,
+          conversation_history: conversationHistoryRef.current
+        })
+      });
+      const data = await res.json();
+      
+      const aiMsg = { role: 'assistant', content: data.refined_content };
+      setMessages(prev => [...prev, aiMsg]);
+      conversationHistoryRef.current.push(aiMsg);
+      
+      setLoopNumber(data.loop_number + 1);
+      if (data.should_ask_outside) {
+        setShowOutsidePrompt(true);
+      }
+    } catch (err) {
+      console.error(err);
+      setMessages(prev => [...prev, { role: 'assistant', content: 'Sorry, an error occurred.' }]);
+    } finally {
+      setIsTyping(false);
+    }
+  };
 
-                <div className={styles.comparison}>
-                    <div className={styles.original}>
-                        <h4>Original</h4>
-                        <div className={styles.textBlock}>{originalText}</div>
-                    </div>
+  const handleOutsideChoice = (choice) => {
+    if (choice === 'yes') {
+      setAllowOutside(true);
+    } else {
+      setAllowOutside(false);
+    }
+    setShowOutsidePrompt(false);
+  };
 
-                    <div className={styles.arrow}>
-                        <ArrowRight size={24} />
-                    </div>
+  const quickChips = [
+    "Code example", "Simplify", "Exam tip", "Mistakes", "Compare", "Step by step"
+  ];
 
-                    <div className={styles.refined}>
-                        <h4>Refined ({history.length} Iterations)</h4>
-                        <div className={styles.textBlock}>{currentRefined}</div>
-                    </div>
-                </div>
-
-                <div className={styles.followUpContainer}>
-                    <div className={styles.followUpLabel}>Not satisfied? Ask AI to tweak it again:</div>
-                    <div className={styles.followUpInputArea}>
-                        <input
-                            type="text"
-                            placeholder="e.g. Make it shorter, use bullet points, simplify terms..."
-                            className={styles.followUpInput}
-                            value={followUp}
-                            onChange={e => setFollowUp(e.target.value)}
-                            onKeyDown={e => e.key === 'Enter' && handleFollowUp()}
-                            disabled={isRefining}
-                        />
-                        <button className={styles.followUpBtn} onClick={handleFollowUp} disabled={isRefining || !followUp.trim()}>
-                            {isRefining ? <Loader2 size={16} className={styles.spin} /> : <Send size={16} />}
-                            Rewrite
-                        </button>
-                    </div>
-                </div>
-
-                <div className={styles.footer} style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
-                    <button className={styles.discardBtn} onClick={onClose} style={{ padding: '8px 16px', borderRadius: '6px', border: '1px solid #ff4d4f', color: '#ff4d4f', background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <X size={16} /> Discard
-                    </button>
-                    <div style={{ display: 'flex', gap: '12px' }}>
-                        <button 
-                            onClick={() => onApply(currentRefined, history, 'insert')}
-                            style={{ padding: '8px 16px', borderRadius: '6px', border: '1px solid #1B1D21', color: '#1B1D21', background: 'transparent', cursor: 'pointer', fontWeight: 500 }}
-                        >
-                            Insert Below (Boxed)
-                        </button>
-                        <button 
-                            className={styles.applyBtn} 
-                            onClick={() => onApply(currentRefined, history, 'replace')}
-                            style={{ padding: '8px 16px', borderRadius: '6px', border: 'none', color: 'white', background: '#2F6CF6', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 500 }}
-                        >
-                            <Check size={16} /> Replace Original
-                        </button>
-                    </div>
-                </div>
+  return (
+    <div className={styles.modalOverlay}>
+      <div className={styles.refineModal}>
+        <div className={styles.modalHeader}>
+          <div className={styles.modalHeaderLeft}>
+            <span className={styles.tagLabel}>Tagged section {allowOutside ? '· web' : '· materials'}</span>
+            <div className={styles.taggedTextBox}>
+              {selectedText.length > 100 ? selectedText.substring(0, 100) + '...' : selectedText}
             </div>
+          </div>
+          <button className={styles.modalCloseBtn} onClick={onClose}>✕</button>
         </div>
-    );
-};
+        
+        <div className={styles.chatArea} ref={chatRef}>
+          {messages.length === 0 && (
+            <div className={styles.chatEmpty}>What would you like to do with this section?</div>
+          )}
+          {messages.map((msg, idx) => (
+            <div key={idx} className={msg.role === 'user' ? styles.msgUser : styles.msgAiContainer}>
+              <div className={msg.role === 'user' ? styles.bubbleUser : styles.bubbleAi}>
+                {msg.content}
+              </div>
+              {msg.role === 'assistant' && (
+                <div className={styles.mergePrompt}>
+                  <p>Happy with this? Where should it go?</p>
+                  <div className={styles.mergeButtons}>
+                    <button onClick={() => onMerge(msg.content, 'replace')}>Insert at tagged position</button>
+                    <button onClick={() => onMerge(msg.content, 'append')}>Add to bottom of note</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+          {isTyping && <div className={styles.typingIndicator}>Typing...</div>}
+          
+          {showOutsidePrompt && (
+            <div className={styles.outsideCard}>
+              <p>You have asked multiple questions. Should I search beyond your materials?</p>
+              <div className={styles.outsideButtons}>
+                <button onClick={() => handleOutsideChoice('yes')}>Yes, search outside</button>
+                <button onClick={() => handleOutsideChoice('no')}>No, stay in materials</button>
+              </div>
+            </div>
+          )}
+        </div>
 
-export default RefineModal;
+        <div className={styles.inputSection}>
+          <div className={styles.quickChips}>
+            {quickChips.map(chip => (
+              <button key={chip} onClick={() => sendMessage(chip)} className={styles.chipBtn}>
+                {chip}
+              </button>
+            ))}
+          </div>
+          <div className={styles.inputRow}>
+            <input 
+              type="text" 
+              value={inputText}
+              onChange={e => setInputText(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && sendMessage()}
+              placeholder="Ask a question or give an instruction..."
+              className={styles.chatInput}
+            />
+            <button onClick={() => sendMessage()} className={styles.sendBtn}>Send</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

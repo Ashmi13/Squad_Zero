@@ -12,7 +12,8 @@ import TurndownService from 'turndown';
 import {
     Share2, Search, ZoomIn, ZoomOut, ChevronLeft, ChevronRight,
     Bold, Italic, Underline, List, Link as LinkIcon, Mic,
-    Wand2, Settings, PenTool, Loader2, X, MousePointerClick, ArrowUpDown, Highlighter, Clock, ArrowUpDown as ArrowUpDownIcon
+    Wand2, Settings, PenTool, Loader2, X, MousePointerClick, ArrowUpDown, Highlighter, Clock, ArrowUpDown as ArrowUpDownIcon,
+    BookOpen, Layers, Hash
 } from 'lucide-react';
 import styles from './NoteEditor.module.css';
 import SaveModal from '../components/SaveModal';
@@ -101,7 +102,10 @@ const NoteEditor = () => {
             // Clean backend artifact wrappers
             loadedContent = loadedContent
                 .replace(/End_of_Notes/g, '')
-                .replace(/^```markdown\n|^```\n|```$/gm, '')
+                .replace(/^```markdown\n|```$/g, '')
+                .replace(/^```\n|```$/g, '')
+                .replace(/^# .*?\n/, '')    // Strip leading H1 title
+                .replace(/^> 📚.*?\n/m, '') // Strip legacy metadata line
                 .trim();
 
             // Check if content is already HTML (ignore image/div wrappers from synthesis)
@@ -163,7 +167,10 @@ const NoteEditor = () => {
                     let fetchedContent = data.content || '';
                     fetchedContent = fetchedContent
                         .replace(/End_of_Notes/g, '')
-                        .replace(/^```markdown\n|^```\n|```$/gm, '')
+                        .replace(/^```markdown\n|```$/g, '')
+                        .replace(/^```\n|```$/g, '')
+                        .replace(/^# .*?\n/, '')    // Strip leading H1 title
+                        .replace(/^> 📚.*?\n/m, '') // Strip legacy metadata line
                         .trim();
 
                     const isFetchedHTML = fetchedContent.includes('<p>') || fetchedContent.includes('<h1');
@@ -652,6 +659,27 @@ const NoteEditor = () => {
 
                     <div className={styles.editorContainer}>
                         <div className={styles.editorPage} style={{ lineHeight: lineHeight }} onContextMenu={handleContextMenu}>
+                            {/* PREMIUM HEADER AREA */}
+                            <div className={styles.premiumNoteHeader}>
+                                <h1 className={styles.noteTitleDisplay}>Study Notes</h1>
+                                <div className={styles.noteMetadataRow}>
+                                    <div className={styles.metaBadge}>
+                                        <BookOpen size={14} />
+                                        <span>{documents.length} document(s)</span>
+                                    </div>
+                                    <div className={styles.metaDivider}></div>
+                                    <div className={styles.metaBadge}>
+                                        <Layers size={14} />
+                                        <span>{(content.match(/<h2|## /g) || []).length} chapters</span>
+                                    </div>
+                                    <div className={styles.metaDivider}></div>
+                                    <div className={styles.metaBadge}>
+                                        <Hash size={14} />
+                                        <span>{(content.match(/<h3|### /g) || []).length} sections</span>
+                                    </div>
+                                </div>
+                            </div>
+
                             <ReactQuill
                                 ref={quillRef}
                                 theme="snow"

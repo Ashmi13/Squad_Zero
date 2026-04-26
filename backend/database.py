@@ -1,28 +1,36 @@
-# backend/database.py
 from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import declarative_base, sessionmaker
+
 from config.config import settings
 
-# Create database engine
-if "neon.tech" in settings.DATABASE_URL or "supabase" in settings.DATABASE_URL:
-    engine = create_engine(
-        settings.DATABASE_URL,
-        connect_args={"sslmode": "require"}
+if not settings.DATABASE_URL:
+    raise RuntimeError(
+        "\n"
+        "DATABASE_URL is not set.\n"
+        "Add it to backend/.env, for example:\n"
+        "  DATABASE_URL=postgresql://neuranote:password@localhost:5432/neuranote_db\n"
+        "  DATABASE_URL=postgresql://postgres:[PASSWORD]@db.xxxx.supabase.co:5432/postgres\n"
     )
-else:
-    engine = create_engine(settings.DATABASE_URL)
 
-# Create session factory
+# SSL for cloud databases
+_use_ssl = any(host in settings.DATABASE_URL for host in ("neon.tech", "supabase", "amazonaws"))
+
+engine = create_engine(
+    settings.DATABASE_URL,
+    connect_args={"sslmode": "require"} if _use_ssl else {},
+    pool_pre_ping=True,    # detect stale connections before using them
+    pool_size=5,
+    max_overflow=10,
+)
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Create base class for models
 Base = declarative_base()
 
-# Dependency injection for database sessions
+
 def get_db():
     """
-    Database session dependency
+    Database session dependency.
     Usage in routes: db: Session = Depends(get_db)
     """
     db = SessionLocal()

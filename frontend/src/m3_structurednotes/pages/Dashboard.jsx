@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import Sidebar from '../../components/Sidebar';
 import Header from '../../components/Header';
 import UploadSection from '../components/UploadSection';
 import FolderGrid from '../components/FolderGrid';
@@ -10,9 +9,6 @@ const Dashboard = () => {
     // Member 3: Multi-Select State
     const [selectedNotes, setSelectedNotes] = useState(new Set());
     const [showActionToolbar, setShowActionToolbar] = useState(false);
-
-    // Member 3: Folder Navigation
-    const [selectedFolderId, setSelectedFolderId] = useState(null);
 
     const toggleNoteSelection = (noteId) => {
         const newSelection = new Set(selectedNotes);
@@ -52,14 +48,13 @@ const Dashboard = () => {
 
     return (
         <div className={styles.app}>
-            <Sidebar onSelectFolder={setSelectedFolderId} selectedFolderId={selectedFolderId} />
             <main className={styles.mainContent}>
                 <Header />
                 <UploadSection />
 
                 <div className={styles.sectionHeader}>
                     <div className={styles.sectionTitle}>
-                        <h2>{selectedFolderId ? 'Folder Contents' : 'Your Files & Folders'}</h2>
+                        <h2>Your Files & Folders</h2>
                         <p>24 items • Last updated today</p>
                     </div>
                     <div className={styles.sectionControls}>
@@ -72,11 +67,10 @@ const Dashboard = () => {
                 </div>
 
                 <div className={styles.contentGrid}>
-                    {!selectedFolderId && <FolderGrid />}
+                    <FolderGrid />
                     <RecentFiles
                         selectedNotes={selectedNotes}
                         onToggleSelection={toggleNoteSelection}
-                        folderId={selectedFolderId}
                     />
                 </div>
 

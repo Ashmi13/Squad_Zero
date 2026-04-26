@@ -127,3 +127,63 @@ h4 {
     border: none;
     font-size: 14px;
 }
+
+/* Follow-up Chat */
+.followUpContainer {
+    margin-bottom: 20px;
+    background-color: #F8F9FA;
+    padding: 15px;
+    border-radius: 8px;
+    border: 1px solid #EAEAEA;
+}
+
+.followUpLabel {
+    font-size: 13px;
+    color: #5F6368;
+    margin-bottom: 8px;
+    font-weight: 600;
+}
+
+.followUpInputArea {
+    display: flex;
+    gap: 10px;
+}
+
+.followUpInput {
+    flex: 1;
+    padding: 10px 15px;
+    border: 1px solid #D1D5DB;
+    border-radius: 6px;
+    font-size: 14px;
+    outline: none;
+}
+
+.followUpInput:focus {
+    border-color: #2F6CF6;
+}
+
+.followUpBtn {
+    background-color: #10B981;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 0 15px;
+    cursor: pointer;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.followUpBtn:disabled {
+    background-color: #A7F3D0;
+    cursor: not-allowed;
+}
+
+.spin {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    100% { transform: rotate(360deg); }
+}

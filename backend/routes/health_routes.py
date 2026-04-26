@@ -1,4 +1,3 @@
-# backend/routes/health_routes.py
 from fastapi import APIRouter
 from config.config import settings
 

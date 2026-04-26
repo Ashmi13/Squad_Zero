@@ -1,0 +1,545 @@
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import {
+  AlarmClock,
+  BookOpen,
+  Clock3,
+  Flame,
+  Play,
+  Pause,
+  RotateCcw,
+  FileText,
+  FolderOpen,
+  ArrowRight,
+  RefreshCw,
+  Quote,
+} from 'lucide-react';
+import { workspaceApi } from '@/services/workspaceApi';
+import { pomodoroTimer } from '@/utils/pomodoroTimer';
+
+const DEFAULT_MINUTES = 25;
+
+const normalizeDashboardStats = (payload) => {
+  if (payload && typeof payload === 'object' && payload.dashboard && typeof payload.dashboard === 'object') {
+    return payload.dashboard;
+  }
+  if (payload && typeof payload === 'object') {
+    return payload;
+  }
+  return {};
+};
+
+const normalizeRecentFiles = (payload) => {
+  const rows = Array.isArray(payload)
+    ? payload
+    : (payload && typeof payload === 'object' && Array.isArray(payload.files) ? payload.files : []);
+
+  const topLevelFiles = rows.filter((file) => {
+    const fileName = String(file?.original_filename || file?.name || '').toLowerCase();
+    const isGeneratedChild = Boolean(file?.parent_file_id || file?.parentFileId);
+    const isGeneratedByName = /extract(ed)? text|summary/.test(fileName);
+
+    // Keep only top-level uploads in Smart Recent Files feed.
+    return !isGeneratedChild && !isGeneratedByName;
+  });
+
+  const previewable = topLevelFiles.filter((file) => file?.preview_available !== false);
+
+  // Prefer previewable files, but never show a false "No recent files" state
+  // when legacy rows exist with incomplete preview metadata.
+  return previewable.length > 0 ? previewable : topLevelFiles;
+};
+
+const formatMinutes = (minutes) => {
+  const total = Math.max(0, Number(minutes) || 0);
+  const hours = Math.floor(total / 60);
+  const mins = total % 60;
+  if (hours && mins) return `${hours}h ${mins}m`;
+  if (hours) return `${hours}h`;
+  return `${mins}m`;
+};
+
+const formatClock = (totalSeconds) => {
+  const seconds = Math.max(0, totalSeconds);
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+};
+
+const formatLastAccessed = (value) => {
+  if (!value) return 'Unknown';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return 'Unknown';
+  return parsed.toLocaleString([], {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+};
+
+const buildFilePath = (file) => {
+  return file?.folder_path || file?.folder_name || 'No folder path available';
+};
+
+const getFileTypeLabel = (file) => {
+  const raw = String(file?.file_type || file?.type || '').toUpperCase();
+  if (raw) return raw;
+  const name = String(file?.original_filename || file?.name || '').toLowerCase();
+  if (name.endsWith('.pdf')) return 'PDF';
+  if (name.endsWith('.docx')) return 'DOCX';
+  if (name.endsWith('.txt')) return 'TXT';
+  if (name.endsWith('.md')) return 'MD';
+  return 'FILE';
+};
+
+const createAlarm = () => {
+  const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextCtor) return null;
+  const audioContext = new AudioContextCtor();
+  const playTone = (frequency, startTime, duration) => {
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+    oscillator.type = 'sine';
+    oscillator.frequency.value = frequency;
+    gainNode.gain.value = 0.001;
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+    oscillator.start(startTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.3, startTime + 0.02);
+    gainNode.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+    oscillator.stop(startTime + duration + 0.03);
+  };
+
+  const play = async () => {
+    if (audioContext.state === 'suspended') {
+      await audioContext.resume();
+    }
+    const now = audioContext.currentTime;
+    playTone(880, now, 0.28);
+    playTone(660, now + 0.33, 0.28);
+    playTone(880, now + 0.66, 0.34);
+  };
+
+  return { play, audioContext };
+};
+
+const StatCard = ({ icon: Icon, label, value, accent, hint }) => (
+  <div style={{
+    background: 'linear-gradient(180deg, #ffffff 0%, #f8faff 100%)',
+    border: '1px solid #e5e9f5',
+    borderRadius: 18,
+    padding: 18,
+    boxShadow: '0 10px 30px rgba(15,23,42,0.05)',
+    minHeight: 130,
+  }}>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#334155', fontWeight: 700, fontSize: 13 }}>
+        <span style={{ width: 34, height: 34, borderRadius: 12, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: accent, color: '#fff' }}>
+          <Icon size={16} />
+        </span>
+        {label}
+      </div>
+    </div>
+    <div style={{ fontSize: 30, fontWeight: 800, color: '#111827', lineHeight: 1.1 }}>{value}</div>
+    {hint ? <div style={{ marginTop: 8, color: '#64748b', fontSize: 13, lineHeight: 1.5 }}>{hint}</div> : null}
+  </div>
+);
+
+const ProductivityDashboard = () => {
+  const navigate = useNavigate();
+  const alarmRef = useRef(null);
+  const completionVersionRef = useRef(0);
+
+  const [dashboard, setDashboard] = useState({
+    today_minutes: 0,
+    yesterday_minutes: 0,
+    week_minutes: 0,
+    current_streak_days: 0,
+    best_streak_days: 0,
+    motivational_message: 'Focus insights will appear after your first completed session.',
+  });
+  const [recentFiles, setRecentFiles] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [focusMinutes, setFocusMinutes] = useState(DEFAULT_MINUTES);
+  const [remainingSeconds, setRemainingSeconds] = useState(DEFAULT_MINUTES * 60);
+  const [isRunning, setIsRunning] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const [sessionBanner, setSessionBanner] = useState('');
+  const [sessionStatus, setSessionStatus] = useState('');
+  const [savingSession, setSavingSession] = useState(false);
+
+  const syncTimerState = (snapshot) => {
+    setFocusMinutes(snapshot.focusMinutes);
+    setRemainingSeconds(snapshot.remainingSeconds);
+    setIsRunning(snapshot.isRunning);
+    setIsPaused(snapshot.isPaused);
+  };
+
+  const refreshDashboard = useCallback(async (options = {}) => {
+    const showLoader = options.showLoader !== false;
+    try {
+      if (showLoader) setLoading(true);
+      const [stats, files] = await Promise.all([
+        workspaceApi.getProductivityDashboard(),
+        workspaceApi.getRecentFiles(5),
+      ]);
+      setDashboard(normalizeDashboardStats(stats));
+      setRecentFiles(normalizeRecentFiles(files));
+    } catch (err) {
+      setError(err.message || 'Failed to refresh productivity dashboard');
+    } finally {
+      if (showLoader) setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    const load = async () => {
+      setLoading(true);
+      setError('');
+      try {
+        const [stats, files] = await Promise.all([
+          workspaceApi.getProductivityDashboard(),
+          workspaceApi.getRecentFiles(5),
+        ]);
+        if (!mounted) return;
+        setDashboard(normalizeDashboardStats(stats));
+        setRecentFiles(normalizeRecentFiles(files));
+      } catch (err) {
+        if (!mounted) return;
+        setError(err.message || 'Failed to load productivity dashboard');
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+    load();
+
+    const refreshFromEvents = () => {
+      refreshDashboard({ showLoader: false });
+    };
+
+    const refreshFromVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        refreshDashboard({ showLoader: false });
+      }
+    };
+
+    const refreshFromFocus = () => {
+      refreshDashboard({ showLoader: false });
+    };
+
+    const periodicRefreshId = window.setInterval(() => {
+      refreshDashboard({ showLoader: false });
+    }, 20000);
+
+    window.addEventListener('neuranote:files-updated', refreshFromEvents);
+    window.addEventListener('neuranote:focus-updated', refreshFromEvents);
+    document.addEventListener('visibilitychange', refreshFromVisibility);
+    window.addEventListener('focus', refreshFromFocus);
+
+    return () => {
+      mounted = false;
+      window.clearInterval(periodicRefreshId);
+      window.removeEventListener('neuranote:files-updated', refreshFromEvents);
+      window.removeEventListener('neuranote:focus-updated', refreshFromEvents);
+      document.removeEventListener('visibilitychange', refreshFromVisibility);
+      window.removeEventListener('focus', refreshFromFocus);
+    };
+  }, [refreshDashboard]);
+
+  useEffect(() => {
+    completionVersionRef.current = pomodoroTimer.getSnapshot().completionVersion || 0;
+
+    const unsubscribe = pomodoroTimer.subscribe((snapshot) => {
+      syncTimerState(snapshot);
+      const isFreshCompletion =
+        snapshot.completionVersion > completionVersionRef.current &&
+        !snapshot.isRunning &&
+        !snapshot.isPaused &&
+        snapshot.remainingSeconds === 0;
+
+      if (isFreshCompletion) {
+        completionVersionRef.current = snapshot.completionVersion;
+        setSessionBanner('Focus Session Completed');
+        setSessionStatus('Nice work. Your completed session has been saved.');
+        setSavingSession(false);
+        if (!alarmRef.current) {
+          alarmRef.current = createAlarm();
+        }
+        alarmRef.current?.play?.().catch(() => {
+          // Alarm is best-effort.
+        });
+      }
+    });
+
+    syncTimerState(pomodoroTimer.getSnapshot());
+    return unsubscribe;
+  }, []);
+
+  const resetTimer = () => {
+    pomodoroTimer.reset();
+    setSessionBanner('');
+    setSessionStatus('');
+  };
+
+  const startTimer = async () => {
+    if (isRunning) return;
+
+    if (!alarmRef.current) {
+      alarmRef.current = createAlarm();
+    }
+
+    try {
+      if (alarmRef.current?.audioContext?.state === 'suspended') {
+        await alarmRef.current.audioContext.resume();
+      }
+    } catch {
+      // Best-effort audio unlock.
+    }
+
+    pomodoroTimer.setFocusMinutes(Number(focusMinutes) || DEFAULT_MINUTES);
+    setSessionBanner('');
+    setSessionStatus('');
+    pomodoroTimer.start();
+  };
+
+  const pauseTimer = () => {
+    if (!isRunning) return;
+    pomodoroTimer.pause();
+  };
+
+  const resumeTimer = () => {
+    if (!isPaused) return;
+    pomodoroTimer.resume();
+  };
+
+  const handleQuickPreset = (minutes) => {
+    pomodoroTimer.setFocusMinutes(minutes);
+    setFocusMinutes(minutes);
+  };
+
+  const currentMessage = useMemo(() => dashboard.motivational_message || 'Focus insights will appear after your first completed session.', [dashboard]);
+
+  const activeSessionSeconds = (isRunning || isPaused)
+    ? Math.max(0, ((Number(focusMinutes) || DEFAULT_MINUTES) * 60) - remainingSeconds)
+    : 0;
+  const liveTodayMinutes = dashboard.today_minutes + Math.floor(activeSessionSeconds / 60);
+
+  const handleOpenRecentFile = (file) => {
+    if (!file) return;
+    const targetFolder = file.folder_id
+      ? {
+        id: file.folder_id,
+        name: file.folder_name || 'Folder',
+        parent_folder_id: file.parent_folder_id || null,
+      }
+      : null;
+
+    navigate('/files', {
+      state: {
+        navigatedFromRecent: true,
+        targetFolder,
+        targetFile: {
+          id: file.id,
+          name: file.name || file.original_filename || 'Untitled file',
+          originalFilename: file.original_filename || file.name || null,
+          type: file.file_type || 'FILE',
+          folderId: file.folder_id,
+          folderName: file.folder_name || null,
+          parentFileId: file.parent_file_id || null,
+          // Let FileViewer resolve a fresh preview URL from backend by file id.
+          fileUrl: null,
+          content: file.file_content || null,
+          mimeType: file.mime_type || null,
+          isParentPDF: String(file.file_type || '').toUpperCase() === 'PDF',
+          storagePath: file.storage_path || null,
+          backendFile: true,
+          recentAccessedAt: file.recent_timestamp || null,
+          folderPath: file.folder_path || null,
+        },
+      },
+    });
+  };
+
+  const displayCurrentMessage = currentMessage;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20, padding: '18px 20px 24px', overflowY: 'auto', height: '100%', width: '100%', boxSizing: 'border-box', background: 'radial-gradient(circle at top left, rgba(99,102,241,0.08), transparent 34%), linear-gradient(180deg, #f8fbff 0%, #f4f7ff 100%)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+        <div>
+          <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.18em', color: '#6b7280', fontWeight: 800 }}>Productivity Dashboard</div>
+          <h1 style={{ margin: '8px 0 8px', fontSize: 36, lineHeight: 1.1, color: '#0f172a', letterSpacing: '-0.04em' }}>Stay focused. Track your habit. Keep your files moving.</h1>
+          <p style={{ margin: 0, color: '#64748b', fontSize: 15, maxWidth: 980, lineHeight: 1.7 }}>
+            A student-friendly workspace with Pomodoro control, focus tracking, streak motivation, and the latest files you opened most recently.
+          </p>
+        </div>
+        <button
+          onClick={refreshDashboard}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 8, border: '1px solid #d8e0f2', background: '#fff', color: '#0f172a', padding: '10px 14px', borderRadius: 12, cursor: 'pointer', boxShadow: '0 8px 20px rgba(15,23,42,0.05)',
+          }}
+        >
+          <RefreshCw size={15} /> Refresh Dashboard
+        </button>
+      </div>
+
+      {error ? (
+        <div style={{ padding: 14, borderRadius: 14, background: '#fff1f2', color: '#b91c1c', border: '1px solid #fecdd3' }}>{error}</div>
+      ) : null}
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.3fr) minmax(300px, 0.7fr)', gap: 20, alignItems: 'start' }}>
+        <div style={{ background: 'linear-gradient(180deg, #ffffff 0%, #f8faff 100%)', border: '1px solid #e5e9f5', borderRadius: 24, padding: 22, boxShadow: '0 18px 40px rgba(15,23,42,0.06)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', alignItems: 'center', marginBottom: 18 }}>
+            <div>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 999, background: '#eef2ff', color: '#4338ca', fontWeight: 800, fontSize: 12 }}>
+                <AlarmClock size={14} /> Pomodoro Focus Timer
+              </div>
+              <h2 style={{ margin: '12px 0 6px', fontSize: 24, color: '#0f172a' }}>Build a focused study block</h2>
+            </div>
+            <div style={{ minWidth: 160, textAlign: 'right' }}>
+              <div style={{ fontSize: 12, color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em' }}>Countdown</div>
+              <div style={{ fontSize: 48, fontWeight: 900, color: remainingSeconds <= 30 ? '#dc2626' : '#111827', letterSpacing: '-0.04em' }}>{formatClock(remainingSeconds)}</div>
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10, marginBottom: 16 }}>
+            {[25, 45, 60].map((minutes) => (
+              <button
+                key={minutes}
+                onClick={() => handleQuickPreset(minutes)}
+                disabled={isRunning || isPaused}
+                style={{
+                  padding: '12px 14px',
+                  borderRadius: 14,
+                  border: focusMinutes === minutes ? '1px solid #4f46e5' : '1px solid #dbe2f2',
+                  background: focusMinutes === minutes ? '#eef2ff' : '#fff',
+                  color: '#111827',
+                  fontWeight: 700,
+                  cursor: isRunning || isPaused ? 'not-allowed' : 'pointer',
+                  opacity: isRunning || isPaused ? 0.7 : 1,
+                }}
+              >
+                {minutes} min
+              </button>
+            ))}
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 8, color: '#334155', fontSize: 13, fontWeight: 700 }}>
+              Custom focus time (minutes)
+              <input
+                type="number"
+                min="1"
+                max="180"
+                value={focusMinutes}
+                disabled={isRunning || isPaused}
+                onChange={(e) => {
+                  const nextValue = Math.max(1, Number(e.target.value) || DEFAULT_MINUTES);
+                  setFocusMinutes(nextValue);
+                  pomodoroTimer.setFocusMinutes(nextValue);
+                }}
+                style={{ border: '1px solid #dbe2f2', borderRadius: 12, padding: '12px 14px', fontSize: 15, outline: 'none', background: isRunning || isPaused ? '#f8fafc' : '#fff', opacity: isRunning || isPaused ? 0.7 : 1 }}
+              />
+            </label>
+
+            <div style={{ display: 'flex', alignItems: 'end', gap: 10, flexWrap: 'wrap' }}>
+              {!isRunning && !isPaused ? (
+                <button onClick={startTimer} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: '#4f46e5', color: '#fff', border: 'none', borderRadius: 12, padding: '12px 16px', fontWeight: 800, cursor: 'pointer' }}>
+                  <Play size={16} /> Start
+                </button>
+              ) : null}
+              {isRunning ? (
+                <button onClick={pauseTimer} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: '#fff', color: '#111827', border: '1px solid #dbe2f2', borderRadius: 12, padding: '12px 16px', fontWeight: 800, cursor: 'pointer' }}>
+                  <Pause size={16} /> Pause
+                </button>
+              ) : null}
+              {isPaused ? (
+                <button onClick={resumeTimer} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: '#10b981', color: '#fff', border: 'none', borderRadius: 12, padding: '12px 16px', fontWeight: 800, cursor: 'pointer' }}>
+                  <Play size={16} /> Resume
+                </button>
+              ) : null}
+              <button onClick={resetTimer} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: '#fff', color: '#111827', border: '1px solid #dbe2f2', borderRadius: 12, padding: '12px 16px', fontWeight: 800, cursor: 'pointer' }}>
+                <RotateCcw size={16} /> Reset
+              </button>
+            </div>
+          </div>
+
+          {sessionBanner ? (
+            <div style={{ marginTop: 10, padding: 14, borderRadius: 16, background: '#ecfeff', border: '1px solid #a5f3fc', color: '#155e75', fontWeight: 800 }}>
+              {sessionBanner}
+              <div style={{ marginTop: 6, fontWeight: 600, color: '#0f766e' }}>{savingSession ? 'Saving your completed session...' : sessionStatus}</div>
+            </div>
+          ) : null}
+
+          <div style={{ marginTop: 18, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+            <StatCard icon={Clock3} label="Today Total Focus Time" value={formatMinutes(liveTodayMinutes)} accent="linear-gradient(135deg, #6366f1, #8b5cf6)" hint="Includes live minutes from the current active Pomodoro." />
+            <StatCard icon={FileText} label="Yesterday Focus Time" value={formatMinutes(dashboard.yesterday_minutes)} accent="linear-gradient(135deg, #0ea5e9, #14b8a6)" hint="Completed focus time from the previous day." />
+            <StatCard icon={BookOpen} label="This Week Total Focus Time" value={formatMinutes(dashboard.week_minutes)} accent="linear-gradient(135deg, #f59e0b, #f97316)" hint="Weekly focus minutes saved in the database." />
+            <StatCard icon={Flame} label="Current Study Streak" value={`${dashboard.current_streak_days || 0} Days`} accent="linear-gradient(135deg, #ef4444, #f59e0b)" hint="At least one completed focus session today keeps the streak alive." />
+            <StatCard icon={Flame} label="Best Streak" value={`${dashboard.best_streak_days || 0} Days`} accent="linear-gradient(135deg, #7c3aed, #6366f1)" hint="Your longest continuous streak so far." />
+          </div>
+
+          <div style={{ marginTop: 16, padding: 16, borderRadius: 18, background: '#ffffff', border: '1px solid #e5e9f5', boxShadow: '0 10px 30px rgba(15,23,42,0.05)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8, color: '#111827', fontWeight: 800 }}>
+              <Quote size={16} color="#4f46e5" /> Motivational Message
+            </div>
+            <div style={{ color: '#334155', fontSize: 15, lineHeight: 1.7 }}>{displayCurrentMessage}</div>
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gap: 16 }}>
+          <div style={{ background: 'linear-gradient(180deg, #ffffff 0%, #f8fbff 100%)', border: '1px solid #e5e9f5', borderRadius: 24, padding: 20, boxShadow: '0 18px 40px rgba(15,23,42,0.06)', minHeight: 0 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 800, color: '#0f172a' }}>
+                  <FolderOpen size={16} color="#4f46e5" /> Smart Recent Files
+                </div>
+                <div style={{ marginTop: 6, color: '#64748b', fontSize: 13 }}>Latest 5 files you opened, sorted by last access.</div>
+              </div>
+            </div>
+
+            {loading ? (
+              <div style={{ color: '#64748b' }}>Loading dashboard...</div>
+            ) : recentFiles.length === 0 ? (
+              <div style={{ color: '#64748b', fontSize: 14 }}>No recent files yet. Open a file to start tracking access history.</div>
+            ) : (
+              <div style={{ display: 'grid', gap: 12 }}>
+                {recentFiles.map((file) => (
+                  <div key={file.id} style={{ border: '1px solid #e5e9f5', borderRadius: 18, padding: 14, background: '#fff', boxShadow: '0 10px 26px rgba(15,23,42,0.04)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                          <FileText size={16} color="#4f46e5" />
+                          <div style={{ fontWeight: 800, color: '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={file.name || file.original_filename}>{file.name || file.original_filename || 'Untitled file'}</div>
+                        </div>
+                        <div style={{ color: '#64748b', fontSize: 13, lineHeight: 1.6 }}>
+                          <div><strong style={{ color: '#334155' }}>Folder:</strong> {buildFilePath(file)}</div>
+                          {file.parent_folder_path ? (
+                            <div><strong style={{ color: '#334155' }}>Parent Folder Path:</strong> {file.parent_folder_path}</div>
+                          ) : null}
+                          <div><strong style={{ color: '#334155' }}>Last Accessed:</strong> {formatLastAccessed(file.recent_timestamp)}</div>
+                          <div><strong style={{ color: '#334155' }}>Type:</strong> {getFileTypeLabel(file)}</div>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleOpenRecentFile(file)}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: 8, border: 'none', background: '#eef2ff', color: '#4338ca', borderRadius: 12, padding: '10px 12px', fontWeight: 800, cursor: 'pointer', whiteSpace: 'nowrap' }}
+                      >
+                        Quick Open <ArrowRight size={14} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+    </div>
+  );
+};
+
+export default ProductivityDashboard;

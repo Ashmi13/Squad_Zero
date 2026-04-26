@@ -1,4 +1,4 @@
-from pydantic import BaseModel, UUID4
+from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
@@ -10,6 +10,8 @@ class TaskCreate(BaseModel):
     priority: Optional[str] = "medium"
     due_date: Optional[datetime] = None
     category: Optional[str] = None
+    reminder_minutes_before: Optional[int] = None
+    color: Optional[str] = None
 
 
 class TaskUpdate(BaseModel):
@@ -19,6 +21,8 @@ class TaskUpdate(BaseModel):
     priority: Optional[str] = None
     due_date: Optional[datetime] = None
     category: Optional[str] = None
+    reminder_minutes_before: Optional[int] = None
+    color: Optional[str] = None
 
 
 class TaskResponse(BaseModel):
@@ -30,5 +34,7 @@ class TaskResponse(BaseModel):
     priority: str
     due_date: Optional[datetime] = None
     category: Optional[str] = None
+    reminder_minutes_before: Optional[int] = None
+    color: Optional[str] = None
     created_at: datetime
     updated_at: datetime

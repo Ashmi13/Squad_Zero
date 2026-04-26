@@ -93,7 +93,9 @@ async def create_task(task: TaskCreate, current_user: dict = Depends(get_current
         "status": task.status or "todo",
         "priority": task.priority or "medium",
         "category": task.category or "personal",
-        "due_date": task.due_date.isoformat() if task.due_date else None,
+       "due_date": task.due_date.isoformat() if task.due_date else None,
+        "reminder_minutes_before": task.reminder_minutes_before,
+        "color": task.color,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }

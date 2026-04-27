@@ -12,10 +12,10 @@ const MEMBERS = [
       { label: 'Landing Page',   path: '/' },
       { label: 'Sign In',        path: '/login' },
       { label: 'Sign Up',        path: '/signup' },
-      { label: 'L',        path: '/signup' },
-      { label: 'OAuth Callback', path: '/oauth/callback' },
+      { label: 'Google Signin', path: '/api/v1/auth/google-login' },
       { label: 'Dashboard',      path: '/dashboard' } ,
       { label: 'Admin dashboard',      path: '/admin' } ,
+      { label: 'Mail related pages',      path: '' } ,
 
     ],
   },

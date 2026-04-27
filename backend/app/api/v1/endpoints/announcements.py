@@ -18,4 +18,19 @@ async def list_announcements(
         .order("created_at", desc=True)
         .execute()
     )
-    return response.data
+    
+    # Log the response to debug transformation
+    data = []
+    for row in (response.data or []):
+        # Flatten or adjust fields if they differ from model
+        data.append({
+            "id": row.get("id"),
+            "title": row.get("title", ""),
+            "content": row.get("content", ""),
+            "type": row.get("type", "info"),
+            "created_at": row.get("created_at"),
+            "updated_at": row.get("updated_at"),
+            "created_by": str(row.get("created_by", ""))  # Ensure it stringifies
+        })
+
+    return data

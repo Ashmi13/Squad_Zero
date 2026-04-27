@@ -174,7 +174,9 @@ const FileManagerPage = ({ activeView, setActiveView }) => {
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
         {/* Top Bar */}
-        <TopBar folderName={activeView === 'home' ? 'Home' : selectedFolder?.name} />
+        <TopBar 
+            folderName={activeView === 'home' ? 'Home' : (selectedFolder?.name || 'My Files')} 
+        />
 
         {/* Content */}
         <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>

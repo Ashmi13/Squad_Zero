@@ -2,6 +2,10 @@ import sys
 import os
 import importlib
 
+# Ensure stdout uses UTF-8 to prevent UnicodeEncodeError with emojis on Windows
+if sys.stdout.encoding.lower() != 'utf-8':
+    sys.stdout.reconfigure(encoding='utf-8')
+
 # Adding backend/ to sys.path so all imports are resolved
 # Launch directory of uvicorn
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -30,6 +34,7 @@ except Exception:
 # Database table creation
 try:
     from database import engine, Base
+    print("⏳ Connecting to database... (this may take a minute if Supabase is waking up)")
     Base.metadata.create_all(bind=engine)
     print("✅ Database tables ready")
 except Exception as e:
@@ -55,7 +60,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],  # explicit, not "*"
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],  # explicit, not "*"
     allow_headers=[
         "Content-Type",
         "Authorization",

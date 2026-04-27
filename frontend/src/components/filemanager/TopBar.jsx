@@ -1,5 +1,6 @@
 import React from 'react';
-import { Search, Bell, Moon, Sun } from 'lucide-react';
+import { Search, Moon, Sun } from 'lucide-react';
+import NotificationBell from '../NotificationBell';
 
 const TopBar = ({ folderName }) => {
   const [dark, setDark] = React.useState(false);
@@ -42,19 +43,7 @@ const TopBar = ({ folderName }) => {
         </div>
 
         {/* Bell */}
-        <div style={{
-          position: 'relative', cursor: 'pointer',
-          width: '36px', height: '36px', borderRadius: '50%',
-          backgroundColor: '#f5f5f5',
-          display: 'flex', alignItems: 'center', justifyContent: 'center'
-        }}>
-          <Bell size={18} color="#555" />
-          <div style={{
-            position: 'absolute', top: '6px', right: '6px',
-            width: '8px', height: '8px', borderRadius: '50%',
-            backgroundColor: '#ff4d4d'
-          }} />
-        </div>
+        <NotificationBell size={18} color="#555" />
 
         {/* Dark mode toggle */}
         <div

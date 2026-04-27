@@ -12,8 +12,11 @@ const MEMBERS = [
       { label: 'Landing Page',   path: '/' },
       { label: 'Sign In',        path: '/login' },
       { label: 'Sign Up',        path: '/signup' },
+      { label: 'L',        path: '/signup' },
       { label: 'OAuth Callback', path: '/oauth/callback' },
-      { label: 'Dashboard',      path: '/dashboard' },
+      { label: 'Dashboard',      path: '/dashboard' } ,
+      { label: 'Admin dashboard',      path: '/admin' } ,
+
     ],
   },
   {

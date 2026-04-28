@@ -305,10 +305,16 @@ async def _run_structured_note_job(job_id: str, input_items: list, user_id: str,
         content = note_service.generate_structured_note(
             input_items=input_items, user_id=user_id, language=language, job_id=job_id
         )
-        note_id = note_service.save_note_to_db(user_id, None, "Structured Study Notes", content)
+        note_id = note_service.save_note_to_db(
+            user_id, None,
+            "Structured Study Notes",
+            content
+        )
         if note_id:
             _set_note_type(note_id, 'structured')
-        _update_job_row(job_id, "done", note_id=note_id)
+        _update_job_row(
+            job_id, "done", note_id=note_id
+        )
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -760,16 +766,15 @@ async def delete_note(note_id: str):
 @router.get("/documents/{filename}")
 async def serve_document(filename: str):
     """
-    Returns metadata for a stored document so the frontend
-    split-view can open it. Actual file serving is handled
-    by FastAPI's StaticFiles mount in main.py:
-        app.mount("/documents", StaticFiles(directory="documents"))
-    This endpoint just confirms the file exists.
+    Returns the actual PDF file.
+    Bypasses the missing StaticFiles mount in main.py 
+    by serving directly from the Member 3 router.
     """
     import os
+    from fastapi.responses import FileResponse
     file_path = os.path.join("documents", filename)
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="Document not found.")
-    return {"filename": filename, "url": f"/documents/{filename}"}
+    return FileResponse(file_path)
 
 

@@ -1,879 +1,1103 @@
+import React, { useState, useEffect, useRef } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
+import axios from 'axios'
+import { marked } from 'marked'
+import RefineModal from '../components/RefineModal'
 
-import React, { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import rehypeRaw from 'rehype-raw';
-import mermaid from 'mermaid';
-import ReactQuill from 'react-quill-new';
-import 'react-quill-new/dist/quill.snow.css';
-import { marked } from 'marked';
-import TurndownService from 'turndown';
-import {
-    Share2, Search, ZoomIn, ZoomOut, ChevronLeft, ChevronRight,
-    Bold, Italic, Underline, List, Link as LinkIcon, Mic,
-    Wand2, Settings, PenTool, Loader2, X, MousePointerClick, ArrowUpDown, Highlighter, Clock, ArrowUpDown as ArrowUpDownIcon,
-    BookOpen, Layers, Hash
-} from 'lucide-react';
-import styles from './NoteEditor.module.css';
-import SaveModal from '../components/SaveModal';
-import RefineModal from '../components/RefineModal';
-import { generateNote, refineText, updateNote, createNote, summarizePrompts, discussNote, getNote } from '../api';
+const API_BASE = 'http://127.0.0.1:8000/api/m3'
 
+export default function NoteEditor() {
+  const { noteId } = useParams()
+  const navigate = useNavigate()
+  
+  // Safety check — if this logs, component mounted
+  useEffect(() => {
+    console.log('[NoteEditor] Component mounted')
+    console.log('[NoteEditor] noteId:', noteId)
+  }, [noteId])
 
-// --- CONFIGURATION ---
-// Set to TRUE for full AI features (Final)
-// Set to FALSE for manual-only mode (Interim Demo)
-const ENABLE_AI = true;
+  const editorRef = useRef(null)
+  const [editorContent, setEditorContent] = useState('')
 
-// --- MERMAID RENDERER ---
-const Mermaid = ({ chart }) => {
-    useEffect(() => {
-        mermaid.initialize({
-            startOnLoad: true,
-            theme: 'default',
-            securityLevel: 'loose',
-            fontFamily: 'Inter, sans-serif',
-        });
+  const contentLoadedRef = useRef(false)
+  const isDragging = useRef(false)
+  const workspaceRef = useRef(null)
+  const matchPositions = useRef([])
 
-        // Timeout ensures the DOM is ready before Mermaid tries to render SVG
-        setTimeout(() => {
-            mermaid.contentLoaded();
-        }, 100);
-    }, [chart]);
+  const [noteTitle, setNoteTitle] = useState('Structured Study Notes')
+  const [noteContent, setNoteContent] = useState('')
+  const [sourceFiles, setSourceFiles] = useState([])
+  const [activeFile, setActiveFile] = useState(null)
+  const [sourceVisible, setSourceVisible] = useState(false)
+  const [editorWidth, setEditorWidth] = useState(50)
+  const [searchTerm, setSearchTerm] = useState('')
+  const [matchCount, setMatchCount] = useState(0)
+  const [currentMatch, setCurrentMatch] = useState(0)
+  const [lineSpacing, setLineSpacing] = useState('1.5')
+  const [showTOC, setShowTOC] = useState(false)
+  const [tocItems, setTocItems] = useState([])
+  const [folders, setFolders] = useState([])
+  const [showSaveModal, setShowSaveModal] = useState(false)
+  const [selectedFolder, setSelectedFolder] = useState(null)
+  const [toast, setToast] = useState('')
+  const [isSaving, setIsSaving] = useState(false)
 
-    return (
-        <div className="mermaid" style={{ display: 'flex', justifyContent: 'center', margin: '20px 0', border: '1px solid #f1f3f5', borderRadius: '12px', padding: '20px', backgroundColor: '#fafbfc' }}>
-            {chart}
+  // FIX 5 — Refine state
+  const [showRefineModal, setShowRefineModal] = useState(false)
+  const [selectedText, setSelectedText] = useState('')
+  const [refineInput, setRefineInput] = useState('')
+  const savedRangeRef = useRef(null)
+
+  // FIX 6 — Context menu state
+  const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0 })
+
+  // Close context menu on click elsewhere
+  useEffect(() => {
+    const close = () => setContextMenu({ visible: false })
+    document.addEventListener('click', close)
+    return () => document.removeEventListener('click', close)
+  }, [])
+
+  // Load note on mount
+  useEffect(() => {
+    if (!noteId) return
+
+    axios.get(`${API_BASE}/notes/${noteId}`)
+      .then(res => {
+        const data = res.data
+        setNoteTitle(data.title || 'Structured Study Notes')
+        const content = data.content || ''
+        setNoteContent(content)
+      })
+      .catch(err => {
+        console.error('Failed to load note')
+      })
+
+    // After note loading code, add:
+    const filesRaw = localStorage.getItem('currentNoteFiles')
+    console.log('[Source] Raw localStorage:', filesRaw)
+    if (filesRaw) {
+      try {
+        const files = JSON.parse(filesRaw)
+        files.forEach((f, i) => {
+          console.log(`[Source] File ${i}:`, {
+            pdf_id: f.pdf_id,
+            filename: f.filename,
+            pdf_url: f.pdf_url
+          })
+        })
+        if (Array.isArray(files) && files.length > 0) {
+          setSourceFiles(files)
+          setActiveFile(files[0])
+        }
+      } catch(e) {
+        console.error('[Source] parse error')
+      }
+    }
+
+    // Folder loading
+    try {
+      const storedFolders = localStorage.getItem('neuranote_folders')
+      if (storedFolders) {
+        setFolders(JSON.parse(storedFolders))
+      }
+    } catch (e) {
+      console.error('Failed to load folders')
+    }
+  }, [noteId])
+
+  // Load content into editor when noteContent changes
+  useEffect(() => {
+    if (!noteContent) return
+    if (contentLoadedRef.current) return
+    contentLoadedRef.current = true
+
+    console.log('[Editor] Raw noteContent length:', noteContent.length)
+    console.log('[Editor] First 100 chars:', noteContent.substring(0, 100))
+
+    // Clean backend artifacts
+    let cleaned = noteContent
+      .replace(/End_of_Notes/g, '')
+      .replace(/END_SECTION/g, '')
+      .replace(/^```markdown\s*/gm, '')
+      .replace(/^```\s*/gm, '')
+      .trim()
+
+    // Convert bullet markers to proper markdown
+    cleaned = cleaned
+      .replace(/^\* •/gm, '-')
+      .replace(/^\* /gm, '- ')
+      .replace(/^• /gm, '- ')
+
+    console.log('[Editor] Cleaned length:', cleaned.length)
+
+    // Convert markdown to HTML
+    let html
+    try {
+      html = marked(cleaned, {
+        breaks: true,
+        gfm: true
+      })
+      console.log('[Editor] HTML generated, length:', html.length)
+    } catch (err) {
+      console.error('[Editor] marked() failed:', err.message)
+      // Fallback: basic conversion
+      html = cleaned
+        .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+        .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+        .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/^- (.+)$/gm, '<li>$1</li>')
+        .replace(/(<li>.*<\/li>\n?)+/gs, '<ul>$&</ul>')
+        .replace(/\n\n/g, '</p><p>')
+        html = '<p>' + html + '</p>'
+    }
+
+    // Set both state and direct DOM
+    setEditorContent(html)
+    
+    // Use setTimeout to ensure DOM is ready
+    setTimeout(() => {
+      if (editorRef.current) {
+        editorRef.current.innerHTML = html
+        console.log('[Editor] Content set in DOM')
+      }
+    }, 100)
+  }, [noteContent])
+
+  // FIX 1 — applyHeading
+  const applyHeading = (level) => {
+    const editor = editorRef.current
+    if (!editor) return
+    editor.focus()
+    
+    const selection = window.getSelection()
+    if (!selection || selection.rangeCount === 0) 
+      return
+    
+    const range = selection.getRangeAt(0)
+    
+    // Find the block element containing cursor
+    let node = range.commonAncestorContainer
+    if (node.nodeType === 3) node = node.parentNode
+    
+    // Get the text content
+    const text = selection.toString() || node.textContent || ''
+    
+    // Create new heading
+    const heading = document.createElement(`h${level}`)
+    heading.textContent = text
+    
+    // Replace current selection or block
+    if (selection.toString()) {
+      range.deleteContents()
+      range.insertNode(heading)
+    } else {
+      node.replaceWith(heading)
+    }
+    
+    // Move cursor after heading
+    const newRange = document.createRange()
+    newRange.setStartAfter(heading)
+    newRange.collapse(true)
+    selection.removeAllRanges()
+    selection.addRange(newRange)
+    
+    // Trigger content update
+    setEditorContent(editor.innerHTML)
+  }
+
+  const applyInlineFormat = (command) => {
+    const editor = editorRef.current
+    if (!editor) return
+    editor.focus()
+    document.execCommand(command, false, null)
+    setEditorContent(editor.innerHTML)
+  }
+
+  // Fallback format function for ul/ol
+  const applyFormat = (command, value = null) => {
+    if (editorRef.current) {
+      editorRef.current.focus()
+    }
+    document.execCommand(command, false, value)
+  }
+
+  // FIX 2 — applyHighlight
+  const applyHighlight = (color) => {
+    const editor = editorRef.current
+    if (!editor) return
+    editor.focus()
+    
+    const selection = window.getSelection()
+    if (!selection || selection.rangeCount === 0 || !selection.toString()) {
+      showToast('Select text first to highlight')
+      return
+    }
+    
+    const success = document.execCommand('hiliteColor', false, color)
+    
+    if (!success) {
+      const range = selection.getRangeAt(0)
+      const mark = document.createElement('mark')
+      mark.style.backgroundColor = color
+      mark.style.borderRadius = '2px'
+      mark.style.padding = '1px 2px'
+      try {
+        range.surroundContents(mark)
+      } catch {
+        const fragment = range.extractContents()
+        mark.appendChild(fragment)
+        range.insertNode(mark)
+      }
+    }
+    
+    setEditorContent(editor.innerHTML)
+    showToast('Highlight applied')
+  }
+
+  const removeHighlight = () => {
+    const editor = editorRef.current
+    if (!editor) return
+    editor.focus()
+    document.execCommand('hiliteColor', false, 'transparent')
+    const selection = window.getSelection()
+    if (selection && selection.rangeCount > 0) {
+      const range = selection.getRangeAt(0)
+      const marks = editor.querySelectorAll('mark')
+      marks.forEach(mark => {
+        if (range.intersectsNode(mark)) {
+          mark.replaceWith(document.createTextNode(mark.textContent))
+        }
+      })
+    }
+    setEditorContent(editor.innerHTML)
+    showToast('Highlight removed')
+  }
+
+  // FIX 5 — Refine functions
+  const handleRefineClick = () => {
+    const selection = window.getSelection()
+    // Save cursor/selection range BEFORE modal opens
+    if (selection && selection.rangeCount > 0) {
+      savedRangeRef.current = selection.getRangeAt(0).cloneRange()
+    }
+    const text = selection?.toString().trim() || ''
+
+    if (text.length >= 3) {
+      setSelectedText(text)
+    } else if (refineInput.trim().length >= 3) {
+      setSelectedText(refineInput.trim())
+    } else {
+      showToast('Select text in note or type a question')
+      return
+    }
+    setShowRefineModal(true)
+  }
+
+  const insertRefinedContent = (content) => {
+    const editor = editorRef.current
+    if (!editor) return
+
+    let html = ''
+    try {
+      html = marked(content, { breaks: true })
+    } catch {
+      html = content.replace(/\n/g, '<br>')
+    }
+
+    const block = document.createElement('div')
+    block.style.cssText = `
+      border: 1.5px solid #A78BFA;
+      border-radius: 8px;
+      padding: 10px 14px;
+      margin: 12px 0;
+      background: #F5F3FF;
+    `
+    const label = document.createElement('div')
+    label.style.cssText = `
+      font-size: 10px;
+      font-weight: 600;
+      color: #7C3AED;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+    `
+    label.textContent = '✨ Refined'
+    block.appendChild(label)
+    const contentDiv = document.createElement('div')
+    contentDiv.innerHTML = html
+    block.appendChild(contentDiv)
+
+    if (savedRangeRef.current) {
+      try {
+        editor.focus()
+        const selection = window.getSelection()
+        selection.removeAllRanges()
+        selection.addRange(savedRangeRef.current)
+        const range = savedRangeRef.current
+        range.collapse(false)
+        range.insertNode(block)
+        const newRange = document.createRange()
+        newRange.setStartAfter(block)
+        newRange.collapse(true)
+        selection.removeAllRanges()
+        selection.addRange(newRange)
+        savedRangeRef.current = null
+      } catch {
+        editor.appendChild(block)
+      }
+    } else {
+      editor.appendChild(block)
+    }
+
+    block.scrollIntoView({ behavior: 'smooth' })
+    setEditorContent(editor.innerHTML)
+    showToast('Inserted into note ✓')
+  }
+
+  const appendRefinedContent = (content) => {
+    const editor = editorRef.current
+    if (!editor) return
+
+    let html = ''
+    try {
+      html = marked(content, { breaks: true })
+    } catch {
+      html = content.replace(/\n/g, '<br>')
+    }
+
+    const block = document.createElement('div')
+    block.style.cssText = `
+      border: 1.5px solid #A78BFA;
+      border-radius: 8px;
+      padding: 10px 14px;
+      margin: 12px 0;
+      background: #F5F3FF;
+    `
+    block.innerHTML = `
+      <div style="font-size:10px;font-weight:600;
+        color:#7C3AED;text-transform:uppercase;
+        letter-spacing:0.5px;margin-bottom:6px">
+        ✨ Refined
+      </div>
+      ${html}
+    `
+    editor.appendChild(block)
+    block.scrollIntoView({ behavior: 'smooth' })
+    setEditorContent(editor.innerHTML)
+    showToast('Added to bottom ✓')
+  }
+
+  const getEditorText = () => editorRef.current?.innerText || editorContent
+  const getEditorHtml = () => editorRef.current?.innerHTML || editorContent
+
+  // Draggable divider
+  useEffect(() => {
+    const onMove = (e) => {
+      if (!isDragging.current || !workspaceRef.current) return
+      const rect = workspaceRef.current.getBoundingClientRect()
+      let pct = ((e.clientX - rect.left) / rect.width) * 100
+      pct = Math.max(25, Math.min(75, pct))
+      setEditorWidth(pct)
+    }
+    const onUp = () => {
+      isDragging.current = false
+      document.body.style.cursor = 'default'
+      document.body.style.userSelect = 'auto'
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, [])
+
+  const showToast = (msg) => {
+    setToast(msg)
+    setTimeout(() => setToast(''), 2500)
+  }
+
+  const applyLineSpacing = (value) => {
+    if (editorRef.current) editorRef.current.style.lineHeight = value
+    setLineSpacing(value)
+  }
+
+  const doSearch = (term) => {
+    if (!editorRef.current) return
+    if (!term) {
+      matchPositions.current = []
+      setMatchCount(0)
+      setCurrentMatch(0)
+      return
+    }
+    const text = editorRef.current?.innerText.toLowerCase() || ''
+    const lower = term.toLowerCase()
+    const positions = []
+    let start = 0
+    while (start < text.length) {
+      const idx = text.indexOf(lower, start)
+      if (idx === -1) break
+      positions.push(idx)
+      start = idx + 1
+    }
+    matchPositions.current = positions
+    setMatchCount(positions.length)
+    if (positions.length > 0) setCurrentMatch(1)
+  }
+
+  const nextMatch = () => {
+    const positions = matchPositions.current
+    if (positions.length === 0) return
+    const next = currentMatch % positions.length
+    setCurrentMatch(next + 1)
+  }
+
+  const prevMatch = () => {
+    const positions = matchPositions.current
+    if (positions.length === 0) return
+    const prev = (currentMatch - 2 + positions.length) % positions.length
+    setCurrentMatch(prev + 1)
+  }
+
+  const downloadMd = () => {
+    let content = getEditorText()
+    if (!content || content.trim().length < 5) content = noteContent || '# ' + noteTitle
+    const blob = new Blob([content], { type: 'text/markdown' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = noteTitle.replace(/[^\w]/g, '_') + '.md'
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    showToast('Downloaded successfully')
+  }
+
+  // FIX 4 — Download PDF
+  const downloadPdf = () => {
+    const html = editorRef.current?.innerHTML || editorContent
+    
+    if (!html || html.trim().length < 10) {
+      showToast('No content to download')
+      return
+    }
+    
+    const fullHtml = `<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8">
+<title>${noteTitle}</title>
+<style>
+body{font-family:-apple-system,sans-serif;
+     max-width:800px;margin:40px auto;
+     padding:20px;color:#1a1523;
+     line-height:1.7;font-size:14px}
+h1{font-size:22px;font-weight:600;
+   border-bottom:2px solid #7C3AED;
+   padding-bottom:8px;margin-bottom:20px}
+h2{font-size:17px;font-weight:600;
+   color:#3C3489;margin-top:28px;
+   margin-bottom:12px}
+h3{font-size:14px;font-weight:600;
+   margin-top:16px;margin-bottom:8px}
+li{margin-bottom:8px}
+ul{padding-left:20px}
+strong{font-weight:600}
+code{background:#f3f0ff;padding:2px 5px;
+     border-radius:3px;font-size:12px;
+     font-family:monospace}
+pre{background:#1e1e2e;color:#cdd6f4;
+    padding:14px;border-radius:8px;
+    font-size:12px;font-family:monospace}
+mark{border-radius:2px;padding:1px 2px}
+@media print{
+  body{margin:20px}
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+  }
+  mark,
+  [style*="background-color"],
+  [style*="background:"] {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  div[style*="border: 1.5px solid #A78BFA"] {
+    border: 1.5px solid #A78BFA !important;
+    background: #F5F3FF !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
+</style>
+</head>
+<body>
+<h1>${noteTitle}</h1>
+${html}
+</body></html>`
+
+    const win = window.open('', '_blank')
+    if (win) {
+      win.document.write(fullHtml)
+      win.document.close()
+      win.focus()
+      setTimeout(() => {
+        win.print()
+      }, 1000)
+      return
+    }
+    
+    const blob = new Blob([fullHtml], { type: 'text/html;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = noteTitle.replace(/[^\w\s]/g, '').replace(/\s+/g, '_') + '.html'
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    showToast('Downloaded as HTML — open in browser and print to PDF')
+  }
+
+  const saveNote = async () => {
+    if (!selectedFolder) {
+      setShowSaveModal(true)
+      return
+    }
+    setIsSaving(true)
+    try {
+      const html = getEditorHtml()
+      await axios.put(`${API_BASE}/notes/${noteId}`, { content: html })
+      await axios.put(`${API_BASE}/notes/${noteId}/folder`, { folder_id: selectedFolder.id })
+      showToast('Saved to ' + selectedFolder.name)
+    } catch (e) {
+      showToast('Save failed')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const confirmSave = async (folder) => {
+    setSelectedFolder(folder)
+    setShowSaveModal(false)
+    setIsSaving(true)
+    try {
+      const html = getEditorHtml()
+      await axios.put(`${API_BASE}/notes/${noteId}`, { content: html })
+      await axios.put(`${API_BASE}/notes/${noteId}/folder`, { folder_id: folder.id })
+      showToast('Saved to ' + folder.name)
+    } catch (e) {
+      showToast('Save failed')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  // FIX 3B — PDF URL helper
+  const getFullPdfUrl = (file) => {
+    if (!file) return ''
+    const id = file.pdf_id || ''
+    if (!id) return ''
+    return `http://127.0.0.1:8000/api/m3/documents/${id}.pdf`
+  }
+
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', height: '100vh',
+      background: 'var(--color-background-primary)', fontFamily: 'var(--font-sans)'
+    }}>
+      {/* TOP BAR */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px',
+        borderBottom: '0.5px solid var(--color-border-tertiary)',
+        background: 'var(--color-background-secondary)', flexShrink: 0
+      }}>
+        <span style={{
+          flex: 1, fontSize: '13px', fontWeight: '500',
+          color: 'var(--color-text-primary)', overflow: 'hidden',
+          textOverflow: 'ellipsis', whiteSpace: 'nowrap'
+        }}>
+          {noteTitle}
+        </span>
+        <button
+          onClick={() => setSourceVisible(v => !v)}
+          style={{
+            fontSize: '11px', padding: '4px 10px', borderRadius: '6px',
+            border: '0.5px solid var(--color-border-tertiary)',
+            background: sourceVisible ? '#EDE9FE' : 'var(--color-background-primary)',
+            color: sourceVisible ? '#3C3489' : 'var(--color-text-secondary)',
+            cursor: 'pointer'
+          }}
+        >
+          {sourceVisible ? 'Hide Source' : 'Split View'}
+        </button>
+        <button onClick={downloadMd} style={{
+          fontSize: '11px', padding: '4px 10px', borderRadius: '6px',
+          border: '0.5px solid var(--color-border-tertiary)',
+          background: 'var(--color-background-primary)', color: 'var(--color-text-secondary)',
+          cursor: 'pointer'
+        }}>.md</button>
+        <button onClick={downloadPdf} style={{
+          fontSize: '11px', padding: '4px 10px', borderRadius: '6px',
+          border: '0.5px solid var(--color-border-tertiary)',
+          background: 'var(--color-background-primary)', color: 'var(--color-text-secondary)',
+          cursor: 'pointer'
+        }}>PDF</button>
+        <button onClick={saveNote} style={{
+          fontSize: '11px', padding: '4px 14px', borderRadius: '6px',
+          border: 'none', background: '#7C3AED', color: '#fff',
+          cursor: 'pointer', fontWeight: '500'
+        }}>{isSaving ? 'Saving…' : 'Save Note'}</button>
+      </div>
+
+      {/* FORMAT TOOLBAR */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: '2px', padding: '5px 12px',
+        borderBottom: '0.5px solid var(--color-border-tertiary)', flexShrink: 0, flexWrap: 'wrap'
+      }}>
+        {[
+          { label: 'B', style: { fontWeight: 700 }, action: () => applyInlineFormat('bold') },
+          { label: 'I', style: { fontStyle: 'italic' }, action: () => applyInlineFormat('italic') },
+          { label: 'U', style: { textDecoration: 'underline' }, action: () => applyInlineFormat('underline') },
+        ].map(btn => (
+          <button key={btn.label} onClick={btn.action} style={{
+            width: '28px', height: '28px', borderRadius: '5px', border: 'none',
+            background: 'none', cursor: 'pointer', fontSize: '12px', color: 'var(--color-text-secondary)',
+            ...btn.style
+          }}>{btn.label}</button>
+        ))}
+        <div style={{ width: '0.5px', height: '16px', background: 'var(--color-border-tertiary)', margin: '0 3px' }} />
+        <button onClick={() => applyHeading(2)} style={{
+          padding: '2px 6px', borderRadius: '5px', border: 'none', background: 'none',
+          cursor: 'pointer', fontSize: '10px', color: 'var(--color-text-secondary)'
+        }}>H2</button>
+        <button onClick={() => applyHeading(3)} style={{
+          padding: '2px 6px', borderRadius: '5px', border: 'none', background: 'none',
+          cursor: 'pointer', fontSize: '10px', color: 'var(--color-text-secondary)'
+        }}>H3</button>
+        <div style={{ width: '0.5px', height: '16px', background: 'var(--color-border-tertiary)', margin: '0 3px' }} />
+        <button onClick={() => applyFormat('insertUnorderedList')} style={{
+          width: '28px', height: '28px', borderRadius: '5px', border: 'none', background: 'none',
+          cursor: 'pointer', fontSize: '14px', color: 'var(--color-text-secondary)'
+        }}>≡</button>
+        <div style={{ width: '0.5px', height: '16px', background: 'var(--color-border-tertiary)', margin: '0 3px' }} />
+        <span style={{
+          fontSize: '10px',
+          color: 'var(--color-text-tertiary)',
+          marginRight: '2px'
+        }}>HL:</span>
+        {[
+          { color: '#FFF9C4', label: 'Y', title: 'Yellow highlight' },
+          { color: '#DCFCE7', label: 'G', title: 'Green highlight' },
+          { color: '#FCE7F3', label: 'P', title: 'Pink highlight' },
+          { color: '#DBEAFE', label: 'B', title: 'Blue highlight' },
+        ].map(({ color, label, title }) => (
+          <button
+            key={color}
+            onClick={() => applyHighlight(color)}
+            title={title}
+            style={{
+              width: '22px', height: '22px', borderRadius: '4px',
+              border: '1px solid rgba(0,0,0,0.15)', background: color,
+              cursor: 'pointer', fontSize: '9px', fontWeight: '600',
+              color: '#555', display: 'flex', alignItems: 'center',
+              justifyContent: 'center', flexShrink: 0
+            }}
+          >{label}</button>
+        ))}
+        <button
+          onClick={removeHighlight}
+          title="Remove highlight"
+          style={{
+            fontSize: '10px', padding: '2px 6px', borderRadius: '4px',
+            border: '0.5px solid var(--color-border-tertiary)',
+            background: 'none', cursor: 'pointer',
+            color: 'var(--color-text-secondary)'
+          }}
+        >✕HL</button>
+        <div style={{ width: '0.5px', height: '16px', background: 'var(--color-border-tertiary)', margin: '0 3px' }} />
+        <select value={lineSpacing} onChange={e => applyLineSpacing(e.target.value)} style={{
+          fontSize: '11px', padding: '3px 5px', borderRadius: '5px',
+          border: '0.5px solid var(--color-border-tertiary)', background: 'var(--color-background-primary)',
+          color: 'var(--color-text-secondary)', cursor: 'pointer'
+        }}>
+          <option value="1.2">1.2</option><option value="1.5">1.5</option><option value="1.8">1.8</option>
+          <option value="2.0">2.0</option><option value="2.5">2.5</option>
+        </select>
+        <button onClick={() => {
+          const text = getEditorText()
+          const items = text.split('\n').filter(l => l.trim().startsWith('##') || l.trim().startsWith('#'))
+            .map(l => l.replace(/^#+\s*/, '').trim()).filter(Boolean)
+          setTocItems(items)
+          setShowTOC(v => !v)
+        }} style={{
+          fontSize: '11px', padding: '4px 8px', borderRadius: '5px',
+          border: '0.5px solid var(--color-border-tertiary)',
+          background: showTOC ? '#EDE9FE' : 'var(--color-background-primary)',
+          color: showTOC ? '#3C3489' : 'var(--color-text-secondary)', cursor: 'pointer'
+        }}>≡ Contents</button>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <input type="text" value={searchTerm} placeholder="Find…" onChange={e => { setSearchTerm(e.target.value); doSearch(e.target.value) }} onKeyDown={e => { if (e.key === 'Enter') nextMatch() }} style={{
+            fontSize: '12px', padding: '4px 8px', width: '140px', borderRadius: '6px',
+            border: '0.5px solid var(--color-border-tertiary)', background: 'var(--color-background-secondary)',
+            color: 'var(--color-text-primary)', outline: 'none'
+          }} />
+          {matchCount > 0 && <span style={{ fontSize: '11px', color: 'var(--color-text-secondary)' }}>{currentMatch}/{matchCount}</span>}
+          {matchCount > 1 && (
+            <>
+              <button onClick={prevMatch} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '13px', color: 'var(--color-text-secondary)' }}>∧</button>
+              <button onClick={nextMatch} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '13px', color: 'var(--color-text-secondary)' }}>∨</button>
+            </>
+          )}
         </div>
-    );
-};
+      </div>
 
-const NoteEditor = () => {
-    const { noteId } = useParams();
-    const navigate = useNavigate();
+      {/* WORKSPACE */}
+      <div ref={workspaceRef} style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative' }}>
+        {/* EDITOR */}
+        <div style={{ width: sourceVisible ? `${editorWidth}%` : '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
+          {showTOC && (
+            <div style={{
+              position: 'absolute', top: '8px', left: '8px', background: 'var(--color-background-primary)',
+              border: '0.5px solid var(--color-border-tertiary)', borderRadius: '8px', padding: '10px',
+              zIndex: 10, minWidth: '200px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+            }}>
+              <div style={{ fontSize: '11px', fontWeight: 500, color: 'var(--color-text-secondary)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Contents</div>
+              {tocItems.map((item, i) => (
+                <div key={i} style={{ fontSize: '12px', padding: '4px 8px', borderRadius: '5px', cursor: 'pointer', color: 'var(--color-text-primary)' }} onClick={() => setShowTOC(false)}>{item}</div>
+              ))}
+            </div>
+          )}
 
-    const [content, setContent] = useState('');
-    const [lineHeight, setLineHeight] = useState('1.5');
-
-    // Support Multiple Documents for the right panel
-    const [documents, setDocuments] = useState([]);
-    const [activeDocIndex, setActiveDocIndex] = useState(0);
-    const [sourceMdContent, setSourceMdContent] = useState("");
-
-    const activeDoc = documents[activeDocIndex] || null;
-    const pdfId = activeDoc?.pdfId || '';
-    const pdfUrl = activeDoc?.url || '';
-    const isPptx = activeDoc?.isPptx || false;
-
-    const [currentNoteId, setCurrentNoteId] = useState(noteId);
-    const [userId, setUserId] = useState('test_user');
-
-    const [showSaveModal, setShowSaveModal] = useState(false);
-    const [chatInput, setChatInput] = useState('');
-    const [isProcessing, setIsProcessing] = useState(false);
-    const [zoomLevel, setZoomLevel] = useState(75);
-
-    // Selection & Refinement
-    const [selection, setSelection] = useState(null);
-    const [refinementResult, setRefinementResult] = useState(null);
-
-    // Context Menu
-    const [contextMenu, setContextMenu] = useState(null);
-    const [tempSelection, setTempSelection] = useState(null);
-
-    // Resizable split screen
-    const [leftPanelWidth, setLeftPanelWidth] = useState(50); // percentage
-    const [isResizing, setIsResizing] = useState(false);
-    const [selectedLanguage, setSelectedLanguage] = useState("English");
-    const [searchText, setSearchText] = useState('');
-
-    const chatInputRef = useRef(null);
-    const quillRef = useRef(null); // Ref for ReactQuill
-
-    const [rightView, setRightView] = useState('pdf'); // 'pdf' | 'preview'
-
-    useEffect(() => {
-        const savedNote = localStorage.getItem('currentNote');
-        if (savedNote) {
-            const parsed = JSON.parse(savedNote);
-            let loadedContent = parsed.content || '';
-
-            // Clean backend artifact wrappers
-            loadedContent = loadedContent
-                .replace(/End_of_Notes/g, '')
-                .replace(/^```markdown\n|```$/g, '')
-                .replace(/^```\n|```$/g, '')
-                .replace(/^# .*?\n/, '')    // Strip leading H1 title
-                .replace(/^> 📚.*?\n/m, '') // Strip legacy metadata line
-                .trim();
-
-            // Check if content is already HTML (ignore image/div wrappers from synthesis)
-            const isHTML = loadedContent.includes('<p>') || 
-                           loadedContent.includes('<h1') || 
-                           loadedContent.includes('<h2') ||
-                           loadedContent.includes('<li') ||
-                           loadedContent.includes('<table');
+          <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <style>{`
+              .note-editor-body {
+                flex: 1;
+                overflow-y: auto;
+                padding: 24px 40px;
+                font-size: 14px;
+                line-height: 1.7;
+                outline: none;
+                min-height: 0;
+              }
+              .note-editor-body h1 {
+                font-size: 22px;
+                font-weight: 600;
+                margin: 0 0 16px;
+                color: #1a1523;
+              }
+              .note-editor-body h2 {
+                font-size: 17px;
+                font-weight: 600;
+                color: #3C3489;
+                margin: 24px 0 10px;
+                padding-bottom: 5px;
+                border-bottom: 1px solid #EDE9FE;
+              }
+              .note-editor-body h3 {
+                font-size: 14px;
+                font-weight: 600;
+                margin: 16px 0 8px;
+                color: #1a1523;
+              }
+              .note-editor-body ul {
+                list-style: none;
+                padding: 0;
+                margin: 0 0 12px;
+              }
+              .note-editor-body li {
+                margin-bottom: 8px;
+                padding: 7px 12px;
+                border-left: 2.5px solid #EDE9FE;
+                border-radius: 0 6px 6px 0;
+                background: #FAFAF9;
+                cursor: pointer;
+                transition: all 0.15s;
+              }
+              .note-editor-body li:hover {
+                border-left-color: #7C3AED;
+                background: #EDE9FE;
+              }
+              .note-editor-body strong {
+                font-weight: 600;
+                color: #1a1523;
+              }
+              .note-editor-body code {
+                background: #f3f0ff;
+                padding: 2px 5px;
+                border-radius: 3px;
+                font-size: 12px;
+                font-family: monospace;
+              }
+              .note-editor-body pre {
+                background: #1e1e2e;
+                color: #cdd6f4;
+                padding: 14px;
+                border-radius: 8px;
+                font-size: 12px;
+                font-family: monospace;
+                overflow-x: auto;
+                margin: 12px 0;
+              }
+              .note-editor-body blockquote {
+                border-left: 3px solid #7C3AED;
+                padding-left: 14px;
+                color: #6B6780;
+                font-style: italic;
+                margin: 12px 0;
+              }
+              .note-editor-body ol {
+                list-style: decimal;
+                padding-left: 24px;
+                margin-bottom: 12px;
+              }
+              .note-editor-body ol li {
+                margin-bottom: 8px;
+                padding: 6px 10px;
+                border-left: 2.5px solid #EDE9FE;
+                border-radius: 0 6px 6px 0;
+                background: none;
+              }
+              .note-editor-body p {
+                margin-bottom: 10px;
+              }
+            `}</style>
             
-            if (!isHTML || (loadedContent.includes('##') && !loadedContent.includes('<p>'))) {
-                // Content is markdown (or mixed) — configure marked properly
-                marked.setOptions({
-                    breaks: true,
-                    gfm: true,
-                    headerIds: false,
-                });
-                loadedContent = marked.parse(loadedContent);
-            }
-            
-            setContent(loadedContent);
-            if (!currentNoteId) setCurrentNoteId(parsed.noteId);
-
-            const absolutePdfUrl = parsed.pdfUrl?.startsWith('/')
-                ? `http://127.0.0.1:8000${parsed.pdfUrl}`
-                : parsed.pdfUrl;
-
-            // CHANGE 1: Load all real uploaded files from localStorage
-            let docs = [];
-            if (parsed.filename && absolutePdfUrl) {
-                docs.push({ id: 'primary', name: parsed.filename, url: absolutePdfUrl, pdfId: parsed.pdfId });
-            }
-
-            if (parsed.allFiles && Array.isArray(parsed.allFiles)) {
-                // If there are multiple files, allFiles will contain them
-                // We map them to the documents state
-                parsed.allFiles.forEach((file, idx) => {
-                    const fileUrl = file.pdf_url?.startsWith('/')
-                        ? `http://127.0.0.1:8000${file.pdf_url}`
-                        : file.pdf_url;
-                    
-                    // Avoid duplicating the primary file if it's already there
-                    if (file.pdf_id !== parsed.pdfId) {
-                        docs.push({
-                            id: file.pdf_id,
-                            name: file.filename || `Document ${idx + 1}`,
-                            url: fileUrl,
-                            pdfId: file.pdf_id
-                        });
-                    }
-                });
-            }
-
-            setDocuments(docs);
-
-            // Fetch actual content if missing from localStorage but we have a noteId
-            const activeNoteId = noteId || parsed.noteId;
-            if (!loadedContent && activeNoteId) {
-                getNote(activeNoteId).then(data => {
-                    let fetchedContent = data.content || '';
-                    fetchedContent = fetchedContent
-                        .replace(/End_of_Notes/g, '')
-                        .replace(/^```markdown\n|```$/g, '')
-                        .replace(/^```\n|```$/g, '')
-                        .replace(/^# .*?\n/, '')    // Strip leading H1 title
-                        .replace(/^> 📚.*?\n/m, '') // Strip legacy metadata line
-                        .trim();
-
-                    const isFetchedHTML = fetchedContent.includes('<p>') || fetchedContent.includes('<h1');
-                    if (!isFetchedHTML || (fetchedContent.includes('##') && !fetchedContent.includes('<p>'))) {
-                        marked.setOptions({ breaks: true, gfm: true, headerIds: false });
-                        fetchedContent = marked.parse(fetchedContent);
-                    }
-                    setContent(fetchedContent);
-                }).catch(err => console.error("Error fetching note content:", err));
-            }
-
-            // If it's a markdown source, fetch the content to display
-            if (absolutePdfUrl && absolutePdfUrl.toLowerCase().endsWith('.md')) {
-                fetch(absolutePdfUrl)
-                    .then(res => res.text())
-                    .then(text => setSourceMdContent(text))
-                    .catch(err => console.error("Error fetching source MD:", err));
-            }
-        } else {
-            if (!ENABLE_AI) setContent('');
-            // Fallback mocks if navigating directly without a real upload
-            setDocuments([
-                { id: 1, name: "Neural Networks Intro.pdf", url: "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf", pdfId: "pdf-123" },
-                { id: 2, name: "Advanced ML Vectors.pdf", url: "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf", pdfId: "pdf-456" }
-            ]);
-        }
-    }, [noteId]);
-
-    // Custom toolbar modules for Quill to disable default toolbar
-    const modules = {
-        toolbar: false,
-    };
-
-    // Resizing Logic
-    const startResizing = (e) => {
-        setIsResizing(true);
-        document.body.style.cursor = 'col-resize';
-    };
-
-    useEffect(() => {
-        const handleMouseMove = (e) => {
-            if (!isResizing) return;
-
-            // Calculate width as percentage of the window (adjust for Sidebar)
-            const sidebarWidth = 320;
-            const availableWidth = window.innerWidth - sidebarWidth;
-            const newLeftWidth = ((e.clientX - sidebarWidth) / availableWidth) * 100;
-
-            // Constrain width
-            if (newLeftWidth > 20 && newLeftWidth < 80) {
-                setLeftPanelWidth(newLeftWidth);
-            }
-        };
-
-        const stopResizing = () => {
-            setIsResizing(false);
-            document.body.style.cursor = 'default';
-        };
-
-        if (isResizing) {
-            window.addEventListener('mousemove', handleMouseMove);
-            window.addEventListener('mouseup', stopResizing);
-        }
-
-        return () => {
-            window.removeEventListener('mousemove', handleMouseMove);
-            window.removeEventListener('mouseup', stopResizing);
-        };
-    }, [isResizing]);
-
-    // --- Toolbar Functions ---
-    const handleToolbarAction = (action, value) => {
-        if (!quillRef.current) return;
-        const editor = quillRef.current.getEditor();
-        const currentFormats = editor.getFormat();
-
-        switch (action) {
-            case 'bold': editor.format('bold', !currentFormats.bold); break;
-            case 'italic': editor.format('italic', !currentFormats.italic); break;
-            case 'underline': editor.format('underline', !currentFormats.underline); break;
-            case 'highlight': editor.format('background', value === 'transparent' ? false : value || 'yellow'); break;
-            case 'list': editor.format('list', currentFormats.list === 'bullet' ? false : 'bullet'); break;
-            case 'link':
-                const range = editor.getSelection();
-                if (range) {
-                    const url = prompt('Enter link URL:');
-                    if (url) editor.format('link', url);
-                } else {
-                    alert('Select text first to add a link');
-                }
-                break;
-            default: break;
-        }
-
-        // Delay to allow quill to update its internal HTML before saving sync
-        setTimeout(() => {
-            const newText = editor.root.innerHTML;
-            setContent(newText);
-            localStorage.setItem('currentNote', JSON.stringify({
-                content: newText,
-                pdfId,
-                noteId: currentNoteId
-            }));
-        }, 100);
-    };
-
-    const downloadNote = () => {
-        if (!content) {
-            alert('No note content to download.');
-            return;
-        }
-        
-        const turndownService = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced' });
-        const markdown = turndownService.turndown(content);
-        
-        const blob = new Blob([markdown], { type: 'text/markdown' });
-        const url = URL.createObjectURL(blob);
-        
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `Study_Notes.md`;
-        document.body.appendChild(a);
-        a.click();
-        
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-    };
-
-    const downloadAsPDF = () => {
-        if (!content) return;
-        setIsProcessing(true);
-        
-        const script = document.createElement('script');
-        script.src = "https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js";
-        script.onload = () => {
-            const wrapper = document.createElement('div');
-            // Hide the wrapper from view but keep it in DOM for html2pdf
-            wrapper.style.position = 'absolute';
-            wrapper.style.left = '-9999px';
-            wrapper.style.top = '-9999px';
-            wrapper.style.fontFamily = '-apple-system, sans-serif';
-            wrapper.style.color = '#1a1523';
-            wrapper.style.lineHeight = '1.7';
-            wrapper.style.padding = '20px';
-            wrapper.style.width = '800px';
-            wrapper.innerHTML = `
-              <style>
-                h1 { font-size: 22px; border-bottom: 2px solid #7C3AED; padding-bottom: 8px; }
-                h2 { font-size: 17px; color: #3C3489; margin-top: 28px; }
-                li { margin-bottom: 8px; }
-                code { background: #f3f0ff; padding: 2px 5px; border-radius: 3px; font-size: 12px; }
-                pre { background: #1e1e2e; color: #cdd6f4; padding: 14px; border-radius: 8px; }
-                hr { border: none; border-top: 1px solid #e4deff; }
-                blockquote { border-left: 3px solid #7C3AED; padding-left: 12px; color: #6B6780; }
-                img { max-width: 100%; height: auto; border-radius: 8px; margin: 16px 0; }
-              </style>
-              <div>${content}</div>
-            `;
-            document.body.appendChild(wrapper);
-
-            const opt = {
-                margin: [10, 10, 10, 10],
-                filename: 'Study_Notes.pdf',
-                image: { type: 'jpeg', quality: 0.98 },
-                html2canvas: { scale: 2, useCORS: true, logging: false },
-                jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-            };
-
-            // @ts-ignore
-            window.html2pdf().set(opt).from(wrapper).save().then(() => {
-                document.body.removeChild(wrapper);
-                setIsProcessing(false);
-            }).catch(err => {
-                console.error("PDF generation failed:", err);
-                document.body.removeChild(wrapper);
-                setIsProcessing(false);
-                alert("Failed to generate PDF. Please try again.");
-            });
-        };
-        document.body.appendChild(script);
-    };
-
-    const handleQuillChangeSelection = (range, source, editor) => {
-        if (range && range.length > 0) {
-            const selectedText = editor.getText(range.index, range.length);
-            setTempSelection({ text: selectedText, start: range.index, length: range.length, range });
-        } else {
-            setTempSelection(null);
-        }
-    };
-
-    const handleContextMenu = (e) => {
-        // Allow context menu if AI is enabled OR if there is a selection to refine
-        if (!ENABLE_AI && !tempSelection) return;
-
-        e.preventDefault();
-        if (tempSelection) {
-            setContextMenu({ x: e.clientX, y: e.clientY });
-        }
-    };
-
-    const closeContextMenu = () => {
-        setContextMenu(null);
-    };
-
-    const lockSelection = () => {
-        if (!quillRef.current || !tempSelection) return;
-        setSelection(tempSelection);
-        setContextMenu(null);
-
-        // Apply visual highlight to the selection natively using Quill formatting
-        const editor = quillRef.current.getEditor();
-        editor.formatText(tempSelection.start, tempSelection.length, 'background', '#FFF176');
-    };
-
-    const clearSelection = () => {
-        if (selection && quillRef.current) {
-            const editor = quillRef.current.getEditor();
-            // Remove highlighting
-            editor.formatText(selection.start, selection.length, 'background', false);
-        }
-        setSelection(null);
-        setTempSelection(null);
-    };
-
-    const handleSearch = () => {
-        if (!quillRef.current || !searchText.trim()) return;
-        const editor = quillRef.current.getEditor();
-        const text = editor.getText().toLowerCase();
-
-        let query = searchText.toLowerCase();
-        let startIndex = 0;
-
-        // If there's an existing selection, start searching *after* it
-        if (selection && selection.length > 0) {
-            startIndex = selection.start + selection.length;
-        }
-
-        let index = text.indexOf(query, startIndex);
-
-        // Wrap around if not found
-        if (index === -1 && startIndex > 0) {
-            index = text.indexOf(query, 0);
-        }
-
-        if (index !== -1) {
-            editor.setSelection(index, query.length);
-        } else {
-            alert("No matches found in document.");
-        }
-    };
-
-    const handleChatSubmit = async () => {
-        if (!chatInput.trim()) return;
-        setIsProcessing(true);
-
-        try {
-            if (selection) {
-                // CASE 1 — When selection exists (tag and refine)
-                const result = await refineText(pdfId, selection.text, chatInput);
-                const rawResult = result.refined_text || result;
-                const refinedStr = rawResult?.refined_content
-                    || rawResult?.refined_text
-                    || (rawResult?.error ? `Error: ${rawResult.error}` : null)
-                    || "Error: Failed to synthesize.";
-                setRefinementResult({
-                    original: selection.text,
-                    refined: refinedStr,
-                    instruction: chatInput,
-                    isFullNote: false
-                });
-            } else {
-                // CASE 2 — When NO selection (whole note discussion)
-                const result = await discussNote(content, chatInput, pdfId);
-                setRefinementResult({
-                    original: "Full Note Discussion",
-                    refined: result.refined_content,
-                    instruction: chatInput,
-                    isFullNote: true
-                });
-            }
-        } catch (error) {
-            console.error("Error in chat submit:", error);
-            alert("Failed to process request.");
-        } finally {
-            setIsProcessing(false);
-            setChatInput('');
-        }
-    };
-
-    /* handleScroll removed as we're switching to a unified page wrapper structure */
-
-    const applyRefinement = async (finalRefinedText, history = [], insertionType = 'replace') => {
-        const editor = quillRef.current?.getEditor();
-        if (!editor) return;
-
-        const isFullNote = refinementResult?.isFullNote;
-        const currentSelection = selection ? { ...selection } : null;
-
-        setRefinementResult(null); // Closes Modal!
-        if (currentSelection) clearSelection();
-
-        let metaTopic = refinementResult?.instruction || 'Refined Update';
-        let metaDescription = '';
-        if (history && history.length > 0) {
-            const prompts = history.map(h => h.prompt);
-            try {
-                const summaryResponse = await summarizePrompts(prompts, currentSelection?.text || 'Full Note');
-                const combined = summaryResponse.topic || '';
-                const parts = combined.split('||');
-                metaTopic = parts[0]?.trim() || prompts.join(' → ');
-                metaDescription = parts[1]?.trim() || '';
-            } catch (e) {
-                metaTopic = prompts.join(' → ');
-                metaDescription = '';
-            }
-        }
-
-        let combinedHtml = "";
-        
-        const cleanRefinedText = finalRefinedText
-            .replace(/End_of_Notes/g, '')
-            .replace(/^```markdown\n|^```\n|```$/gm, '')
-            .trim();
-        const parsedMarkdown = marked.parse(cleanRefinedText);
-
-        if (insertionType === 'insert') {
-            combinedHtml = `
-                <p><br></p>
-                <div style="border-left: 4px solid #2F6CF6; background: #f8faff; padding: 16px; margin: 12px 0; border-radius: 4px;">
-                    <strong style="color: #2F6CF6; font-size: 14px; display: block; margin-bottom: 4px;">✨ ${metaTopic}</strong>
-                    ${metaDescription ? `<em style="color: #666; font-size: 12px; display: block; margin-bottom: 8px;">${metaDescription}</em>` : ''}
-                    <div style="font-size: 15px; line-height: 1.6;">${parsedMarkdown}</div>
-                </div>
-                <p><br></p>
-            `;
-
-            if (currentSelection) {
-                // Insert right below selection
-                editor.insertText(currentSelection.start + currentSelection.length, '\n');
-                editor.clipboard.dangerouslyPasteHTML(currentSelection.start + currentSelection.length + 1, combinedHtml);
-            } else {
-                // Append to end of document (for full note discussion)
-                const length = editor.getLength();
-                editor.clipboard.dangerouslyPasteHTML(length, combinedHtml);
-            }
-        } else {
-            // Replace logic
-            combinedHtml = parsedMarkdown;
-            if (currentSelection) {
-                editor.deleteText(currentSelection.start, currentSelection.length);
-                editor.clipboard.dangerouslyPasteHTML(currentSelection.start, combinedHtml);
-            } else {
-                // For full note, maybe replace everything? 
-                // Usually for full note discussion, 'insert' is safer, 
-                // but if user clicks replace, we replace the whole content.
-                editor.root.innerHTML = combinedHtml;
-            }
-        }
-
-        const newContent = editor.root.innerHTML;
-        setContent(newContent);
-    };
-
-    return (
-        <div className={styles.pageContainer} onClick={closeContextMenu}>
             <div
-                id="export-content"
-                style={{
-                    position: 'absolute',
-                    top: '0',
-                    left: '0',
-                    width: '210mm',
-                    padding: '20mm',
-                    backgroundColor: 'white',
-                    color: 'black',
-                    fontFamily: 'Inter, sans-serif',
-                    fontSize: '12pt',
-                    zIndex: -1000,
-                    opacity: 0,
-                    pointerEvents: 'none'
-                }}
-            >
-                <div
-                    className="ql-editor"
-                    style={{ padding: 0, overflow: 'visible', color: 'black' }}
-                    dangerouslySetInnerHTML={{ __html: content }}
-                />
-            </div>
+              ref={editorRef}
+              className="note-editor-body"
+              contentEditable={true}
+              suppressContentEditableWarning={true}
+              onInput={(e) => setEditorContent(e.currentTarget.innerHTML)}
+              onContextMenu={(e) => {
+                const selection = window.getSelection()
+                const text = selection ? selection.toString().trim() : ''
+                if (text.length >= 3) {
+                  e.preventDefault()
+                  setContextMenu({
+                    visible: true,
+                    x: e.clientX,
+                    y: e.clientY,
+                    text: text
+                  })
+                }
+              }}
+            />
+          </div>
 
-            <div className={styles.header}>
-                <div className={styles.brand}>
-                    <div className={styles.logoBox}>N</div>
-                    <span>NeuraNote</span>
-                </div>
-
-                <div className={styles.headerActions}>
-                    <div className={styles.actionGroup}>
-                        <div className={styles.saveStatus}>
-                            {isProcessing ? (
-                                <><Loader2 size={14} className={styles.spin} /> Processing...</>
-                            ) : (
-                                <><Clock size={14} /> Saved</>
-                            )}
-                        </div>
-                        <div className={styles.actionGroup}>
-                            <button className={styles.headerBtn} onClick={downloadNote} style={{ padding: '8px 16px', background: '#f5f5f5', border: '1px solid #ddd', borderRadius: '6px', cursor: 'pointer' }}>
-                                Download .md
-                            </button>
-                            <button className={styles.headerBtn} onClick={downloadAsPDF} disabled={isProcessing} style={{ padding: '8px 16px', background: '#f5f5f5', border: '1px solid #ddd', borderRadius: '6px', cursor: 'pointer' }}>
-                                {isProcessing ? 'Generating...' : 'Download PDF'}
-                            </button>
-                            <button className={styles.primaryBtn} onClick={() => setShowSaveModal(true)}>Save</button>
-                        </div>
-                    </div>
-                    <div className={styles.zoomControls}>
-                        <button className={styles.iconBtn} onClick={() => setZoomLevel(z => Math.max(z - 10, 25))}><ZoomOut size={16} /></button>
-                        <span className={styles.zoomLevel}>{zoomLevel}%</span>
-                        <button className={styles.iconBtn} onClick={() => setZoomLevel(z => Math.min(z + 10, 200))}><ZoomIn size={16} /></button>
-                    </div>
-                </div>
-            </div>
-
-            <div className={`${styles.mainArea} ${isResizing ? styles.isResizing : ''}`}>
-                {/* EDITOR PANEL (NOW LEFT) */}
-                <div className={styles.leftPanel} style={{ width: `${leftPanelWidth}%`, flexShrink: 0, background: '#F8F9FA' }}>
-                    <div className={styles.editorToolbar}>
-                        <div className={styles.formatGroup}>
-                            <button className={styles.formatBtn} onMouseDown={(e) => { e.preventDefault(); handleToolbarAction('bold'); }} title="Bold"><Bold size={18} /></button>
-                            <button className={styles.formatBtn} onMouseDown={(e) => { e.preventDefault(); handleToolbarAction('italic'); }} title="Italic"><Italic size={18} /></button>
-                            <button className={styles.formatBtn} onMouseDown={(e) => { e.preventDefault(); handleToolbarAction('underline'); }} title="Underline"><Underline size={18} /></button>
-
-                            <div className={styles.spacingWrapper} title="Highlight Color">
-                                <Highlighter size={16} className={styles.spacingIcon} />
-                                <select
-                                    className={styles.spacingSelect}
-                                    onChange={(e) => {
-                                        handleToolbarAction('highlight', e.target.value);
-                                        e.target.value = '';
-                                    }}
-                                >
-                                    <option value="">Highlight...</option>
-                                    <option value="#FFF176">Yellow</option>
-                                    <option value="#A5D6A7">Green</option>
-                                    <option value="#90CAF9">Blue</option>
-                                    <option value="#F48FB1">Pink</option>
-                                    <option value="#FFCC80">Orange</option>
-                                    <option value="transparent">Clear</option>
-                                </select>
-                            </div>
-
-                            <div className={styles.divider}></div>
-                            <button className={styles.formatBtn} onMouseDown={(e) => { e.preventDefault(); handleToolbarAction('list'); }} title="List"><List size={18} /></button>
-                            <button className={styles.formatBtn} onMouseDown={(e) => { e.preventDefault(); handleToolbarAction('link'); }} title="Link"><LinkIcon size={18} /></button>
-
-                            <div className={styles.divider}></div>
-                            <div className={styles.spacingWrapper} title="Line Spacing">
-                                <ArrowUpDownIcon size={16} className={styles.spacingIcon} />
-                                <select
-                                    className={styles.spacingSelect}
-                                    value={lineHeight}
-                                    onChange={(e) => setLineHeight(e.target.value)}
-                                >
-                                    <option value="1.0">1.0</option>
-                                    <option value="1.15">1.15</option>
-                                    <option value="1.5">1.5</option>
-                                    <option value="2.0">2.0</option>
-                                    <option value="2.5">2.5</option>
-                                </select>
-                            </div>
-                            <div style={{ marginLeft: "10px", display: "flex", alignItems: "center", background: "white", borderRadius: "6px", border: "1px solid #EAEAEA", padding: "4px 8px" }}>
-                                <input
-                                    type="text"
-                                    placeholder="Find text..."
-                                    value={searchText}
-                                    onChange={(e) => setSearchText(e.target.value)}
-                                    onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                                    style={{ border: 'none', outline: 'none', fontSize: '13px', width: '130px', background: "transparent" }}
-                                />
-                                <div onClick={handleSearch} style={{ cursor: "pointer", color: "#8E9297", display: "flex", alignItems: "center" }}>
-                                    <Search size={14} />
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className={styles.editorContainer}>
-                        <div className={styles.editorPage} style={{ lineHeight: lineHeight }} onContextMenu={handleContextMenu}>
-                            {/* PREMIUM HEADER AREA */}
-                            <div className={styles.premiumNoteHeader}>
-                                <h1 className={styles.noteTitleDisplay}>Study Notes</h1>
-                                <div className={styles.noteMetadataRow}>
-                                    <div className={styles.metaBadge}>
-                                        <BookOpen size={14} />
-                                        <span>{documents.length} document(s)</span>
-                                    </div>
-                                    <div className={styles.metaDivider}></div>
-                                    <div className={styles.metaBadge}>
-                                        <Layers size={14} />
-                                        <span>{(content.match(/<h2|## /g) || []).length} chapters</span>
-                                    </div>
-                                    <div className={styles.metaDivider}></div>
-                                    <div className={styles.metaBadge}>
-                                        <Hash size={14} />
-                                        <span>{(content.match(/<h3|### /g) || []).length} sections</span>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <ReactQuill
-                                ref={quillRef}
-                                theme="snow"
-                                modules={modules}
-                                value={content}
-                                onChange={setContent}
-                                onChangeSelection={handleQuillChangeSelection}
-                                className={styles.editorQuill}
-                                placeholder="Start typing your note here..."
-                            />
-                        </div>
-                    </div>
-
-                    {selection && (
-                        <div className={styles.selectionIndicator}>
-                            <span className={styles.selectionLabel}>Tagged:</span>
-                            <span className={styles.selectionText}>"{selection.text.substring(0, 50)}..."</span>
-                            <button className={styles.clearSelectionBtn} onClick={clearSelection}><X size={12} /></button>
-                        </div>
-                    )}
-
-                    {(ENABLE_AI || selection) && (
-                        <div className={styles.bottomBarContainer}>
-                            <div className={styles.bottomBar}>
-                                <div className={styles.inputWrapper}>
-                                    <input
-                                        ref={chatInputRef}
-                                        type="text"
-                                        placeholder={selection 
-                                            ? "Ask about tagged text: explain more, give example..." 
-                                            : "Ask anything about your note content..."}
-                                        value={chatInput}
-                                        onChange={(e) => setChatInput(e.target.value)}
-                                        onKeyDown={(e) => e.key === 'Enter' && handleChatSubmit()}
-                                        disabled={isProcessing}
-                                    />
-                                    <button className={styles.iconBtn}><Mic size={18} /></button>
-                                </div>
-                                <button className={styles.sendBtn} onClick={handleChatSubmit} disabled={isProcessing}>
-                                    {isProcessing ? <Loader2 size={18} className={styles.spin} /> : 'Refine'}
-                                </button>
-                            </div>
-                        </div>
-                    )}
-                </div>
-
-                {/* Divider Line */}
-                <div
-                    className={`${styles.resizer} ${isResizing ? styles.isResizing : ''}`}
-                    onMouseDown={startResizing}
-                />
-
-                {/* PDF / PREVIEW PANEL (NOW RIGHT) */}
-                <div className={styles.rightPanel} style={{ flex: 1, pointerEvents: isResizing ? 'none' : 'auto' }}>
-                    <div className={styles.pdfToolbar}>
-
-                        {/* NEW DOCUMENT SELECTOR */}
-                        <select
-                            className={styles.docSelector}
-                            value={activeDocIndex}
-                            onChange={(e) => setActiveDocIndex(Number(e.target.value))}
-                        >
-                            {documents.map((doc, idx) => (
-                                <option key={idx} value={idx}>{doc.name}</option>
-                            ))}
-                        </select>
-
-                        <div className={styles.viewToggleGroup} style={{ marginLeft: 0 }}>
-                            <button
-                                className={`${styles.viewToggleBtn} ${rightView === 'pdf' ? styles.active : ''}`}
-                                onClick={() => setRightView('pdf')}
-                            >
-                                {isPptx ? 'PowerPoint View' : 'PDF Source'}
-                            </button>
-                            <button
-                                className={`${styles.viewToggleBtn} ${rightView === 'preview' ? styles.active : ''}`}
-                                onClick={() => setRightView('preview')}
-                            >
-                                Live Preview
-                            </button>
-                        </div>
-                    </div>
-                    <div className={styles.pdfContent}>
-                        {rightView === 'pdf' ? (
-                            <div className={styles.markdownWrapper} style={{ height: '100%' }}>
-                                {pdfUrl ? (
-                                    isPptx ? (
-                                        <div className={styles.emptyState} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                                            <div>PowerPoint files cannot be previewed directly.</div>
-                                            <a
-                                                href={pdfUrl}
-                                                download
-                                                className={styles.primaryBtn}
-                                                style={{ textDecoration: 'none', textAlign: 'center' }}
-                                            >
-                                                Download Slides
-                                            </a>
-                                        </div>
-                                    ) : pdfUrl.toLowerCase().endsWith('.md') ? (
-                                        <div style={{ padding: '20px', overflowY: 'auto', height: '100%', background: 'white' }}>
-                                            <div dangerouslySetInnerHTML={{ __html: marked.parse(sourceMdContent || "# Loading Source...") }} />
-                                        </div>
-                                    ) : (
-                                        <iframe
-                                            src={pdfUrl}
-                                            className={styles.pdfFrame}
-                                            title="PDF Viewer"
-                                        />
-                                    )
-                                ) : (
-                                    <div className={styles.emptyState}>No source file loaded.</div>
-                                )}
-                            </div>
-                        ) : (
-                            <div className={styles.markdownWrapper} style={{
-                                height: '100%',
-                                overflowY: 'auto',
-                                fontSize: `${zoomLevel / 100 * 15}px`,
-                            }}>
-                                <div
-                                    className={styles.markdownContent}
-                                    style={{ padding: 0, overflow: 'visible', minHeight: 'auto' }}
-                                    dangerouslySetInnerHTML={{ __html: content || "Start typing in the editor to see the preview..." }}
-                                />
-                            </div>
-                        )}
-
-                    </div>
-                </div>
-            </div>
-
-            {contextMenu && (
-                <div
-                    className={styles.contextMenu}
-                    style={{ top: contextMenu.y, left: contextMenu.x }}
-                >
-                    <button onClick={lockSelection}>
-                        <Wand2 size={14} /> Tag & Refine Selection
-                    </button>
-                    <button onClick={closeContextMenu}>
-                        <X size={14} /> Cancel
-                    </button>
-                </div>
-            )}
-
-            {showSaveModal && (
-                <SaveModal
-                    noteId={currentNoteId}
-                    onClose={() => setShowSaveModal(false)}
-                    onSave={async (title) => {
-                        try {
-                            const noteTitle = title || "Untitled Note";
-                            if (currentNoteId) {
-                                // Update existing note
-                                await updateNote(currentNoteId, content);
-                                alert(`Note "${noteTitle}" updated in PostgreSQL! ✅`);
-                            } else {
-                                // Handle creating a brand new note for the demo
-                                const result = await createNote("test_user", noteTitle, content, pdfId);
-                                if (result && result.note_id) {
-                                    setCurrentNoteId(result.note_id);
-                                    // Also update localStorage so it persists on refresh
-                                    const currentNote = JSON.parse(localStorage.getItem('currentNote') || '{}');
-                                    currentNote.noteId = result.note_id;
-                                    localStorage.setItem('currentNote', JSON.stringify(currentNote));
-
-                                    alert(`Note "${noteTitle}" created and saved to PostgreSQL! ✅`);
-                                }
-                            }
-                        } catch (err) {
-                            console.error("Failed to save to DB", err);
-                            alert("Error saving to PostgreSQL.");
-                        }
-                        setShowSaveModal(false);
-                    }}
-                />
-            )}
-
-            {refinementResult && (
-                <RefineModal
-                    originalText={refinementResult.isFullNote 
-                        ? refinementResult.instruction 
-                        : refinementResult.original}
-                    initialRefinedText={refinementResult.refined}
-                    currentInstruction={refinementResult.instruction}
-                    pdfId={pdfId}
-                    isFullNote={refinementResult.isFullNote}
-                    content={content}
-                    onClose={() => setRefinementResult(null)}
-                    onApply={(finalRefinedText, history, insertionType) => applyRefinement(finalRefinedText, history, insertionType)}
-                />
-            )}
+          {/* REFINE BAR */}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 16px',
+            borderTop: '0.5px solid var(--color-border-tertiary)', background: 'var(--color-background-secondary)', flexShrink: 0
+          }}>
+            <input
+              value={refineInput}
+              onChange={e => setRefineInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') handleRefineClick() }}
+              placeholder="Select text in note then click Refine, or ask a question..."
+              style={{
+                flex: 1, fontSize: '13px', padding: '8px 14px', borderRadius: '24px',
+                border: '0.5px solid var(--color-border-tertiary)', background: 'var(--color-background-primary)',
+                color: 'var(--color-text-primary)', outline: 'none'
+              }}
+            />
+            <button
+              onClick={handleRefineClick}
+              style={{
+                padding: '8px 20px', borderRadius: '24px', background: '#7C3AED', color: '#fff',
+                border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: 500
+              }}>
+              Refine
+            </button>
+          </div>
         </div>
-    );
-};
 
-export default NoteEditor;
+        {/* DIVIDER */}
+        {sourceVisible && (
+          <div
+            onMouseDown={() => {
+              isDragging.current = true
+              document.body.style.cursor = 'col-resize'
+              document.body.style.userSelect = 'none'
+            }}
+            onDoubleClick={() => {
+              setEditorWidth(prev => prev < 60 ? 70 : 50)
+            }}
+            style={{
+              width: '6px', flexShrink: 0, cursor: 'col-resize', background: 'var(--color-border-tertiary)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center'
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = '#7C3AED'}
+            onMouseLeave={e => { if (!isDragging.current) e.currentTarget.style.background = 'var(--color-border-tertiary)' }}
+          >
+            <div style={{ width: '2px', height: '32px', background: 'rgba(255,255,255,0.4)', borderRadius: '2px' }} />
+          </div>
+        )}
+
+        {/* SOURCE PANEL */}
+        {sourceVisible && (
+          <div style={{
+          width: `${100 - editorWidth}%`, flexShrink: 0, display: 'flex', flexDirection: 'column',
+            borderLeft: '0.5px solid var(--color-border-tertiary)', background: 'var(--color-background-secondary)'
+          }}>
+            <div style={{
+              padding: '8px 12px', borderBottom: '0.5px solid var(--color-border-tertiary)',
+              background: 'var(--color-background-primary)', display: 'flex', alignItems: 'center', gap: '8px'
+            }}>
+              <select
+                value={activeFile?.pdf_url || ''}
+                onChange={e => {
+                  const file = sourceFiles.find(f => f.pdf_url === e.target.value)
+                  if (file) setActiveFile(file)
+                }}
+                style={{
+                  flex: 1, fontSize: '12px', padding: '4px 8px', borderRadius: '5px',
+                  border: '0.5px solid var(--color-border-tertiary)', background: 'var(--color-background-primary)'
+                }}
+              >
+                {sourceFiles.length === 0 && <option value="">No source files</option>}
+                {sourceFiles.map(f => (
+                  <option key={f.pdf_id} value={f.pdf_url}>{f.filename}</option>
+                ))}
+              </select>
+              <button onClick={() => setSourceVisible(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', color: 'var(--color-text-secondary)' }}>✕</button>
+            </div>
+            <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+              {activeFile ? (
+                <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', height: '100%' }}>
+                  <div style={{
+                    fontSize: '10px',
+                    color: '#888',
+                    padding: '4px 12px',
+                    background: '#f5f5f5'
+                  }}>
+                    Loading: {getFullPdfUrl(activeFile)}
+                  </div>
+                  <iframe
+                    key={activeFile.pdf_id}
+                    src={getFullPdfUrl(activeFile)}
+                    style={{
+                      width: '100%',
+                      flex: 1,
+                      border: 'none'
+                    }}
+                    title={activeFile.filename}
+                    onLoad={() => console.log(
+                      '[iframe] Loaded:',
+                      getFullPdfUrl(activeFile)
+                    )}
+                    onError={() => console.error(
+                      '[iframe] Failed:',
+                      getFullPdfUrl(activeFile)
+                    )}
+                  />
+                </div>
+              ) : (
+                <div style={{ padding: '20px', fontSize: '13px', color: 'var(--color-text-secondary)' }}>No source file selected</div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* CONTEXT MENU */}
+      {contextMenu.visible && (
+        <div
+          style={{
+            position: 'fixed', top: contextMenu.y, left: contextMenu.x,
+            background: 'var(--color-background-primary)', border: '0.5px solid var(--color-border-tertiary)',
+            borderRadius: '8px', padding: '4px', zIndex: 1000,
+            boxShadow: '0 4px 12px rgba(0,0,0,0.15)', minWidth: '180px'
+          }}
+          onMouseLeave={() => setContextMenu({ visible: false, x: 0, y: 0 })}
+        >
+          {[
+            {
+              label: '✦ Refine this section', action: () => {
+                setSelectedText(contextMenu.text || '')
+                setShowRefineModal(true)
+                setContextMenu({ visible: false })
+              }
+            },
+            {
+              label: '🟡 Highlight yellow', action: () => {
+                applyHighlight('#FFF9C4')
+                setContextMenu({ visible: false })
+              }
+            },
+            {
+              label: '🟢 Highlight green', action: () => {
+                applyHighlight('#DCFCE7')
+                setContextMenu({ visible: false })
+              }
+            },
+            {
+              label: '🩷 Highlight pink', action: () => {
+                applyHighlight('#FCE7F3')
+                setContextMenu({ visible: false })
+              }
+            },
+            {
+              label: '✕ Remove highlight', action: () => {
+                removeHighlight()
+                setContextMenu({ visible: false })
+              }
+            },
+          ].map((item, i) => (
+            <div
+              key={i} onClick={item.action}
+              style={{
+                padding: '7px 12px', borderRadius: '5px', cursor: 'pointer', fontSize: '12px',
+                color: 'var(--color-text-primary)', display: 'flex', alignItems: 'center', gap: '8px'
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = 'var(--color-background-secondary)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'none'}
+            >
+              {item.label}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* SAVE MODAL */}
+      {showSaveModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
+          <div style={{ width: '340px', background: 'var(--color-background-primary)', borderRadius: '12px', border: '0.5px solid var(--color-border-tertiary)', overflow: 'hidden' }}>
+            <div style={{ padding: '14px 16px', borderBottom: '0.5px solid var(--color-border-tertiary)', fontSize: '14px', fontWeight: 500, color: 'var(--color-text-primary)' }}>Save to folder</div>
+            {folders.length === 0 && <div style={{ padding: '20px', fontSize: '13px', color: 'var(--color-text-secondary)' }}>No folders found. Create a folder in the notebook first.</div>}
+            {folders.map(folder => (
+              <div key={folder.id} onClick={() => confirmSave(folder)} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 16px', cursor: 'pointer', borderBottom: '0.5px solid var(--color-border-tertiary)', fontSize: '13px', color: 'var(--color-text-primary)' }} onMouseEnter={e => e.currentTarget.style.background = '#EDE9FE'} onMouseLeave={e => e.currentTarget.style.background = 'none'}>
+                <span>📁</span><span>{folder.name}</span>
+              </div>
+            ))}
+            <div style={{ padding: '12px 16px', display: 'flex', justifyContent: 'flex-end' }}>
+              <button onClick={() => setShowSaveModal(false)} style={{ padding: '6px 16px', borderRadius: '6px', border: '0.5px solid var(--color-border-tertiary)', background: 'none', cursor: 'pointer', fontSize: '12px', color: 'var(--color-text-secondary)' }}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* REFINE MODAL */}
+      {showRefineModal && (
+        <RefineModal
+          selectedText={selectedText}
+          pdfId={sourceFiles[0]?.pdf_id || ''}
+          noteContent={editorContent}
+          onClose={() => setShowRefineModal(false)}
+          onInsert={(content) => insertRefinedContent(content)}
+          onAppend={(content) => appendRefinedContent(content)}
+        />
+      )}
+
+      {/* TOAST */}
+      {toast && (
+        <div style={{ position: 'fixed', bottom: '24px', left: '50%', transform: 'translateX(-50%)', background: '#1D9E75', color: '#fff', padding: '8px 20px', borderRadius: '20px', fontSize: '13px', fontWeight: 500, zIndex: 200, whiteSpace: 'nowrap' }}>
+          {toast}
+        </div>
+      )}
+    </div>
+  )
+}

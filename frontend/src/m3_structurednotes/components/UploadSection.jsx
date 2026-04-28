@@ -134,6 +134,7 @@ const UploadSection = ({ userId: userIdProp }) => {
 
   const fileInputRef  = useRef(null);
   const pollTimerRef  = useRef(null);
+  const successfulUploadsRef = useRef([]);
 
   // ── Resolve userId ─────────────────────────────────────────
   const userId = userIdProp
@@ -165,17 +166,29 @@ const UploadSection = ({ userId: userIdProp }) => {
         setJobStatus(data.status);
 
         if (data.status === 'done') {
-          setIsProcessing(false);
-          // Store minimal info + file metadata for editor
-          localStorage.setItem('currentNote', JSON.stringify({
-            noteId: data.note_id,
-            filename: allFiles[0]?.filename,
-            pdfUrl: allFiles[0]?.pdf_url,
-            pdfId: allFiles[0]?.pdf_id,
-            allFiles: allFiles
-          }));
-          setTimeout(() => navigate(`/notes/editor/${data.note_id}`), 600);
-
+          const noteId = data.note_id
+          console.log('[Poll] Done! noteId:', noteId)
+          
+          if (!noteId || noteId === '...') {
+            console.error('[Poll] Missing note_id!')
+            setErrorMsg('Note generated but ID missing.')
+            setIsProcessing(false)
+            setJobStatus(null)
+            return
+          }
+          
+          // Store files before navigating
+          if (successfulUploadsRef && 
+              successfulUploadsRef.current) {
+            localStorage.setItem(
+              'currentNoteFiles',
+              JSON.stringify(successfulUploadsRef.current)
+            )
+          }
+          
+          // Navigate with real noteId
+          navigate('/notes/editor/' + noteId)
+          return
         } else if (data.status === 'failed') {
           setIsProcessing(false);
           setErrorMsg(data.error || 'Generation failed. Please try again.');
@@ -309,6 +322,13 @@ const UploadSection = ({ userId: userIdProp }) => {
         throw new Error(`Upload Failed:\n${errorDetails || 'All files failed to upload.'}`);
       }
 
+      if (successfulUploads.length > 0) {
+        localStorage.setItem(
+          'currentPdfId',
+          successfulUploads[0].pdf_id
+        )
+      }
+
       const allPdfIds = successfulUploads.map(f => f.pdf_id);
 
       // Step 3 — Start structured note background job
@@ -329,6 +349,7 @@ const UploadSection = ({ userId: userIdProp }) => {
       setJobStatus(jobData.status || 'queued');
 
       // Step 4 — Poll until done or failed
+      successfulUploadsRef.current = successfulUploads;
       startPolling(newJobId, successfulUploads);
 
     } catch (err) {

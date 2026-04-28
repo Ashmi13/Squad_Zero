@@ -1,6 +1,6 @@
 """
-NeuraNote — Member 3: Structured Note Generation
-services.py — FULL REBUILD (5-Phase Mind Map Pipeline)
+NeuraNote - Member 3: Structured Note Generation
+services.py - FULL REBUILD (5-Phase Mind Map Pipeline)
 """
 
 import os
@@ -59,6 +59,8 @@ class AIService:
         if self._llm is None:
             from langchain_openai import ChatOpenAI
             api_key = (os.getenv("OPENROUTER_API_KEY") or "").strip()
+            print(f"[Auth] API key loaded: {bool(api_key)}")
+            print(f"[Auth] Key length: {len(api_key) if api_key else 0}")
             model_name = (os.getenv("OPENROUTER_MODEL") or "openai/gpt-4o-mini").strip()
             if not api_key:
                 raise EnvironmentError("OPENROUTER_API_KEY is not set.")
@@ -67,9 +69,14 @@ class AIService:
                 api_key=api_key,
                 base_url="https://openrouter.ai/api/v1",
                 model=model_name,
-                temperature=0,
-                timeout=120,
-                max_tokens=800
+                temperature=0.1,
+                timeout=180,
+                max_tokens=1500,
+                default_headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "HTTP-Referer": "http://localhost:5173",
+                    "X-Title": "NeuraNote"
+                }
             )
         return self._llm
 
@@ -160,8 +167,60 @@ class NoteService:
                 text = re.sub(r"^```json\n|```$", "", text, flags=re.MULTILINE).strip()
             return text
         except Exception as e:
-            print(f"[LLM ERROR] {e}")
-            return "{}" if json_mode else ""
+            print(f"[LLM ERROR] {type(e).__name__}")
+            raise e
+
+    def _llm_call_with_retry(
+        self,
+        prompt: str,
+        max_retries: int = 4,
+        initial_wait: int = 15
+    ) -> str:
+        """
+        Central LLM call wrapper with exponential
+        backoff retry on rate limit errors.
+
+        Retries up to max_retries times.
+        Waits initial_wait seconds on first retry.
+        Doubles wait time on each subsequent retry.
+        Returns empty string only if all retries fail.
+        Never raises an exception.
+        """
+        import time
+
+        wait_time = initial_wait
+
+        for attempt in range(max_retries):
+            try:
+                response = self._ai.llm.invoke(prompt)
+                return response.content.strip()
+
+            except Exception as e:
+                error_str = str(e)
+                is_rate_limit = any(x in error_str for x in [
+                    '429', '504', 'rate', 'Rate',
+                    'timeout', 'Timeout', 'overloaded'
+                ])
+
+                if is_rate_limit and \
+                        attempt < max_retries - 1:
+                    print(
+                        f"[LLM] Rate limited. "
+                        f"Waiting {wait_time}s "
+                        f"(attempt {attempt+1}"
+                        f"/{max_retries})..."
+                    )
+                    time.sleep(wait_time)
+                    wait_time *= 2
+                else:
+                    print(
+                        f"[LLM] Failed after "
+                        f"{attempt+1} attempts: "
+                        f"{type(e).__name__}"
+                    )
+                    return ""
+
+        return ""
 
     def safe_parse_json(self, raw: str) -> dict:
         """
@@ -189,7 +248,7 @@ class NoteService:
 
     def _merge_chapters(self, chapters: list) -> list:
         """
-        MANUAL ALGORITHM — Jaccard chapter merging.
+        MANUAL ALGORITHM - Jaccard chapter merging.
         Merges chapters with similar titles using
         Jaccard similarity threshold 0.4.
         Combines their sections.
@@ -225,50 +284,81 @@ class NoteService:
         extraction. Returns parsed dict.
         Instructs LLM to return raw JSON only.
         """
-        prompt = f"""Read this lecture material and extract the topic structure as JSON.
+        prompt = f"""You are an expert academic 
+document analyser.
 
-CRITICAL: Return ONLY raw JSON. 
-Start your response with {{ and end with }}.
-No markdown fences. No explanation. Nothing before {{.
+Your job: Extract the COMPLETE topic structure
+from this lecture material.
 
-Expected JSON structure:
+CRITICAL INSTRUCTION:
+Cover every single heading and subheading in 
+the source document without skipping any concept.
+Do not stop until ALL topics are captured.
+
+Return ONLY raw JSON starting with {{
+No markdown. No explanation. Start with {{ now.
+
 {{
-  "lecture_title": "main lecture name if visible, else empty string",
+  "lecture_title": "short lecture name",
   "chapters": [
     {{
-      "title": "chapter or main heading name",
+      "title": "Short Topic Name — max 5 words",
       "sections": [
         {{
-          "title": "sub-section name",
+          "title": "Sub-topic — max 5 words",
           "content_lines": [
-            "every single content line exactly as written in source"
+            "every content line exactly as written"
           ],
-          "has_code": true,
-          "code_blocks": ["any code examples found"],
-          "image_pages": [1, 3]
+          "has_code": false,
+          "code_blocks": [],
+          "image_pages": [],
+          "is_emphasised": false
         }}
       ]
     }}
   ]
 }}
 
-Rules:
-- Capture EVERY content line. Nothing skipped.
-- content_lines = every bullet, sentence, numbered item exactly as written.
-- Numbered lists stay as "1. text", "2. text".
-- If a chapter has no sub-sections, create one section with title matching the chapter title.
-- has_code is true only if actual code exists.
-- image_pages lists page numbers where images appear.
-- Start response with {{ immediately. Nothing before it.
+RULES FOR TITLES:
+  CORRECT: "Encapsulation", "Types of Inheritance"
+  WRONG: "• Encapsulation is a mechanism where..."
+  Titles must be SHORT TOPIC NAMES only.
+  Content goes in content_lines not in titles.
 
-MATERIAL:
-{chunk_text}"""
-        try:
-            response = self._ai.llm.invoke(prompt)
-            return self.safe_parse_json(response.content)
-        except Exception as e:
-            print(f"[MindMap] LLM call failed: {e}")
+RULES FOR COVERAGE:
+  - Every heading in the source becomes a chapter
+  - Every subheading becomes a section
+  - Every bullet point goes into content_lines
+  - NOTHING is skipped — not even short points
+  - If source has 10 topics you must return 10 chapters
+
+RULES FOR is_emphasised:
+  Set is_emphasised to true if the content:
+  - Was repeated more than once in the material
+  - Appears in a summary or review slide
+  - Has special formatting (bold, underline, caps)
+  - Is a definition or key formula
+  - Appears near the end as a summary point
+
+SELF-CHECK before returning JSON:
+  Count the headings in the source material.
+  Count the chapters in your JSON.
+  They must match. If not, add the missing ones.
+
+LECTURE MATERIAL:
+{chunk_text}
+
+Start with {{ immediately. No other text."""
+        raw = self._llm_call_with_retry(
+            prompt,
+            max_retries=3,
+            initial_wait=10
+        )
+
+        if not raw:
             return {"lecture_title": "", "chapters": []}
+
+        return self.safe_parse_json(raw)
 
     def extract_mindmap_chunked(self, full_text: str) -> dict:
         """
@@ -317,7 +407,7 @@ MATERIAL:
 
     def classify_section_content(self, section: dict) -> list:
         """
-        MANUAL ALGORITHM — Content line classifier.
+        MANUAL ALGORITHM - Content line classifier.
         Returns list of {type, text} dicts.
         """
         classified = []
@@ -341,6 +431,15 @@ MATERIAL:
                     classified.append({"type": "paragraph", "text": line})
             elif len(line) >= 10:
                 classified.append({"type": "short", "text": line})
+
+        for item in classified:
+            item['source'] = {
+                'doc_id': section.get('doc_id', ''),
+                'page_hint': section.get(
+                    'image_pages', [0]
+                )[0] if section.get('image_pages') else 0
+            }
+
         return classified
 
     def is_already_detailed_note(self, content: str) -> bool:
@@ -368,35 +467,111 @@ MATERIAL:
             part2 = self.expand_section(section_title, classified_lines[mid:], language)
             return part1 + "\n" + part2
 
-        prompt = f"""You are NotesGPT writing university exam study notes in {language}.
+        prompt = f"""You are NotesGPT — an expert exam
+preparation note writer in {language}.
 
 SECTION TOPIC: {section_title}
 
 RAW LECTURE CONTENT:
 {content_str}
 
-YOUR TASK:
-Convert the raw content into clean exam-ready bullets.
+YOUR MISSION:
+Transform raw lecture content into exam revision
+bullets that a student can read the night before
+an exam to recall everything quickly.
 
-STRICT RULES — follow every one:
-1. Output bullet points ONLY. Zero paragraphs.
-2. Each bullet MUST be 2 to 4 lines long. One-line bullets are NOT allowed.
-3. Bold ALL key terms using **term**.
-4. Start critical exam points with ⚡
-5. Start examples or analogies with 💡
-6. Start common confusions with ⚠️
-7. Include EVERY point from raw content. Do not skip any item.
-8. If any line is under 15 words OR only states WHAT without explaining WHY or HOW:
-   Expand it into a 2-3 sentence explanation using your own knowledge.
-9. Numbered lists from source stay numbered.
-10. If source has code examples, keep as code block and add one explanatory comment line.
-11. If source content contains a comparison table, preserve the comparison structure.
-    Format as Left concept vs Right concept with paired bullet points.
-    Never flatten table rows into separate numbered items.
-12. Keep response under 500 words.
-13. End with exactly: END_SECTION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+COVERAGE RULE — most important rule:
+Cover every single point in the raw content
+above without skipping any concept.
+Do not stop until ALL points are covered.
+If there are 10 points in the raw content,
+there must be at least 10 bullets in your output.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Output bullet points only. No heading. No intro sentence. Just bullets."""
+BULLET FORMAT RULE:
+Every bullet must follow this exact pattern:
+
+  - ⚡ **Term**: One-line definition.
+    WHY it matters or HOW it works in one sentence.
+
+  The first line = what it is (under 10 words)
+  The second line = why/how (under 15 words)
+  Total reading time per bullet: under 5 seconds
+  Total recall from bullet: complete idea
+
+CORRECT bullet example:
+  - ⚡ **Encapsulation**: Bundles data and methods
+    in one class. WHY: prevents external code from
+    corrupting internal data — access controlled
+    through getters and setters only.
+
+WRONG bullet example (too vague):
+  - Encapsulation is an important OOP concept.
+
+WRONG bullet example (too long):
+  - Encapsulation is a mechanism in object oriented
+    programming where you combine the data and the
+    code that operates on that data into a single
+    unit which is known as a class and you hide the
+    internal details from the outside world...
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+EMPHASIS RULE:
+Treat anything that was repeated, bolded, or
+appeared in a summary as HIGH PRIORITY.
+Mark these with ⚡ at the start.
+All other points get standard bullet •
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+MARKER RULES:
+  ⚡ = critical exam point, must know
+  💡 = real-world example or analogy
+  ⚠️ = common mistake or confusion point
+
+EXPANSION RULE:
+If any raw content line is under 15 words OR
+only states WHAT without WHY or HOW:
+  Expand it using your knowledge of {section_title}
+  Add the WHY or HOW so student understands fully
+  Student must NOT need slides after reading this
+
+COMPARISON RULE:
+When two concepts contrast (A vs B, X or Y):
+  Write one bullet per concept
+  Then write ⚠️ bullet on the key difference
+  Example:
+    - ⚡ **private**: only same class can access
+    - ⚡ **protected**: same class + subclasses
+    - ⚠️ **Difference**: private blocks subclasses,
+      protected allows them — choose based on
+      whether child classes need access
+
+CODE RULE:
+If source has code examples:
+  Keep the code in a code block
+  Add one comment line explaining what it shows
+  Example:
+```java
+    // extends keyword creates inheritance link
+    class Dog extends Animal {{ }}
+```
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+COMPLETENESS CHECK — do this before END_SECTION:
+List the main topics from the raw content above.
+Confirm each one appears in your bullets.
+If any topic is missing add it now.
+Do not include this checklist in your output —
+just use it to verify before finishing.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Keep total response under 700 words.
+End with exactly: END_SECTION
+
+Start with first bullet directly.
+No intro sentence. No heading. Just bullets.
+"""
         try:
             response = self._ai.llm.invoke(prompt)
             result = response.content.strip()
@@ -410,12 +585,435 @@ Output bullet points only. No heading. No intro sentence. Just bullets."""
                 for item in classified_lines[:5]
             )
 
+    def extract_headings_manual(
+        self, full_text: str
+    ) -> list:
+        """
+        MANUAL ALGORITHM — detects headings in
+        lecture text without using AI.
+
+        Detects these heading patterns:
+        1. ALL CAPS lines under 80 chars
+        2. Lines that end with : under 60 chars
+        3. Numbered lines: 1. or 1) or Chapter 1
+        4. Short lines under 50 chars that are
+           followed by bullet content
+        5. Lines starting with common heading words:
+           Introduction, Overview, Types, Definition,
+           Advantages, Disadvantages, Example,
+           Summary, Conclusion, Applications
+
+        Returns ordered list of heading strings
+        preserving document order.
+        """
+        import re
+        lines = full_text.split('\n')
+        headings = []
+        seen = set()
+
+        HEADING_STARTERS = {
+            'introduction', 'overview', 'types',
+            'definition', 'advantages', 'disadvantages',
+            'example', 'examples', 'summary',
+            'conclusion', 'applications', 'features',
+            'properties', 'methods', 'syntax',
+            'concept', 'concepts', 'principles',
+            'objectives', 'what is', 'how to',
+            'difference', 'comparison', 'uses',
+            'characteristics', 'importance'
+        }
+
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if not stripped or len(stripped) < 3:
+                continue
+
+            is_heading = False
+            lower = stripped.lower()
+
+            # Pattern 1: ALL CAPS under 80 chars
+            if (stripped.isupper() and
+                    5 < len(stripped) < 80 and
+                    not stripped.startswith('•')):
+                is_heading = True
+
+            # Pattern 2: ends with colon under 60 chars
+            elif (stripped.endswith(':') and
+                  len(stripped) < 60 and
+                  not stripped.startswith('•') and
+                  not stripped.startswith('-')):
+                is_heading = True
+
+            # Pattern 3: numbered heading
+            elif re.match(
+                r'^\d+[\.\)]\s+[A-Z][a-zA-Z\s]{3,40}$',
+                stripped
+            ):
+                is_heading = True
+
+            # Pattern 4: starts with heading word
+            elif any(
+                lower.startswith(w)
+                for w in HEADING_STARTERS
+            ) and len(stripped) < 60:
+                is_heading = True
+
+            # Pattern 5: short title-case line
+            # followed by bullet content
+            elif (len(stripped.split()) <= 6 and
+                  len(stripped) < 50 and
+                  stripped[0].isupper() and
+                  not stripped.endswith('.') and
+                  not stripped.startswith('•') and
+                  not stripped.startswith('-') and
+                  i + 1 < len(lines) and
+                  lines[i+1].strip().startswith('•')):
+                is_heading = True
+
+            if is_heading:
+                # Clean the heading
+                clean = stripped.rstrip(':').strip()
+                clean = re.sub(
+                    r'^\d+[\.\)]\s+', '', clean
+                )
+                if clean not in seen and len(clean) > 3:
+                    headings.append(clean)
+                    seen.add(clean)
+
+        print(
+            f"[Headings] Found {len(headings)} headings:"
+        )
+        for h in headings:
+            print(f"  - {h}")
+
+        return headings
+
+    def _is_duplicate_line(
+        self,
+        line: str,
+        existing_lines: list,
+        threshold: float = 0.7
+    ) -> bool:
+        """
+        MANUAL ALGORITHM — Jaccard similarity check.
+        Returns True if line is too similar to any
+        existing line (duplicate content).
+        """
+        words_a = set(line.lower().split())
+        if len(words_a) < 3:
+            return False
+        for existing in existing_lines:
+            words_b = set(existing.lower().split())
+            if not words_b:
+                continue
+            union = len(words_a | words_b)
+            inter = len(words_a & words_b)
+            if union > 0 and inter/union >= threshold:
+                return True
+        return False
+
+    def collect_content_under_headings(
+        self,
+        full_text: str,
+        headings: list
+    ) -> dict:
+        """
+        MANUAL ALGORITHM — collects all content lines
+        that belong to each heading.
+
+        For each heading, takes all text between
+        that heading and the next heading.
+        Returns dict: {heading: [content lines]}
+
+        Rules:
+        - Content lines are non-empty lines that
+          are not themselves headings
+        - Bullet markers (•, -, *) are kept
+        - Short lines under 10 chars are skipped
+        - Maximum 50 lines per heading to avoid
+          context overflow
+        """
+        lines = full_text.split('\n')
+        result = {}
+        current_heading = "Introduction"
+        current_content = []
+        heading_set = set(
+            h.lower() for h in headings
+        )
+
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                continue
+
+            # Check if this line is a heading
+            clean = stripped.rstrip(':').strip()
+            is_current_heading = (
+                clean.lower() in heading_set or
+                stripped.lower() in heading_set
+            )
+
+            if is_current_heading and clean in headings:
+                # Save previous heading's content
+                if current_content:
+                    if current_heading not in result:
+                        result[current_heading] = []
+                    result[current_heading].extend(
+                        current_content[:50]
+                    )
+                current_heading = clean
+                current_content = []
+            else:
+                # Add as content if meaningful
+                if (len(stripped) >= 10 and
+                    not self._is_duplicate_line(
+                        stripped, current_content
+                    )):
+                    current_content.append(stripped)
+
+        # Save last heading's content
+        if current_content and current_heading:
+            if current_heading not in result:
+                result[current_heading] = []
+            result[current_heading].extend(
+                current_content[:50]
+            )
+
+        print(
+            f"[Content] Collected content for "
+            f"{len(result)} headings:"
+        )
+        for h, lines in result.items():
+            print(f"  {h}: {len(lines)} lines")
+
+        return result
+
+    def expand_heading_content(
+        self,
+        heading: str,
+        content_lines: list,
+        language: str = "English"
+    ) -> str:
+        """
+        AI call — one per heading.
+        AI only writes precise bullets from
+        the EXACT content lines provided.
+        Cannot invent topics. Cannot skip topics.
+        Only job: make each point precise and clear.
+        """
+        if not content_lines:
+            return ""
+
+        # Build content string from exact lines
+        content_str = "\n".join(
+            f"- {line}" if not line.startswith(
+                ('•', '-', '*', '→')
+            ) else line
+            for line in content_lines
+        )
+
+        # Truncate at sentence boundary not character limit
+        if len(content_str) > 2500:
+            # Find last complete sentence before 2500
+            truncation_point = 2500
+            # Look for sentence end before limit
+            for punct in ['. ', '.\n', '! ', '? ']:
+                last_punct = content_str.rfind(
+                    punct, 0, 2500
+                )
+                if last_punct > 1500:
+                    truncation_point = last_punct + 1
+                    break
+            content_str = content_str[:truncation_point]
+            print(
+                f"[Expand] Content truncated at "
+                f"sentence boundary: "
+                f"{truncation_point} chars"
+            )
+
+        prompt = f"""You are NotesGPT. Your job is to
+TRANSFORM raw lecture bullets into exam revision
+notes. This is NOT summarising. This is NOT
+copying. This is TRANSFORMATION.
+
+TOPIC: {heading}
+
+RAW LECTURE CONTENT — transform every line below:
+{content_str}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TRANSFORMATION RULES — follow all strictly:
+
+RULE 1 — NEVER copy the raw line as-is.
+Every bullet must be REWRITTEN and EXPANDED.
+
+WRONG (copying):
+  raw: "Encapsulation binds data and code"
+  output: "- Encapsulation binds data and code"
+
+CORRECT (transformed):
+  raw: "Encapsulation binds data and code"
+  output: "- ⚡ **Encapsulation**: Bundles data
+    (variables) and methods into one class unit.
+    WHY: prevents external code from directly
+    modifying internal state — all access goes
+    through controlled getter/setter methods."
+
+RULE 2 — Every bullet must have 2 parts:
+  Part 1: WHAT it is — max 10 words
+  Part 2: WHY it matters or HOW it works — max 15 words
+  If the raw content only has Part 1, you MUST
+  add Part 2 from your knowledge of {heading}.
+
+RULE 3 — Every bullet readable in 5 seconds.
+  Maximum 30 words per bullet total.
+  Complete enough to recall the full concept.
+
+RULE 4 — Bold ALL key terms: **term**
+
+RULE 5 — Use markers:
+  ⚡ = critical exam point
+  💡 = real example or analogy
+  ⚠️ = common mistake or comparison
+
+RULE 6 — For comparisons write:
+  - ⚡ **TermA**: definition. WHY/HOW.
+  - ⚡ **TermB**: definition. WHY/HOW.
+  - ⚠️ **Key difference**: A does X, B does Y.
+
+RULE 7 — For code examples:
+  Keep in code block. Add one comment line.
+
+RULE 8 — Cover EVERY point. Skip nothing.
+
+RULE 9 — Never cut a sentence mid-way.
+  If a point cannot be completed, skip it.
+  Partial bullets are useless.
+
+RULE 10 — No repetition. Each concept once.
+
+RULE 11 — NUMBERED LIST RULE:
+If the source content has numbered items
+(1. 2. 3. or 1) 2) 3)), keep them as a
+numbered list in your output.
+Do NOT convert numbered lists to bullets.
+Example:
+  Source: 1. Declaration 2. Initialization
+  Output:
+  1. ⚡ **Declaration**: define variable type
+     and name. Allocates memory slot.
+  2. ⚡ **Initialization**: assign first value
+     to declared variable. Sets starting state.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Keep total under 600 words.
+End with: END_SECTION
+Start with first bullet directly. No intro.
+"""
+
+        import time as _time
+        import random as _random
+        _time.sleep(_random.uniform(0.3, 0.8))
+
+        result = self._llm_call_with_retry(prompt)
+
+        if not result:
+            print(
+                f"[Expand] All retries failed "
+                f"for: {heading}. Using raw content."
+            )
+            return "\n".join(
+                f"- {line}"
+                for line in content_lines[:10]
+            )
+
+        result = result.replace("END_SECTION", "").strip()
+        result = re.sub(
+            r'^```\w*\n|```$', '',
+            result,
+            flags=re.MULTILINE
+        )
+        return result.strip()
+
+    def verify_and_complete_headings(
+        self,
+        headings: list,
+        full_text: str,
+        domain_keywords: list = None
+    ) -> list:
+        """
+        MANUAL ALGORITHM — ensures critical topics
+        are not missed.
+
+        Searches full_text for important terms that
+        did not get detected as headings.
+        Adds them to the headings list if found
+        in the text but missing from headings.
+        """
+        if not domain_keywords:
+            return headings
+
+        headings_lower = [h.lower() for h in headings]
+        additions = []
+
+        for keyword in domain_keywords:
+            kw_lower = keyword.lower()
+            # Check if keyword is already covered
+            already_covered = any(
+                kw_lower in h for h in headings_lower
+            )
+            if not already_covered:
+                # Check if keyword appears in text
+                if kw_lower in full_text.lower():
+                    print(
+                        f"[Coverage] Adding missing "
+                        f"topic: {keyword}"
+                    )
+                    additions.append(keyword)
+
+        # Insert additions in a logical position
+        if additions:
+            return headings + additions
+        return headings
+
+    def verify_takeaways_coverage(
+        self,
+        takeaways: str,
+        headings: list
+    ) -> str:
+        """
+        Checks that key headings appear in takeaways.
+        Appends any missing critical topics.
+        """
+        missing = []
+        tk_lower = takeaways.lower()
+
+        for heading in headings:
+            # Check if heading concept is mentioned
+            key_word = heading.split()[0].lower()
+            if key_word not in tk_lower:
+                missing.append(heading)
+
+        if missing:
+            print(
+                f"[Takeaways] Missing topics: "
+                f"{missing}"
+            )
+            additions = "\n".join(
+                f"- ⚡ **{h}**: "
+                f"[Review this topic in the note above]"
+                for h in missing[:3]
+            )
+            return takeaways + "\n" + additions
+
+        return takeaways
+
     def generate_detailed_note(self, pdf_id: str, user_id: str,
                                 language: str = "English", job_id: str = None) -> str:
         """
         Full pipeline for one PDF:
-        Phase 1 — fetch chunks, Phase 2 — mind map,
-        Phase 3 — classify, Phase 4 — expand, Phase 5 — assemble.
+        Phase 1 - fetch chunks, Phase 2 - mind map,
+        Phase 3 - classify, Phase 4 - expand, Phase 5 - assemble.
         """
         import time
         import concurrent.futures
@@ -440,85 +1038,177 @@ Output bullet points only. No heading. No intro sentence. Just bullets."""
         print(f"[DetailedNote] {len(rows)} chunks, {len(full_text)} chars")
 
         self._update_job(job_id, "analyzing")
-        mindmap = self.extract_mindmap_chunked(full_text)
-        chapters = mindmap.get("chapters", [])
-        lecture_title = mindmap.get("lecture_title", "Study Notes")
 
-        if not chapters:
-            return f"# {lecture_title}\n\nNo structure found."
+        lecture_title = "Study Notes"
 
-        print(f"[DetailedNote] {len(chapters)} chapters")
+        # Pass 1: Manual heading detection
+        headings = self.extract_headings_manual(
+            full_text
+        )
+
+        if not headings:
+            print(
+                "[DetailedNote] No headings found. "
+                "Using fallback single section."
+            )
+            headings = ["Main Content"]
+
+        # Detect domain from content
+        opp_keywords = [
+            "Encapsulation", "Inheritance",
+            "Polymorphism", "Abstraction",
+            "Method Overloading", "Method Overriding",
+            "Abstract Class", "Interface"
+        ]
+
+        java_keywords = [
+            "Variables", "Data Types", "Operators",
+            "Control Structures", "Loops", "Arrays",
+            "Methods", "Classes", "Objects"
+        ]
+
+        # Check if this is OOP content
+        is_oop = any(
+            kw.lower() in full_text.lower()
+            for kw in ["encapsulation", "inheritance",
+                       "polymorphism", "abstraction"]
+        )
+
+        if is_oop:
+            headings = self.verify_and_complete_headings(
+                headings, full_text, opp_keywords
+            )
+
+        # Pass 2: Collect content under each heading
+        heading_content = \
+            self.collect_content_under_headings(
+                full_text, headings
+            )
+
         self._update_job(job_id, "expanding")
 
-        all_sections = []
-        for ch in chapters:
-            for sec in ch.get("sections", []):
-                classified = self.classify_section_content(sec)
-                all_sections.append({
-                    "chapter_title": ch["title"],
-                    "section_title": sec["title"],
-                    "classified": classified,
-                    "code_blocks": sec.get("code_blocks", []),
-                    "image_pages": sec.get("image_pages", []),
-                })
+        # Pass 3: AI expands each heading's content
+        # Run in parallel for speed
+        import concurrent.futures
+        import time
 
-        print(f"[DetailedNote] {len(all_sections)} sections to expand")
+        def expand_one(heading):
+            content = heading_content.get(heading, [])
+            if not content:
+                return heading, ""
+            # Small delay to avoid rate limiting
+            time.sleep(0.5)
+            expanded = self.expand_heading_content(
+                heading, content, language
+            )
+            return heading, expanded
 
-        try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-                futures = [
-                    executor.submit(self.expand_section, s["section_title"], s["classified"], language)
-                    for s in all_sections
-                ]
-                expanded_texts = [f.result() for f in futures]
-        except Exception as e:
-            print(f"[DetailedNote] Parallel failed, using sequential: {e}")
-            expanded_texts = [
-                self.expand_section(s["section_title"], s["classified"], language)
-                for s in all_sections
-            ]
-
-        for i, section in enumerate(all_sections):
-            section["expanded"] = expanded_texts[i]
+        expanded_results = {}
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=2
+        ) as executor:
+            futures = {}
+            for h in headings:
+                future = executor.submit(expand_one, h)
+                futures[future] = h
+                time.sleep(1.0)
+            for future in concurrent.futures.as_completed(
+                futures
+            ):
+                heading, expanded = future.result()
+                expanded_results[heading] = expanded
+                print(
+                    f"[Expand] Done: {heading} — "
+                    f"{len(expanded)} chars"
+                )
 
         self._update_job(job_id, "assembling")
 
+        # Assembly — preserve original heading order
         note_lines = [
-            f"# {lecture_title}",
-            f"> 📚 Detailed notes · {len(chapters)} chapters · {len(all_sections)} sections",
+            f"# 🎯 {lecture_title}",
+            f"> 📚 Complete exam notes · "
+            f"{len(headings)} topics",
+            "",
+            "---",
             ""
         ]
-        current_chapter = None
-        for section in all_sections:
-            ch_title = section["chapter_title"]
-            if ch_title != current_chapter:
-                current_chapter = ch_title
-                note_lines.append(f"\n## 📌 {current_chapter}\n")
-            note_lines.append(f"### {section['section_title']}\n")
-            note_lines.append(section["expanded"])
-            for code in section.get("code_blocks", []):
-                if code.strip():
-                    note_lines.append(f"\n```java\n{code}\n```\n")
-            for page in section.get("image_pages", []):
-                note_lines.append(f"\n[IMG: page {page}]\n")
-            note_lines.append("\n---\n")
+
+        sections_added = 0
+        for heading in headings:
+            expanded = expanded_results.get(heading, "")
+            if not expanded or len(
+                expanded.strip()
+            ) < 20:
+                continue
+
+            note_lines.append(f"## 📌 {heading}")
+            note_lines.append("")
+            note_lines.append(expanded)
+            note_lines.append("")
+            note_lines.append("---")
+            note_lines.append("")
+            sections_added += 1
+
+        print(
+            f"[DetailedNote] sections_added: "
+            f"{sections_added}"
+        )
+
+        if sections_added == 0:
+            return (
+                f"# {lecture_title}\n\n"
+                f"Could not extract content. "
+                f"Please try again."
+            )
 
         combined_preview = "\n".join(note_lines)[:2000]
         try:
-            tk_prompt = f"""Based on this study note content, write the Key Takeaways section in {language}.
+            tk_prompt = f"""You are writing the Key Takeaways
+section of a university exam study note
+in {language}.
 
-CONTENT:
+FULL NOTE CONTENT:
 {combined_preview}
 
-Rules:
-- Start with: ## 🗝️ Key Takeaways
-- Write exactly 6 to 8 bullet points
-- Each bullet is one complete exam-ready sentence
-- Bold all key terms
-- Cover the most critical points across all topics
-- End with: END_SECTION"""
+YOUR TASK:
+Write the 8 most exam-critical points a student
+MUST know before walking into the exam.
+
+SELECTION RULES:
+1. Pick points that were emphasised or repeated
+   in the material — these are highest priority.
+2. Pick definitions that are likely to appear
+   in exam questions.
+3. Pick points that students commonly get wrong.
+4. Pick points that connect multiple concepts.
+
+FORMAT RULES:
+1. Start with: ## 🗝️ Must Know For Exam
+2. Write exactly 8 bullets.
+3. Each bullet follows this pattern:
+   - ⚡ **Term**: complete idea in under 10 words.
+   
+   CORRECT: 
+   - ⚡ **extends keyword**: creates inheritance —
+     child class gets all non-private parent members
+   
+   WRONG:
+   - Understand how inheritance works in Java
+
+4. Every bullet must be specific and factual.
+   No generic study advice.
+   No "understand", "remember", "know about".
+   Only specific technical facts.
+
+5. Bold all key terms.
+6. Use ⚡ on every bullet — all are critical.
+7. Keep total under 200 words.
+8. End with: END_SECTION
+"""
             tk_resp = self._ai.llm.invoke(tk_prompt)
             takeaways = tk_resp.content.strip().replace("END_SECTION", "").strip()
+            takeaways = self.verify_takeaways_coverage(takeaways, headings)
             note_lines.append(f"\n{takeaways}")
         except Exception as e:
             print(f"[DetailedNote] Takeaways failed: {e}")
@@ -527,7 +1217,9 @@ Rules:
         images = _fetch_images([pdf_id])
         final = _inject_images(final, images)
         final = clean_note_formatting(final)
-        print(f"[DetailedNote] DONE in {time.time()-t0:.1f}s — {len(final)} chars")
+        print(f"[DEBUG DetailedNote] sections_added: {sections_added}")
+        print(f"[DEBUG DetailedNote] final note length: {len(final)}")
+        print(f"[DetailedNote] DONE in {time.time()-t0:.1f}s - {len(final)} chars")
         return final
 
     def generate_structured_note(self, input_items: list, user_id: str,
@@ -556,7 +1248,7 @@ Rules:
             elif item["type"] == "note_content":
                 content = item["value"]
                 if self.is_already_detailed_note(content):
-                    print("[StructuredNote] Skipping — already detailed note")
+                    print("[StructuredNote] Skipping - already detailed note")
                     return content
                 return content
             return None
@@ -576,7 +1268,7 @@ Rules:
                 print(f"[StructuredNote] {completed}/{total} PDFs done")
             return result
 
-        # Process PDFs in parallel — max 4 at once
+        # Process PDFs in parallel - max 4 at once
         MAX_WORKERS = 4
         pdf_results = []
         if pdf_items:
@@ -587,6 +1279,11 @@ Rules:
         note_results = [process_with_counter(i) for i in note_items]
 
         all_detailed_content = [c for c in (pdf_results + note_results) if c]
+        print(f"[DEBUG] all_detailed_content count: {len(all_detailed_content)}")
+        for i, c in enumerate(all_detailed_content):
+            print(f"[DEBUG] item {i}: {len(c) if c else 0} chars")
+            if c:
+                print(f"[DEBUG] item {i} preview: {c[:100]}")
         
         if pdf_items:
             print(f"[StructuredNote] All PDFs processed in {_time.time()-t_parallel:.1f}s")
@@ -596,40 +1293,101 @@ Rules:
 
         self._update_job(job_id, "generating")
         combined = "\n\n---\n\n".join(all_detailed_content)
-        sections = re.split(r'\n## ', combined)
+        print(f"[DEBUG] combined length: {len(combined)}")
+        print(f"[DEBUG] combined preview: {combined[:200]}")
+        
+        raw_sections = re.split(r'\n## ', combined)
+        print(f"[GEN] raw_sections count: {len(raw_sections)}")
+
+        # If no ## headings found split by \n\n instead
+        if len(raw_sections) <= 1:
+            print("[GEN] No ## headings found. Splitting by paragraph breaks.")
+            raw_sections = [
+                s for s in combined.split('\n\n')
+                if len(s.strip()) > 100
+            ]
+            print(f"[GEN] paragraph sections: {len(raw_sections)}")
+            
         structured_sections = []
 
-        for section in sections:
-            if not section.strip() or len(section) < 50:
-                continue
+        for section in raw_sections:
             section_text = section[:3000]
-            condense_prompt = f"""You are creating a targeted exam revision note in {language}.
+            first_line = section.split('\n')[0].strip()
+            heading = re.sub(r'^#+\s*📌?\s*', '', first_line).strip()
+            
+            if not heading or len(heading) < 3:
+                heading = f"Section {len(structured_sections)+1}"
+                print(f"[GEN] Empty heading, using: {heading}")
 
-Condense this detailed content into the most important exam-ready bullet points.
+            condense_prompt = f"""You are condensing a
+detailed study note into an exam revision note
+in {language}.
 
-CONTENT:
+TOPIC: {heading}
+
+DETAILED CONTENT:
 {section_text}
 
-RULES:
-1. Keep ONLY the most exam-critical points.
-2. Maximum 6 bullets per section.
-3. Each bullet 1 to 2 lines — concise not detailed.
-4. Bold key terms. Use ⚡ for must-know points.
-5. Keep definitions. Keep key mechanisms.
-6. This is for last-minute exam revision.
-7. Keep response under 300 words.
-8. End with: END_SECTION
+YOUR TASK:
+Select and keep the most exam-critical bullets.
+Do NOT rewrite. Do NOT summarise.
+Pick the best bullets and keep them intact.
 
-Output condensed bullets only. No heading."""
+SELECTION RULES:
+1. ALWAYS keep definition bullets
+   (they start with ⚡ **Term**: definition)
+2. ALWAYS keep comparison bullets
+   (they have ⚠️ markers)
+3. ALWAYS keep code examples
+4. ALWAYS keep any bullet that explains WHY or HOW
+5. CUT bullets that only state WHAT without depth
+6. If same concept appears twice keep the
+   better explained version only
+
+COVERAGE RULE:
+Cover every distinct concept in the content.
+Do not skip any topic even if the content
+for that topic is thin.
+
+DEPTH RULE:
+Each kept bullet stays 2 lines.
+Do NOT shorten to one line.
+The explanation is what makes it valuable.
+
+FORBIDDEN — delete any bullet containing:
+  "understand", "memorize", "focus on",
+  "recognize", "prepare to", "be able to"
+  These are generic and useless for revision.
+
+Keep 6-8 bullets maximum per section.
+Keep response under 400 words.
+If content is empty output: SKIP_SECTION
+End with: END_SECTION
+"""
+                
             try:
                 resp = self._ai.llm.invoke(condense_prompt)
-                condensed = resp.content.strip().replace("END_SECTION", "").strip()
-                first_line = section.split('\n')[0].strip()
-                heading = re.sub(r'^#+\s*', '', first_line).strip()
-                if heading and condensed:
-                    structured_sections.append(f"## {heading}\n\n{condensed}")
+                condensed = resp.content.strip()
+                condensed = condensed.replace("END_SECTION", "").strip()
+                print(f"[GEN] '{heading}': {len(condensed)} chars returned")
             except Exception as e:
-                print(f"[StructuredNote] Section failed: {e}")
+                print(f"[GEN ERROR] '{heading}' failed: {type(e).__name__}: {str(e)[:100]}")
+                # On LLM failure use raw section text instead of skipping entirely
+                condensed = section_text[:500]
+                print(f"[GEN] Using fallback raw text for '{heading}'")
+            
+            if heading and condensed:
+                structured_sections.append(f"## {heading}\n\n{condensed}")
+
+        # If still empty after all fixes, build note directly from detailed content
+        if not structured_sections:
+            print("[GEN] structured_sections empty. Building from detailed content directly.")
+            for i, detail in enumerate(all_detailed_content):
+                if detail and len(detail.strip()) > 50:
+                    preview = detail[:3000]
+                    heading = f"Lecture {i+1} Content"
+                    structured_sections.append(f"## 📌 {heading}\n\n{preview}")
+                    print(f"[GEN] Added fallback section: {heading}")
 
         if not structured_sections:
             return "# Error\n\nCould not generate note."
@@ -639,7 +1397,7 @@ Output condensed bullets only. No heading."""
         title = re.sub(r'^#+\s*', '', title).strip()
 
         final_lines = [
-            f"# 🎯 {title} — Exam Notes",
+            f"# 🎯 {title} - Exam Notes",
             f"> ⚡ Structured from {len(input_items)} source(s) · Exam ready",
             ""
         ]
@@ -739,7 +1497,7 @@ Rules:
         conn = _get_conn()
         cur = conn.cursor(cursor_factory=RealDictCursor)
         
-        # PHASE 1 — Per-document mind map extraction
+        # PHASE 1 - Per-document mind map extraction
         doc_trees = {}
         lecture_titles = set()
         for pdf_id in pdf_ids:
@@ -788,18 +1546,18 @@ Return ONLY valid JSON. No explanation. No markdown fences.
 
 JSON format:
 {{
-  "lecture_title": "string — the main lecture/module name",
+  "lecture_title": "string - the main lecture/module name",
   "chapters": [
     {{
-      "title": "string — chapter or main heading name",
+      "title": "string - chapter or main heading name",
       "sections": [
         {{
-          "title": "string — sub-section name",
+          "title": "string - sub-section name",
           "content_lines": [
-            "string — every single content line, bullet, sentence, or item under this section, EXACTLY as written in the source. Do not summarise. Do not skip any line."
+            "string - every single content line, bullet, sentence, or item under this section, EXACTLY as written in the source. Do not summarise. Do not skip any line."
           ],
           "has_code": true,
-          "code_blocks": ["string — any code examples"],
+          "code_blocks": ["string - any code examples"],
           "image_pages": [1]
         }}
       ]
@@ -852,7 +1610,7 @@ LECTURE MATERIAL:
             except Exception as e:
                 print(f"Error extracting JSON for {pdf_id}: {e}")
 
-        # PHASE 2 — Cross-document topic merging
+        # PHASE 2 - Cross-document topic merging
         self._update_job(job_id, "deduplicating")
         master_tree = []
         for pdf_id, data in doc_trees.items():
@@ -915,7 +1673,7 @@ LECTURE MATERIAL:
                         unique_lines.append(line)
                 sec["content_lines"] = unique_lines
 
-        # PHASE 3 — Content collection per leaf node
+        # PHASE 3 - Content collection per leaf node
         self._update_job(job_id, "generating")
         for chapter in master_tree:
             for sec in chapter.get("sections", []):
@@ -935,7 +1693,7 @@ LECTURE MATERIAL:
                         classified.append(cls)
                 sec["classified"] = classified
 
-        # PHASE 4 — Intelligence expansion per section
+        # PHASE 4 - Intelligence expansion per section
         for chapter in master_tree:
             for sec in chapter.get("sections", []):
                 classified_lines = sec.get("classified", [])
@@ -957,7 +1715,7 @@ LECTURE MATERIAL:
 
                 expanded_parts = []
                 for chk in chunks:
-                    prompt = f'''You are NotesGPT — expert academic note writer for university exam preparation.
+                    prompt = f'''You are NotesGPT - expert academic note writer for university exam preparation.
 
 Your job is to take raw lecture content and produce clean, complete, exam-ready bullet points.
 
@@ -966,7 +1724,7 @@ SECTION TOPIC: {sec.get("title", "")}
 RAW CONTENT FROM LECTURE MATERIALS:
 {chk}
 
-RULES — follow every one exactly:
+RULES - follow every one exactly:
 1. Output ONLY bullet points. No paragraphs. No essays.
 2. Each bullet must be 2-4 lines long.
 3. Bold all key terms using **term**.
@@ -975,7 +1733,7 @@ RULES — follow every one exactly:
 6. Use ⚠️ for common confusions or mistakes.
 7. Include EVERY point from the raw content above.
    Do not skip any item. Do not merge two items into one.
-8. CRITICAL — if any raw content line is under 15 words or only states WHAT without WHY or HOW:
+8. CRITICAL - if any raw content line is under 15 words or only states WHAT without WHY or HOW:
    Expand it into a full 2-3 sentence explanation.
    Use your knowledge to make it fully understandable.
    The student must not need the original slides.
@@ -991,7 +1749,7 @@ Output only the bullet points. No heading. No intro text.'''
                 
                 sec["expanded_content"] = "\n".join(expanded_parts)
 
-        # PHASE 5 — Tree-to-note assembly
+        # PHASE 5 - Tree-to-note assembly
         self._update_job(job_id, "finalising")
         
         main_title = " · ".join(list(lecture_titles)) if lecture_titles else "Study Notes"
@@ -1135,7 +1893,7 @@ CONVERSATION SO FAR:
 
 Answer as a warm, intelligent tutor would. Your answer 
 should feel like a teacher sitting next to the student 
-and explaining clearly — not like a search result.
+and explaining clearly - not like a search result.
 Answer ONLY using the provided material context.
 
 Format your answer as structured note bullets:
@@ -1149,7 +1907,21 @@ Be thorough. If the student seems confused, explain
 from first principles. Cover WHY not just WHAT.
 End with: END_REFINE'''
 
-        res = self._llm_call(prompt)
+        res = self._llm_call_with_retry(
+            prompt,
+            max_retries=3,
+            initial_wait=10
+        )
+
+        if not res:
+            return {
+                "refined_content":
+                "The AI is busy. Please wait "
+                "30 seconds and try again.",
+                "loop_number": loop_number,
+                "should_ask_outside": False
+            }
+
         res = res.replace("END_REFINE", "").strip()
 
         return {
@@ -1421,6 +2193,21 @@ Answer concisely.
             print(f"[get_all_notes] ERROR: {e}")
             return []
 
+    def validate_note_content(
+        self,
+        content: str,
+        pdf_ids: list = None
+    ) -> bool:
+        if not content or len(
+            content.strip()
+        ) < 30:
+            print("[Validate] Empty - FAIL")
+            return False
+        print(
+            f"[Validate] {len(content)} chars - PASS"
+        )
+        return True
+  
     def save_note_to_db(self, user_id: str, pdf_id: str | None, title: str, content: str) -> str | None:
         try:
             conn = _get_conn()

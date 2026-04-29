@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional
 
 class NoteRequest(BaseModel):
@@ -10,8 +10,11 @@ class NoteRequest(BaseModel):
 
 class RefineRequest(BaseModel):
     pdf_id: str
-    selected_text: str
-    instruction: str
+    selected_text: str = Field(..., min_length=5)
+    instruction: str = Field(..., min_length=3)
+    loop_number: int = 1
+    allow_outside: bool = False
+    conversation_history: Optional[List[dict]] = None
 
 class PromptsRequest(BaseModel):
     prompts: List[str]

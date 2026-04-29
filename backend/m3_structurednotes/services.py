@@ -712,6 +712,55 @@ No intro sentence. No heading. Just bullets.
                 return True
         return False
 
+    def _should_keep_line(self, line: str) -> bool:
+        """
+        FIX 2+5 — Smart line filter.
+        Keeps lines that have any of:
+        1. Length >= 10 chars (normal content)
+        2. 4-digit year (1000-2099)
+        3. Currency symbol ($, £, €, Rs, ₹)
+        4. Percentage (%)
+        5. Large-number data pattern
+        6. Real-world example signals
+        """
+        stripped = line.strip()
+        if not stripped:
+            return False
+        if len(stripped) >= 10:
+            return True
+        # Keep if contains year
+        if re.search(r'\b(1[0-9]{3}|20[0-9]{2})\b', stripped):
+            return True
+        # Keep if contains currency
+        if re.search(r'[$£€₹]|\bRs\.?\b', stripped):
+            return True
+        # Keep if contains percentage
+        if '%' in stripped:
+            return True
+        # Keep if contains large-number data
+        if re.search(
+            r'\d+\.?\d*\s*(million|billion|thousand|crore|lakh)',
+            stripped, re.IGNORECASE
+        ):
+            return True
+        # FIX 5 — Keep if contains example signals
+        example_signals = [
+            'e.g', 'e.g.', 'for instance',
+            'such as', 'case study', 'example',
+            'starbucks', 'sri lanka', 'india',
+        ]
+        stripped_lower = stripped.lower()
+        if any(sig in stripped_lower for sig in example_signals):
+            return True
+        # Keep if starts with capital proper noun (likely named example)
+        words = stripped.split()
+        if (len(words) >= 2 and
+                words[0][0].isupper() and
+                len(words[0]) > 3 and
+                words[0].isalpha()):
+            return True
+        return False
+
     def collect_content_under_headings(
         self,
         full_text: str,
@@ -764,8 +813,9 @@ No intro sentence. No heading. Just bullets.
                 current_heading = clean
                 current_content = []
             else:
-                # Add as content if meaningful
-                if (len(stripped) >= 10 and
+                # FIX 2 — smart line filter preserving
+                # dates, currency, percentages
+                if (self._should_keep_line(stripped) and
                     not self._is_duplicate_line(
                         stripped, current_content
                     )):
@@ -795,7 +845,7 @@ No intro sentence. No heading. Just bullets.
         language: str = "English"
     ) -> str:
         """
-        AI call — one per heading.
+        AI call - one per heading.
         AI only writes precise bullets from
         the EXACT content lines provided.
         Cannot invent topics. Cannot skip topics.
@@ -812,104 +862,151 @@ No intro sentence. No heading. Just bullets.
             for line in content_lines
         )
 
-        # Truncate at sentence boundary not character limit
-        if len(content_str) > 2500:
-            # Find last complete sentence before 2500
-            truncation_point = 2500
-            # Look for sentence end before limit
-            for punct in ['. ', '.\n', '! ', '? ']:
-                last_punct = content_str.rfind(
-                    punct, 0, 2500
-                )
-                if last_punct > 1500:
-                    truncation_point = last_punct + 1
-                    break
-            content_str = content_str[:truncation_point]
-            print(
-                f"[Expand] Content truncated at "
-                f"sentence boundary: "
-                f"{truncation_point} chars"
-            )
-
-        prompt = f"""You are NotesGPT. Your job is to
-TRANSFORM raw lecture bullets into exam revision
-notes. This is NOT summarising. This is NOT
-copying. This is TRANSFORMATION.
+        prompt = f"""You are NotesGPT writing
+university exam revision notes in {language}.
 
 TOPIC: {heading}
 
-RAW LECTURE CONTENT — transform every line below:
+╔═══════════════════════════════════════════════╗
+║         STRICT DATA HYGIENE                   ║
+╠═══════════════════════════════════════════════╣
+║  RULE 1 - SOURCE ONLY:                        ║
+║  Use ONLY the content provided below.         ║
+║  Forget all previous sessions completely.     ║
+║  If this is Biology - no Economics terms.     ║
+║  If this is Economics - no Biology terms.     ║
+║  If this is Java - no Nutrition terms.        ║
+║  Each session is completely isolated.         ║
+║                                               ║
+║  RULE 2 - NO HALLUCINATION:                   ║
+║  Never add concepts not in the content below. ║
+║  Never add related academic terms unless      ║
+║  they appear word-for-word in the content.    ║
+║                                               ║
+║  RULE 3 - TECHNICAL PRECISION:                ║
+║  Chemical names: Retinol, Retinal, Ascorbic   ║
+║  acid - keep exact spelling always.           ║
+║  Bond types: peptide bond, hydrogen bond -    ║
+║  keep exact terminology always.               ║
+║  Never simplify or paraphrase technical terms.║
+║                                               ║
+║  RULE 4 - NUMERICAL DATA:                     ║
+║  All RDA values, percentages, mg amounts,     ║
+║  years, prices - keep exact values.           ║
+║  Never approximate or omit numbers.           ║
+║  Tables in source -> Markdown table in output. ║
+║                                               ║
+║  RULE 5 - CODE PRESERVATION:                  ║
+║  If source has code, keep it in code block.   ║
+║  Never describe code as plain text.           ║
+╚═══════════════════════════════════════════════╝
+
+EXACT CONTENT FROM THIS SESSION ONLY:
 {content_str}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-TRANSFORMATION RULES — follow all strictly:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+OUTPUT FORMAT - THIS IS THE MOST IMPORTANT RULE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-RULE 1 — NEVER copy the raw line as-is.
-Every bullet must be REWRITTEN and EXPANDED.
+You MUST write BULLET POINTS ONLY.
+NEVER write paragraphs.
+NEVER let bullets flow into each other.
+Each bullet is ONE complete thought.
+Each bullet MUST start on a NEW LINE with -
 
-WRONG (copying):
-  raw: "Encapsulation binds data and code"
-  output: "- Encapsulation binds data and code"
+CORRECT FORMAT:
+- ⚡ **Haemoglobin**: Protein carrying oxygen
+  in red blood cells.
+  HOW: Iron atom in heme group binds O2.
+  WHY: Without it cells cannot receive oxygen.
 
-CORRECT (transformed):
-  raw: "Encapsulation binds data and code"
-  output: "- ⚡ **Encapsulation**: Bundles data
-    (variables) and methods into one class unit.
-    WHY: prevents external code from directly
-    modifying internal state — all access goes
-    through controlled getter/setter methods."
+- ⚡ **Iron Deficiency**: Insufficient iron
+  for haemoglobin production.
+  HOW: Low dietary iron or poor absorption.
+  WHY: Leads to anaemia and fatigue.
 
-RULE 2 — Every bullet must have 2 parts:
-  Part 1: WHAT it is — max 10 words
-  Part 2: WHY it matters or HOW it works — max 15 words
-  If the raw content only has Part 1, you MUST
-  add Part 2 from your knowledge of {heading}.
+WRONG FORMAT (paragraphs - FORBIDDEN):
+Haemoglobin is a protein that carries oxygen
+in red blood cells through iron binding.
+Iron deficiency occurs when there is not
+enough iron for haemoglobin production.
 
-RULE 3 — Every bullet readable in 5 seconds.
-  Maximum 30 words per bullet total.
-  Complete enough to recall the full concept.
+THE RULE: If you write more than one sentence
+without starting a new bullet with -, you are
+writing paragraphs. STOP and rewrite as bullets.
 
-RULE 4 — Bold ALL key terms: **term**
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+BULLET STRUCTURE - every bullet must have:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-RULE 5 — Use markers:
-  ⚡ = critical exam point
-  💡 = real example or analogy
-  ⚠️ = common mistake or comparison
+Line 1: - MARKER **Term**: WHAT it is (max 10 words)
+Line 2:   HOW: mechanism or process (max 15 words)
+Line 3:   WHY: impact or consequence (max 15 words)
 
-RULE 6 — For comparisons write:
-  - ⚡ **TermA**: definition. WHY/HOW.
-  - ⚡ **TermB**: definition. WHY/HOW.
+MARKERS:
+  ⚡ = critical exam point (use for most bullets)
+  💡 = real example, case study, or analogy
+  ⚠️ = comparison between two concepts
+
+SPECIAL CASES:
+
+For numerical tables in source:
+  Output as markdown table:
+  | Nutrient | RDA | Unit |
+  |----------|-----|------|
+  | Iron     | 18  | mg   |
+
+For diagrams or structures (Primary/Secondary/
+Quaternary protein structures etc):
+  Write one bullet per level/component:
+  - ⚡ **Primary Structure**: sequence of amino
+    acids linked by peptide bonds.
+    HOW: Amino acids joined in specific order.
+    WHY: Determines all higher-order structure.
+  - ⚡ **Secondary Structure**: local folding
+    into alpha helix or beta sheet.
+    HOW: Hydrogen bonds between backbone atoms.
+    WHY: Gives protein initial 3D shape.
+
+For comparisons:
+  - ⚡ **TermA**: definition. HOW. WHY.
+  - ⚡ **TermB**: definition. HOW. WHY.
   - ⚠️ **Key difference**: A does X, B does Y.
 
-RULE 7 — For code examples:
-  Keep in code block. Add one comment line.
+For code examples:
+```java
+  // explanation of what this shows
+  actual code here
+```
 
-RULE 8 — Cover EVERY point. Skip nothing.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+COVERAGE AND COMPLETION RULES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-RULE 9 — Never cut a sentence mid-way.
-  If a point cannot be completed, skip it.
-  Partial bullets are useless.
+COVERAGE: Every point in the content above
+gets its own bullet. Count source points.
+Count your bullets. They must match.
 
-RULE 10 — No repetition. Each concept once.
+COMPLETION: Never cut a sentence mid-way.
+If you cannot complete a point, skip it.
+Partial bullets are useless.
 
-RULE 11 — NUMBERED LIST RULE:
-If the source content has numbered items
-(1. 2. 3. or 1) 2) 3)), keep them as a
-numbered list in your output.
-Do NOT convert numbered lists to bullets.
-Example:
-  Source: 1. Declaration 2. Initialization
-  Output:
-  1. ⚡ **Declaration**: define variable type
-     and name. Allocates memory slot.
-  2. ⚡ **Initialization**: assign first value
-     to declared variable. Sets starting state.
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+NO REPETITION: Each concept appears once.
+If same idea appears twice in source,
+write it once with the best explanation.
 
-Keep total under 600 words.
-End with: END_SECTION
+FINAL CHECK before END_SECTION:
+Read every bullet you wrote.
+Ask: is this a proper bullet starting with -?
+Ask: is this fact in the content above?
+Ask: does it have WHAT + HOW + WHY?
+If any answer is NO - fix that bullet.
+
+Keep total under 700 words.
+End with exactly: END_SECTION
 Start with first bullet directly. No intro.
 """
+
 
         import time as _time
         import random as _random
@@ -933,6 +1030,16 @@ Start with first bullet directly. No intro.
             result,
             flags=re.MULTILINE
         )
+
+        # Structural Repair: Force icons to start on a new line
+        # Find " - ⚡" or similar patterns and insert a newline
+        result = re.sub(r'([^\n])\s*-\s*([⚡💡⚠️])', r'\1\n- \2', result)
+        
+        # Structural Repair: Force HOW: and WHY: to start on a new line
+        # This matches the user's requested 3-line bullet structure
+        result = re.sub(r'([^\n])\s*(HOW:)', r'\1\n  \2', result)
+        result = re.sub(r'([^\n])\s*(WHY:)', r'\1\n  \2', result)
+
         return result.strip()
 
     def verify_and_complete_headings(
@@ -942,39 +1049,92 @@ Start with first bullet directly. No intro.
         domain_keywords: list = None
     ) -> list:
         """
-        MANUAL ALGORITHM — ensures critical topics
-        are not missed.
-
-        Searches full_text for important terms that
-        did not get detected as headings.
-        Adds them to the headings list if found
-        in the text but missing from headings.
+        Checks for critical topics missing from
+        headings list. Inserts them at the correct
+        position based on where they appear in text.
         """
         if not domain_keywords:
             return headings
 
         headings_lower = [h.lower() for h in headings]
-        additions = []
+        result = list(headings)
 
         for keyword in domain_keywords:
             kw_lower = keyword.lower()
-            # Check if keyword is already covered
             already_covered = any(
                 kw_lower in h for h in headings_lower
             )
-            if not already_covered:
-                # Check if keyword appears in text
-                if kw_lower in full_text.lower():
-                    print(
-                        f"[Coverage] Adding missing "
-                        f"topic: {keyword}"
-                    )
-                    additions.append(keyword)
+            if already_covered:
+                continue
 
-        # Insert additions in a logical position
-        if additions:
-            return headings + additions
-        return headings
+            # Check if keyword appears in text
+            kw_pos = full_text.lower().find(kw_lower)
+            if kw_pos == -1:
+                continue
+
+            print(
+                f"[Coverage] Adding missing "
+                f"topic at correct position: {keyword}"
+            )
+
+            # Find correct insertion position
+            # by comparing text positions
+            insert_at = len(result)
+            for i, existing in enumerate(result):
+                existing_pos = full_text.lower().find(
+                    existing.lower()
+                )
+                if existing_pos > kw_pos:
+                    insert_at = i
+                    break
+
+            result.insert(insert_at, keyword)
+            headings_lower.insert(
+                insert_at, kw_lower
+            )
+
+        return result
+
+    def sort_headings_by_position(
+        self,
+        headings: list,
+        full_text: str
+    ) -> list:
+        """
+        MANUAL ALGORITHM - sorts headings by their
+        first appearance position in the full text.
+        Preserves original document order exactly.
+        Returns new list sorted by text position.
+        """
+        heading_positions = []
+
+        for heading in headings:
+            # Find position of this heading in text
+            # Try exact match first
+            pos = full_text.find(heading)
+
+            if pos == -1:
+                # Try case-insensitive
+                pos = full_text.lower().find(
+                    heading.lower()
+                )
+
+            if pos == -1:
+                # Not found - put at end
+                pos = len(full_text)
+
+            heading_positions.append((pos, heading))
+
+        # Sort by position ascending
+        heading_positions.sort(key=lambda x: x[0])
+
+        sorted_headings = [h for _, h in heading_positions]
+
+        print(f"[Order] Original heading order:")
+        for i, h in enumerate(sorted_headings):
+            print(f"  {i+1}. {h}")
+
+        return sorted_headings
 
     def verify_takeaways_coverage(
         self,
@@ -1008,6 +1168,93 @@ Start with first bullet directly. No intro.
 
         return takeaways
 
+    def extract_page_images(
+        self,
+        pdf_path: str,
+        max_images: int = 3
+    ) -> dict:
+        """
+        Extracts images from PDF pages.
+        Returns dict: {page_num: image_url_path}
+        Uses PyMuPDF (fitz) for extraction.
+        """
+        # FIX 2C — Debug prints
+        print(f"[Images] Extracting from: {pdf_path}")
+        print(f"[Images] Path exists: {os.path.exists(pdf_path)}")
+
+        images_folder = os.path.join(
+            "documents", "images"
+        )
+        os.makedirs(images_folder, exist_ok=True)
+
+        page_images = {}
+        try:
+            import fitz
+            doc = fitz.open(pdf_path)
+
+            count = 0
+            for page_num in range(len(doc)):
+                if count >= max_images:
+                    break
+                page = doc[page_num]
+                image_list = page.get_images()
+                if not image_list:
+                    continue
+
+                # Get the largest image on the page
+                largest = max(
+                    image_list,
+                    key=lambda img: (
+                        img[2] * img[3]
+                        if len(img) > 3 else 0
+                    )
+                )
+
+                try:
+                    xref = largest[0]
+                    base_image = doc.extract_image(xref)
+                    image_bytes = base_image["image"]
+                    ext = base_image["ext"]
+
+                    image_filename = (
+                        f"page_{page_num + 1}.{ext}"
+                    )
+                    image_path = os.path.join(
+                        images_folder, image_filename
+                    )
+                    with open(image_path, "wb") as f:
+                        f.write(image_bytes)
+                    
+                    # FIX 2A — Debug prints
+                    print(f"[Images] Saved: {image_path}")
+                    print(f"[Images] File size: {os.path.getsize(image_path)} bytes")
+
+                    page_images[page_num + 1] = (
+                        f"/images/{image_filename}"
+                    )
+                    count += 1
+
+                except Exception:
+                    pass
+
+            doc.close()
+            # FIX 2A — End debug
+            print(f"[Images] Total extracted: {len(page_images)}")
+            for page, path in page_images.items():
+                print(f"[Images] Page {page}: {path}")
+        except ImportError:
+            print(
+                "[Images] PyMuPDF not installed. "
+                "Skipping image extraction."
+            )
+        except Exception as e:
+            print(
+                f"[Images] Extraction failed: "
+                f"{type(e).__name__}"
+            )
+
+        return page_images
+
     def generate_detailed_note(self, pdf_id: str, user_id: str,
                                 language: str = "English", job_id: str = None) -> str:
         """
@@ -1036,6 +1283,16 @@ Start with first bullet directly. No intro.
 
         full_text = " ".join(r["content"] for r in rows)
         print(f"[DetailedNote] {len(rows)} chunks, {len(full_text)} chars")
+
+        # FIX 3 — extract page images from PDF
+        pdf_path = os.path.join(
+            "documents", f"{pdf_id}.pdf"
+        )
+        page_images = {}
+        if os.path.exists(pdf_path):
+            page_images = self.extract_page_images(
+                pdf_path, max_images=3
+            )
 
         self._update_job(job_id, "analyzing")
 
@@ -1079,6 +1336,32 @@ Start with first bullet directly. No intro.
                 headings, full_text, opp_keywords
             )
 
+        # PRESERVE ORIGINAL ORDER
+        headings = self.sort_headings_by_position(
+            headings, full_text
+        )
+
+        # FIX 3 — Build heading_pages mapping for click-to-source
+        heading_pages = {}
+        chunk_offsets = []
+        current_offset = 0
+        for r in rows:
+            chunk_offsets.append((current_offset, r.get('page_hint', 0)))
+            current_offset += len(r['content']) + 1
+            
+        for h in headings:
+            pos = full_text.find(h)
+            if pos != -1:
+                page = 1
+                for offset, p_hint in chunk_offsets:
+                    if pos >= offset:
+                        page = p_hint
+                    else:
+                        break
+                heading_pages[h] = page or 1
+            else:
+                heading_pages[h] = 1
+
         # Pass 2: Collect content under each heading
         heading_content = \
             self.collect_content_under_headings(
@@ -1118,13 +1401,13 @@ Start with first bullet directly. No intro.
                 heading, expanded = future.result()
                 expanded_results[heading] = expanded
                 print(
-                    f"[Expand] Done: {heading} — "
+                    f"[Expand] Done: {heading} - "
                     f"{len(expanded)} chars"
                 )
 
         self._update_job(job_id, "assembling")
 
-        # Assembly — preserve original heading order
+        # Assembly - preserve original heading order
         note_lines = [
             f"# 🎯 {lecture_title}",
             f"> 📚 Complete exam notes · "
@@ -1135,19 +1418,59 @@ Start with first bullet directly. No intro.
         ]
 
         sections_added = 0
-        for heading in headings:
+        img_pages_used = set()
+        pdf_id_attr = pdf_id.replace('"', '')
+
+        for i, heading in enumerate(headings):
             expanded = expanded_results.get(heading, "")
             if not expanded or len(
                 expanded.strip()
             ) < 20:
                 continue
 
-            note_lines.append(f"## 📌 {heading}")
-            note_lines.append("")
-            note_lines.append(expanded)
-            note_lines.append("")
-            note_lines.append("---")
-            note_lines.append("")
+            page_num = heading_pages.get(heading, 1)
+            
+            # Start section container with data attributes for click-to-source
+            # FIX 3B — Use cleaner section wrapping
+            section_html = [
+                f'<div class="note-section" data-doc="{pdf_id_attr}" data-page="{page_num}">',
+                f'<h2 style="color:#3C3489;font-size:17px;font-weight:600;margin-top:24px;margin-bottom:10px;padding-bottom:5px;border-bottom:1px solid #EDE9FE;cursor:pointer;transition:color 0.15s;" title="Click to view source">📌 {heading}</h2>'
+            ]
+
+            # FIX 3 — embed image if available
+            # Use page index roughly aligned to heading position
+            if page_images:
+                # Map heading index to page number
+                approx_page = (
+                    (i * max(page_images.keys()))
+                    // max(len(headings), 1)
+                ) + 1
+                # Find nearest available page image
+                for pg in [approx_page,
+                           approx_page + 1,
+                           approx_page - 1]:
+                    if pg in page_images and \
+                            pg not in img_pages_used:
+                        img_url = page_images[pg]
+                        # FIX 2C — Correct image URL with api/m3 prefix
+                        section_html.append(
+                            f'<img src="http://127.0.0.1:8000/api/m3'
+                            f'{img_url}" '
+                            f'style="max-width:100%;'
+                            f'border-radius:8px;'
+                            f'margin:12px 0;'
+                            f'display:block;'
+                            f'border:1px solid #EDE9FE;" '
+                            f'alt="Lecture diagram"/>'
+                        )
+                        img_pages_used.add(pg)
+                        break
+
+            section_html.append(expanded)
+            section_html.append("</div>")
+            section_html.append("<hr style='border:0.5px solid #EDE9FE; margin:20px 0;'/>")
+            
+            note_lines.append("\n".join(section_html))
             sections_added += 1
 
         print(
@@ -1291,154 +1614,195 @@ FORMAT RULES:
         if not all_detailed_content:
             return "# Error\n\nNo content to process."
 
-        self._update_job(job_id, "generating")
-        combined = "\n\n---\n\n".join(all_detailed_content)
-        print(f"[DEBUG] combined length: {len(combined)}")
-        print(f"[DEBUG] combined preview: {combined[:200]}")
-        
-        raw_sections = re.split(r'\n## ', combined)
-        print(f"[GEN] raw_sections count: {len(raw_sections)}")
+        self._update_job(job_id, "assembling")
 
-        # If no ## headings found split by \n\n instead
-        if len(raw_sections) <= 1:
-            print("[GEN] No ## headings found. Splitting by paragraph breaks.")
-            raw_sections = [
-                s for s in combined.split('\n\n')
-                if len(s.strip()) > 100
+        # Combine all detailed notes directly
+        # No condensing - detailed notes are
+        # already good quality exam notes
+
+        # Get lecture titles from detailed notes
+        import re
+        titles = []
+        for content in all_detailed_content:
+            match = re.search(
+                r'^# 🎯 (.+)$',
+                content,
+                re.MULTILINE
+            )
+            if match:
+                title = match.group(1).strip()
+                title = re.sub(
+                    r'\s*-\s*Exam Notes$', '', title
+                ).strip()
+                if title and title != 'Study Notes':
+                    titles.append(title)
+
+        # Build main title
+        if len(titles) == 1:
+            main_title = titles[0]
+        elif len(titles) > 1:
+            # Find common words across titles
+            words = titles[0].split()
+            common = [
+                w for w in words
+                if all(
+                    w.lower() in t.lower()
+                    for t in titles[1:]
+                ) and len(w) > 3
             ]
-            print(f"[GEN] paragraph sections: {len(raw_sections)}")
-            
-        structured_sections = []
+            main_title = (
+                ' '.join(common).title()
+                if common else titles[0]
+            )
+        else:
+            main_title = 'Study Notes'
 
-        for section in raw_sections:
-            section_text = section[:3000]
-            first_line = section.split('\n')[0].strip()
-            heading = re.sub(r'^#+\s*📌?\s*', '', first_line).strip()
-            
-            if not heading or len(heading) < 3:
-                heading = f"Section {len(structured_sections)+1}"
-                print(f"[GEN] Empty heading, using: {heading}")
-
-            condense_prompt = f"""You are condensing a
-detailed study note into an exam revision note
-in {language}.
-
-TOPIC: {heading}
-
-DETAILED CONTENT:
-{section_text}
-
-YOUR TASK:
-Select and keep the most exam-critical bullets.
-Do NOT rewrite. Do NOT summarise.
-Pick the best bullets and keep them intact.
-
-SELECTION RULES:
-1. ALWAYS keep definition bullets
-   (they start with ⚡ **Term**: definition)
-2. ALWAYS keep comparison bullets
-   (they have ⚠️ markers)
-3. ALWAYS keep code examples
-4. ALWAYS keep any bullet that explains WHY or HOW
-5. CUT bullets that only state WHAT without depth
-6. If same concept appears twice keep the
-   better explained version only
-
-COVERAGE RULE:
-Cover every distinct concept in the content.
-Do not skip any topic even if the content
-for that topic is thin.
-
-DEPTH RULE:
-Each kept bullet stays 2 lines.
-Do NOT shorten to one line.
-The explanation is what makes it valuable.
-
-FORBIDDEN — delete any bullet containing:
-  "understand", "memorize", "focus on",
-  "recognize", "prepare to", "be able to"
-  These are generic and useless for revision.
-
-Keep 6-8 bullets maximum per section.
-Keep response under 400 words.
-If content is empty output: SKIP_SECTION
-End with: END_SECTION
-"""
-                
-            try:
-                resp = self._ai.llm.invoke(condense_prompt)
-                condensed = resp.content.strip()
-                condensed = condensed.replace("END_SECTION", "").strip()
-                print(f"[GEN] '{heading}': {len(condensed)} chars returned")
-            except Exception as e:
-                print(f"[GEN ERROR] '{heading}' failed: {type(e).__name__}: {str(e)[:100]}")
-                # On LLM failure use raw section text instead of skipping entirely
-                condensed = section_text[:500]
-                print(f"[GEN] Using fallback raw text for '{heading}'")
-            
-            if heading and condensed:
-                structured_sections.append(f"## {heading}\n\n{condensed}")
-
-        # If still empty after all fixes, build note directly from detailed content
-        if not structured_sections:
-            print("[GEN] structured_sections empty. Building from detailed content directly.")
-            for i, detail in enumerate(all_detailed_content):
-                if detail and len(detail.strip()) > 50:
-                    preview = detail[:3000]
-                    heading = f"Lecture {i+1} Content"
-                    structured_sections.append(f"## 📌 {heading}\n\n{preview}")
-                    print(f"[GEN] Added fallback section: {heading}")
-
-        if not structured_sections:
-            return "# Error\n\nCould not generate note."
-
-        title_match = re.search(r'^# (.+)$', combined, re.MULTILINE)
-        title = title_match.group(1) if title_match else "Structured Study Notes"
-        title = re.sub(r'^#+\s*', '', title).strip()
-
+        # Build the structured note header
+        source_count = len(all_detailed_content)
         final_lines = [
-            f"# 🎯 {title} - Exam Notes",
-            f"> ⚡ Structured from {len(input_items)} source(s) · Exam ready",
-            ""
+            f'# 🎯 {main_title}',
+            f'> ⚡ Structured from {source_count} '
+            f'source(s) - Exam ready',
+            '',
+            '> 💡 **How to use**: Each section heading '
+            'matches your lecture slides in order. '
+            'Click any heading to jump to that slide '
+            'in the source panel.',
+            '',
+            '---',
+            ''
         ]
-        final_lines.extend(structured_sections)
+
+        # Append each detailed note directly
+        # Strip the title header from each note
+        # Keep all section content intact and
+        # in original order
+        for i, content in enumerate(all_detailed_content):
+            if not content or len(content.strip()) < 50:
+                continue
+
+            # Remove the top title/header lines
+            # Keep everything from first ## heading
+            lines = content.split('\n')
+            content_start = 0
+            for j, line in enumerate(lines):
+                if line.strip().startswith('## ') or \
+                   line.strip().startswith('<div'):
+                    content_start = j
+                    break
+
+            # Get content from first section onward
+            section_content = '\n'.join(
+                lines[content_start:]
+            ).strip()
+
+            if section_content:
+                final_lines.append(section_content)
+                final_lines.append('')
+                final_lines.append('---')
+                final_lines.append('')
+
+        # Generate combined key takeaways
+        # from ALL content together
+        all_preview = '\n'.join(final_lines)[:3000]
 
         try:
-            all_condensed = "\n\n".join(structured_sections)[:2000]
-            tk_prompt = f"""Write Key Takeaways for this exam note in {language}.
+            tk_prompt = f"""Write the Must Know For Exam
+section for this combined study note.
 
-{all_condensed}
+CONTENT PREVIEW:
+{all_preview}
 
-Rules:
-- Start with: ## 🗝️ Must Know For Exam
-- Exactly 5 to 7 bullets
-- Each bullet one complete sentence
-- Bold all key terms
-- Only the absolute most critical points
-- End with: END_SECTION"""
-            tk_resp = self._ai.llm.invoke(tk_prompt)
-            tk = tk_resp.content.strip().replace("END_SECTION", "").strip()
-            final_lines.append(f"\n{tk}")
+RULES:
+1. Start with: ## 🗝️ Must Know For Exam
+2. Write exactly 8 bullets
+3. Cover the most important point from each
+   major topic across all sources
+4. Each bullet: ⚡ **Term**: fact. WHY it matters.
+5. Only specific technical facts
+6. Bold all key terms
+7. Under 200 words total
+8. End with: END_SECTION
+"""
+            tk_raw = self._llm_call_with_retry(
+                tk_prompt,
+                max_retries=3,
+                initial_wait=10
+            )
+            if tk_raw:
+                tk = tk_raw.replace(
+                    'END_SECTION', ''
+                ).strip()
+                final_lines.append('')
+                final_lines.append(tk)
         except Exception as e:
-            print(f"[StructuredNote] Takeaways failed: {e}")
+            print(f"[StructuredNote] Takeaways: {e}")
 
-        final = clean_note_formatting("\n\n".join(final_lines))
-        print(f"[StructuredNote] DONE in {time.time()-t0:.1f}s")
+        final = clean_note_formatting(
+            '\n'.join(final_lines)
+        )
+
+        import time
+        print(
+            f"[StructuredNote] DONE in "
+            f"{time.time()-t0:.1f}s - "
+            f"{len(final)} chars"
+        )
         self._update_job(job_id, "done")
         return final
 
-    def _update_job(self, job_id: str | None, status: str):
-        if not job_id: return
+    def merge_duplicate_sections(self, sections: list) -> list:
+        """
+        MANUAL ALGORITHM - Merges sections with identical
+        or near-identical headings.
+        Preserves the order of FIRST appearance.
+        """
+        merged_map = {}
+        ordered_headings = []
+
+        for section in sections:
+            if not section.strip():
+                continue
+            
+            first_line = section.split('\n')[0].strip()
+            # Clean heading for comparison
+            heading = re.sub(r'^#+\s*📌?\s*', '', first_line).strip()
+            h_key = heading.lower()
+
+            if h_key not in merged_map:
+                merged_map[h_key] = section
+                ordered_headings.append(h_key)
+            else:
+                # Append content to existing section
+                content_only = "\n".join(section.split('\n')[1:])
+                merged_map[h_key] += "\n\n" + content_only
+                print(f"[Merge] Consolidated duplicate topic: {heading}")
+
+        return [merged_map[h] for h in ordered_headings]
+
+    def _update_job(self, job_id: str | None, status: str, note_id: str | None = None):
+        if not job_id:
+            return
         try:
             conn = get_db_connection()
-            if not conn: return
+            if not conn:
+                return
             cur = conn.cursor()
-            cur.execute("UPDATE generation_jobs SET status = %s, updated_at = NOW() WHERE job_id = %s", (status, job_id))
+            if note_id:
+                cur.execute(
+                    "UPDATE generation_jobs SET status = %s, note_id = %s, updated_at = NOW() WHERE job_id = %s",
+                    (status, note_id, job_id)
+                )
+            else:
+                cur.execute(
+                    "UPDATE generation_jobs SET status = %s, updated_at = NOW() WHERE job_id = %s",
+                    (status, job_id)
+                )
             conn.commit()
             cur.close()
             conn.close()
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[_update_job] Failed: {e}")
 
     def save_note_to_db(self, user_id, pdf_id, title, content):
         note_id = str(uuid.uuid4())

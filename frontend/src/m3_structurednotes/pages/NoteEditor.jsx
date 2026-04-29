@@ -23,6 +23,7 @@ export default function NoteEditor() {
   const isDragging = useRef(false)
   const workspaceRef = useRef(null)
   const matchPositions = useRef([])
+  const sectionPageMapRef = useRef(new Map())
 
   const [noteTitle, setNoteTitle] = useState('Structured Study Notes')
   const [noteContent, setNoteContent] = useState('')
@@ -112,57 +113,207 @@ export default function NoteEditor() {
     if (contentLoadedRef.current) return
     contentLoadedRef.current = true
 
-    console.log('[Editor] Raw noteContent length:', noteContent.length)
-    console.log('[Editor] First 100 chars:', noteContent.substring(0, 100))
+    console.log(
+      '[Load] Content length:', noteContent.length
+    )
+    console.log(
+      '[Load] First 200 chars:',
+      noteContent.substring(0, 200)
+    )
 
-    // Clean backend artifacts
+    // Step 1: Clean backend artifacts
     let cleaned = noteContent
       .replace(/End_of_Notes/g, '')
       .replace(/END_SECTION/g, '')
       .replace(/^```markdown\s*/gm, '')
-      .replace(/^```\s*/gm, '')
+      .replace(/^```\s*$/gm, '')
       .trim()
 
-    // Convert bullet markers to proper markdown
-    cleaned = cleaned
-      .replace(/^\* •/gm, '-')
-      .replace(/^\* /gm, '- ')
-      .replace(/^• /gm, '- ')
+    // Step 2: Detect if content is HTML or markdown
+    const hasHtmlTags = /<(h[1-6]|div|ul|ol|li|strong|em|p|pre|code|blockquote)\b/i.test(
+      cleaned
+    )
 
-    console.log('[Editor] Cleaned length:', cleaned.length)
+    let html = ''
 
-    // Convert markdown to HTML
-    let html
-    try {
-      html = marked(cleaned, {
-        breaks: true,
-        gfm: true
-      })
-      console.log('[Editor] HTML generated, length:', html.length)
-    } catch (err) {
-      console.error('[Editor] marked() failed:', err.message)
-      // Fallback: basic conversion
+    if (hasHtmlTags) {
+      // Content already has HTML — use directly
+      // But still process any remaining markdown
+      // inside text nodes
       html = cleaned
-        .replace(/^# (.+)$/gm, '<h1>$1</h1>')
-        .replace(/^## (.+)$/gm, '<h2>$1</h2>')
-        .replace(/^### (.+)$/gm, '<h3>$1</h3>')
-        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-        .replace(/^- (.+)$/gm, '<li>$1</li>')
-        .replace(/(<li>.*<\/li>\n?)+/gs, '<ul>$&</ul>')
-        .replace(/\n\n/g, '</p><p>')
+
+      // Convert any remaining **bold** to <strong>
+      html = html.replace(
+        /\*\*([^*]+)\*\*/g,
+        '<strong>$1</strong>'
+      )
+      // Convert any remaining *italic* to <em>
+      html = html.replace(
+        /(?<!\*)\*([^*]+)\*(?!\*)/g,
+        '<em>$1</em>'
+      )
+
+      console.log('[Load] Content detected as HTML')
+
+    } else {
+      // Pure markdown — convert with marked
+      try {
+        html = marked(cleaned, {
+          breaks: true,
+          gfm: true,
+          headerIds: false,
+          mangle: false
+        })
+        console.log('[Load] Content converted from markdown')
+      } catch (err) {
+        console.error('[Load] marked() failed:', err)
+        // Manual fallback conversion
+        html = cleaned
+          .replace(/^## (.+)$/gm,
+            '<h2>$1</h2>')
+          .replace(/^### (.+)$/gm,
+            '<h3>$1</h3>')
+          .replace(/^# (.+)$/gm,
+            '<h1>$1</h1>')
+          .replace(/\*\*([^*]+)\*\*/g,
+            '<strong>$1</strong>')
+          .replace(/\*([^*]+)\*/g,
+            '<em>$1</em>')
+          .replace(/^- (.+)$/gm,
+            '<li>$1</li>')
+          .replace(/(<li>.*<\/li>\n?)+/gs,
+            '<ul>$&</ul>')
+          .replace(/\n\n/g, '</p><p>')
         html = '<p>' + html + '</p>'
+      }
     }
 
-    // Set both state and direct DOM
+    // Step 3: Post-process to ensure bullets are on separate lines
+    const postProcess = (htmlStr) => {
+      // Split by lines
+      const lines = htmlStr.split('\n')
+      const result = []
+      let inList = false
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i]
+        const trimmed = line.trim()
+
+        // Check if this line starts with a bullet
+        // that was NOT already inside an li tag
+        const isBulletLine = (
+          trimmed.startsWith('- ') ||
+          trimmed.startsWith('* ')
+        ) && !trimmed.startsWith('<')
+
+        if (isBulletLine) {
+          if (!inList) {
+            result.push('<ul>')
+            inList = true
+          }
+          const content = trimmed.substring(2)
+          result.push(`<li>${content}</li>`)
+        } else {
+          if (inList && trimmed !== '') {
+            // Check if next bullet continues list
+            const nextLine = lines[i + 1]?.trim() || ''
+            const nextIsBullet = (
+              nextLine.startsWith('- ') ||
+              nextLine.startsWith('* ')
+            ) && !nextLine.startsWith('<')
+
+            if (!nextIsBullet) {
+              result.push('</ul>')
+              inList = false
+            }
+          }
+          if (trimmed !== '' || !inList) {
+            result.push(line)
+          }
+        }
+      }
+
+      if (inList) result.push('</ul>')
+      return result.join('\n')
+    }
+
+    // Apply post-processing after markdown/HTML detection
+    html = postProcess(html)
+
+    console.log(
+      '[Load] Final HTML length:', html.length
+    )
+    console.log(
+      '[Load] HTML preview:',
+      html.substring(0, 200)
+    )
+
+    // Set into editor
     setEditorContent(html)
-    
-    // Use setTimeout to ensure DOM is ready
     setTimeout(() => {
       if (editorRef.current) {
         editorRef.current.innerHTML = html
-        console.log('[Editor] Content set in DOM')
+
+        // Count block elements to verify rendering
+        const lists = editorRef.current
+            .querySelectorAll('ul, ol')
+        const items = editorRef.current
+            .querySelectorAll('li')
+        const headings = editorRef.current
+            .querySelectorAll('h2, h3')
+
+        console.log('[Render] Lists:', lists.length)
+        console.log('[Render] Bullets:', items.length)
+        console.log('[Render] Headings:', headings.length)
+
+        if (items.length === 0) {
+          console.warn(
+            '[Render] WARNING: No li elements found.',
+            'Content may not be rendering as bullets.'
+          )
+          console.log(
+            '[Render] HTML preview:',
+            html.substring(0, 500)
+          )
+        }
+
+        // Build section-to-page mapping from HTML
+        // Parse data attributes before they might
+        // get stripped by contentEditable
+        const tempDiv = document.createElement('div')
+        tempDiv.innerHTML = html
+
+        const sections = tempDiv.querySelectorAll(
+          '[data-page]'
+        )
+        console.log(
+          '[Map] Building section map from',
+          sections.length, 'sections'
+        )
+
+        const newMap = new Map()
+        sections.forEach(section => {
+          const heading = section.querySelector('h2')
+          if (heading) {
+            const headingText = heading.textContent
+              .replace('📌', '')
+              .trim()
+            newMap.set(headingText, {
+              page: parseInt(section.dataset.page) || 1,
+              docId: section.dataset.doc || ''
+            })
+            console.log(
+              '[Map] Mapped:', headingText,
+              '-> page', section.dataset.page
+            )
+          }
+        })
+        sectionPageMapRef.current = newMap
+        console.log(
+          '[Map] Total mappings:', newMap.size
+        )
       }
-    }, 100)
+    }, 150)
   }, [noteContent])
 
   // FIX 1 — applyHeading
@@ -424,27 +575,106 @@ export default function NoteEditor() {
     setLineSpacing(value)
   }
 
+  // FIX 1 — Search bar highlighting
+  const SEARCH_HIGHLIGHT_CLASS = 'search-hl'
+
+  const clearSearchHighlights = () => {
+    const editor = editorRef.current
+    if (!editor) return
+    const marks = editor.querySelectorAll(`mark.${SEARCH_HIGHLIGHT_CLASS}`)
+    marks.forEach(mark => {
+      const text = document.createTextNode(mark.textContent)
+      mark.replaceWith(text)
+    })
+    editor.normalize()
+  }
+
   const doSearch = (term) => {
-    if (!editorRef.current) return
-    if (!term) {
-      matchPositions.current = []
-      setMatchCount(0)
-      setCurrentMatch(0)
-      return
-    }
-    const text = editorRef.current?.innerText.toLowerCase() || ''
-    const lower = term.toLowerCase()
+    clearSearchHighlights()
+    matchPositions.current = []
+    setMatchCount(0)
+    setCurrentMatch(0)
+
+    if (!term || term.trim().length < 2) return
+
+    const editor = editorRef.current
+    if (!editor) return
+
+    const termLower = term.toLowerCase()
     const positions = []
-    let start = 0
-    while (start < text.length) {
-      const idx = text.indexOf(lower, start)
-      if (idx === -1) break
-      positions.push(idx)
-      start = idx + 1
+
+    const walker = document.createTreeWalker(
+      editor,
+      NodeFilter.SHOW_TEXT,
+      {
+        acceptNode: (node) => {
+          if (node.parentElement?.tagName === 'MARK') return NodeFilter.FILTER_REJECT
+          if (!node.textContent.trim()) return NodeFilter.FILTER_SKIP
+          return NodeFilter.FILTER_ACCEPT
+        }
+      }
+    )
+
+    const textNodes = []
+    let node
+    while ((node = walker.nextNode())) {
+      textNodes.push(node)
     }
+
+    textNodes.forEach(textNode => {
+      const text = textNode.textContent
+      const textLower = text.toLowerCase()
+      let startIdx = 0
+
+      while (true) {
+        const idx = textLower.indexOf(termLower, startIdx)
+        if (idx === -1) break
+
+        const range = document.createRange()
+        range.setStart(textNode, idx)
+        range.setEnd(textNode, idx + term.length)
+
+        const mark = document.createElement('mark')
+        mark.className = SEARCH_HIGHLIGHT_CLASS
+        
+        try {
+          range.surroundContents(mark)
+          positions.push(mark)
+          // Since surroundContents split the text node, we need to stop searching this specific text node
+          // and rely on the next iterations or normalize. For simplicity in this implementation,
+          // we break and the user can re-search if needed, or we just move index.
+          break 
+        } catch (e) {
+          startIdx = idx + 1
+        }
+      }
+    })
+
     matchPositions.current = positions
     setMatchCount(positions.length)
-    if (positions.length > 0) setCurrentMatch(1)
+
+    if (positions.length > 0) {
+      setCurrentMatch(1)
+      scrollToMatch(positions[0])
+      highlightCurrentMatch(0)
+    }
+  }
+
+  const highlightCurrentMatch = (index) => {
+    const positions = matchPositions.current
+    positions.forEach(mark => {
+      mark.style.backgroundColor = '#FFD700'
+      mark.style.outline = 'none'
+    })
+    if (positions[index]) {
+      positions[index].style.backgroundColor = '#FF8C00'
+      positions[index].style.outline = '2px solid #FF6B00'
+    }
+  }
+
+  const scrollToMatch = (markEl) => {
+    if (!markEl) return
+    markEl.scrollIntoView({ behavior: 'smooth', block: 'center' })
   }
 
   const nextMatch = () => {
@@ -452,6 +682,8 @@ export default function NoteEditor() {
     if (positions.length === 0) return
     const next = currentMatch % positions.length
     setCurrentMatch(next + 1)
+    scrollToMatch(positions[next])
+    highlightCurrentMatch(next)
   }
 
   const prevMatch = () => {
@@ -459,107 +691,319 @@ export default function NoteEditor() {
     if (positions.length === 0) return
     const prev = (currentMatch - 2 + positions.length) % positions.length
     setCurrentMatch(prev + 1)
+    scrollToMatch(positions[prev])
+    highlightCurrentMatch(prev)
+  }
+
+  // FIX 4 — Clean search marks before save/download
+  const getCleanHtml = () => {
+    const editor = editorRef.current
+    if (!editor) return editorContent
+    const clone = editor.cloneNode(true)
+    const marks = clone.querySelectorAll('mark.search-hl, mark.search-hl-current')
+    marks.forEach(mark => {
+      const text = document.createTextNode(mark.textContent)
+      mark.replaceWith(text)
+    })
+    return clone.innerHTML
+  }
+
+  // FIX 3C — Robust handleEditorClick
+  const handleEditorClick = (e) => {
+    const target = e.target
+
+    // Find the nearest h2 heading
+    // by walking up the DOM tree
+    let el = target
+    let headingText = null
+
+    // Check if clicked element IS a heading
+    if (el.tagName === 'H2') {
+      headingText = el.textContent
+        .replace('📌', '').trim()
+    }
+
+    // Or find nearest h2 parent
+    if (!headingText) {
+      const h2 = el.closest('h2')
+      if (h2) {
+        headingText = h2.textContent
+          .replace('📌', '').trim()
+      }
+    }
+
+    // Or find the section div containing click
+    if (!headingText) {
+      // Walk up looking for any element with h2
+      let parent = el.parentElement
+      for (let i = 0; i < 6; i++) {
+        if (!parent) break
+        const h2 = parent.querySelector('h2')
+        if (h2) {
+          headingText = h2.textContent
+            .replace('📌', '').trim()
+          break
+        }
+        parent = parent.parentElement
+      }
+    }
+
+    if (!headingText) return
+
+    console.log('[Click] Heading clicked:', headingText)
+
+    // Look up page number from our map
+    const mapping = sectionPageMapRef.current.get(
+      headingText
+    )
+
+    if (!mapping) {
+      console.log(
+        '[Click] No mapping for:', headingText
+      )
+      console.log(
+        '[Click] Available mappings:',
+        Array.from(sectionPageMapRef.current.keys())
+      )
+      return
+    }
+
+    console.log(
+      '[Click] Jump to page:', mapping.page,
+      'doc:', mapping.docId
+    )
+
+    handleSourceJump(mapping.page, mapping.docId)
+  }
+
+  const handleSourceJump = (pageNum, docId) => {
+    // Ensure source panel is open
+    setSourceVisible(true)
+
+    // Find the right file
+    let targetFile = activeFile
+    if (docId && sourceFiles.length > 0) {
+      const found = sourceFiles.find(
+        f => f.pdf_id === docId
+      )
+      if (found) {
+        targetFile = found
+        setActiveFile(found)
+      }
+    } else if (sourceFiles.length > 0) {
+      targetFile = sourceFiles[0]
+      setActiveFile(sourceFiles[0])
+    }
+
+    if (!targetFile) {
+      showToast('No source file loaded')
+      return
+    }
+
+    const baseUrl = getFullPdfUrl(targetFile)
+    if (!baseUrl) {
+      showToast('Cannot find source file URL')
+      return
+    }
+
+    const pageUrl = baseUrl + '#page=' + pageNum
+
+    // Force iframe navigation
+    const setIframeSrc = () => {
+      const iframe = document.querySelector(
+        '.source-iframe'
+      )
+      if (iframe) {
+        iframe.src = ''
+        requestAnimationFrame(() => {
+          iframe.src = pageUrl
+          console.log('[Jump] iframe src:', pageUrl)
+        })
+      } else {
+        console.warn('[Jump] iframe not found')
+      }
+    }
+
+    // Small delay to let source panel open first
+    setTimeout(setIframeSrc, 400)
+
+    showToast(`↗ Jumped to page ${pageNum}`)
   }
 
   const downloadMd = () => {
-    let content = getEditorText()
-    if (!content || content.trim().length < 5) content = noteContent || '# ' + noteTitle
-    const blob = new Blob([content], { type: 'text/markdown' })
+    const editor = editorRef.current
+
+    // Clone and clean search marks
+    let content = ''
+    if (editor) {
+      const clone = editor.cloneNode(true)
+      const marks = clone.querySelectorAll('mark')
+      marks.forEach(mark => {
+        const text = document.createTextNode(
+          mark.textContent
+        )
+        mark.replaceWith(text)
+      })
+      content = clone.innerText || clone.textContent
+    }
+
+    if (!content || content.trim().length < 10) {
+      content = noteContent || noteTitle ||
+          'Study Notes'
+    }
+
+    const blob = new Blob([content], {
+      type: 'text/plain;charset=utf-8'
+    })
     const url = URL.createObjectURL(blob)
+    const filename = (noteTitle || 'Study_Notes')
+      .replace(/[^\w\s-]/g, '')
+      .replace(/\s+/g, '_')
+      .substring(0, 60) + '.md'
+
     const a = document.createElement('a')
     a.href = url
-    a.download = noteTitle.replace(/[^\w]/g, '_') + '.md'
+    a.download = filename
+    a.style.display = 'none'
     document.body.appendChild(a)
     a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
-    showToast('Downloaded successfully')
+
+    setTimeout(() => {
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    }, 200)
+
+    showToast('Downloaded as .md successfully')
   }
 
-  // FIX 4 — Download PDF
   const downloadPdf = () => {
-    const html = editorRef.current?.innerHTML || editorContent
-    
-    if (!html || html.trim().length < 10) {
+    const editor = editorRef.current
+    if (!editor) {
       showToast('No content to download')
       return
     }
-    
-    const fullHtml = `<!DOCTYPE html>
-<html><head>
-<meta charset="utf-8">
-<title>${noteTitle}</title>
+
+    // Clone and clean the editor content
+    const clone = editor.cloneNode(true)
+    clone.querySelectorAll('mark').forEach(m => {
+      m.replaceWith(
+        document.createTextNode(m.textContent)
+      )
+    })
+
+    const bodyHtml = clone.innerHTML
+
+    if (!bodyHtml || bodyHtml.trim().length < 20) {
+      showToast('Generate a note first')
+      return
+    }
+
+    const printHtml = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>${noteTitle || 'Study Notes'}</title>
 <style>
-body{font-family:-apple-system,sans-serif;
-     max-width:800px;margin:40px auto;
-     padding:20px;color:#1a1523;
-     line-height:1.7;font-size:14px}
-h1{font-size:22px;font-weight:600;
-   border-bottom:2px solid #7C3AED;
-   padding-bottom:8px;margin-bottom:20px}
-h2{font-size:17px;font-weight:600;
-   color:#3C3489;margin-top:28px;
-   margin-bottom:12px}
-h3{font-size:14px;font-weight:600;
-   margin-top:16px;margin-bottom:8px}
-li{margin-bottom:8px}
-ul{padding-left:20px}
-strong{font-weight:600}
-code{background:#f3f0ff;padding:2px 5px;
-     border-radius:3px;font-size:12px;
-     font-family:monospace}
-pre{background:#1e1e2e;color:#cdd6f4;
-    padding:14px;border-radius:8px;
-    font-size:12px;font-family:monospace}
-mark{border-radius:2px;padding:1px 2px}
-@media print{
-  body{margin:20px}
-  * {
-    -webkit-print-color-adjust: exact !important;
-    print-color-adjust: exact !important;
-    color-adjust: exact !important;
-  }
-  mark,
-  [style*="background-color"],
-  [style*="background:"] {
-    -webkit-print-color-adjust: exact !important;
-    print-color-adjust: exact !important;
-  }
-  div[style*="border: 1.5px solid #A78BFA"] {
-    border: 1.5px solid #A78BFA !important;
-    background: #F5F3FF !important;
-    -webkit-print-color-adjust: exact !important;
-    print-color-adjust: exact !important;
-  }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: Arial, sans-serif;
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 32px 28px;
+  color: #1a1523;
+  line-height: 1.75;
+  font-size: 14px;
 }
+h1 {
+  font-size: 22px;
+  font-weight: 700;
+  border-bottom: 3px solid #7C3AED;
+  padding-bottom: 10px;
+  margin-bottom: 20px;
+}
+h2 {
+  font-size: 17px;
+  font-weight: 700;
+  color: #3C3489;
+  margin-top: 28px;
+  margin-bottom: 12px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid #EDE9FE;
+}
+h3 { font-size: 14px; font-weight: 600;
+     margin-top: 16px; margin-bottom: 8px; }
+p { margin-bottom: 10px; }
+ul { list-style: disc; padding-left: 20px;
+     margin-bottom: 12px; }
+ol { list-style: decimal; padding-left: 20px;
+     margin-bottom: 12px; }
+li { margin-bottom: 8px; }
+strong, b { font-weight: 700; }
+code { background: #f3f0ff; padding: 2px 5px;
+       border-radius: 3px; font-size: 12px;
+       font-family: Consolas, monospace; }
+pre { background: #1e1e2e; color: #cdd6f4;
+      padding: 14px; border-radius: 8px;
+      font-size: 12px; white-space: pre-wrap;
+      margin: 12px 0; }
+blockquote { border-left: 4px solid #7C3AED;
+             padding-left: 14px; color: #5F5E5A;
+             margin: 12px 0; font-style: italic; }
+hr { border: none; border-top: 1px solid #EDE9FE;
+     margin: 20px 0; }
+* { -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important; }
+@page { margin: 18mm; }
 </style>
 </head>
 <body>
-<h1>${noteTitle}</h1>
-${html}
-</body></html>`
+<h1>${noteTitle || 'Structured Study Notes'}</h1>
+${bodyHtml}
+</body>
+</html>`
 
-    const win = window.open('', '_blank')
-    if (win) {
-      win.document.write(fullHtml)
-      win.document.close()
-      win.focus()
-      setTimeout(() => {
-        win.print()
-      }, 1000)
+    // Use hidden iframe to avoid popup blocks
+    let frame = document.getElementById('pdf-print-frame')
+
+    if (!frame) {
+      frame = document.createElement('iframe')
+      frame.id = 'pdf-print-frame'
+      frame.style.cssText = `
+        position: fixed;
+        width: 0;
+        height: 0;
+        border: none;
+        left: -9999px;
+        top: -9999px;
+      `
+      document.body.appendChild(frame)
+    }
+
+    const frameDoc = frame.contentDocument ||
+        frame.contentWindow?.document
+
+    if (!frameDoc) {
+      showToast('Cannot create print frame')
       return
     }
-    
-    const blob = new Blob([fullHtml], { type: 'text/html;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = noteTitle.replace(/[^\w\s]/g, '').replace(/\s+/g, '_') + '.html'
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
-    showToast('Downloaded as HTML — open in browser and print to PDF')
+
+    frameDoc.open()
+    frameDoc.write(printHtml)
+    frameDoc.close()
+
+    showToast(
+      'Opening print dialog — select Save as PDF'
+    )
+
+    setTimeout(() => {
+      try {
+        frame.contentWindow.focus()
+        frame.contentWindow.print()
+      } catch (err) {
+        console.error('[PDF] Print failed:', err)
+        showToast('Print failed — try again')
+      }
+    }, 600)
   }
 
   const saveNote = async () => {
@@ -569,7 +1013,7 @@ ${html}
     }
     setIsSaving(true)
     try {
-      const html = getEditorHtml()
+      const html = getCleanHtml()
       await axios.put(`${API_BASE}/notes/${noteId}`, { content: html })
       await axios.put(`${API_BASE}/notes/${noteId}/folder`, { folder_id: selectedFolder.id })
       showToast('Saved to ' + selectedFolder.name)
@@ -585,7 +1029,7 @@ ${html}
     setShowSaveModal(false)
     setIsSaving(true)
     try {
-      const html = getEditorHtml()
+      const html = getCleanHtml()
       await axios.put(`${API_BASE}/notes/${noteId}`, { content: html })
       await axios.put(`${API_BASE}/notes/${noteId}/folder`, { folder_id: folder.id })
       showToast('Saved to ' + folder.name)
@@ -599,9 +1043,17 @@ ${html}
   // FIX 3B — PDF URL helper
   const getFullPdfUrl = (file) => {
     if (!file) return ''
+
     const id = file.pdf_id || ''
-    if (!id) return ''
-    return `http://127.0.0.1:8000/api/m3/documents/${id}.pdf`
+    if (!id) {
+      console.warn('[URL] No pdf_id in file:', file)
+      return ''
+    }
+
+    // Always use the confirmed working route
+    const url = `http://127.0.0.1:8000/api/m3/documents/${id}.pdf`
+    console.log('[URL] PDF URL:', url)
+    return url
   }
 
   return (
@@ -740,11 +1192,29 @@ ${html}
           color: showTOC ? '#3C3489' : 'var(--color-text-secondary)', cursor: 'pointer'
         }}>≡ Contents</button>
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '4px' }}>
-          <input type="text" value={searchTerm} placeholder="Find…" onChange={e => { setSearchTerm(e.target.value); doSearch(e.target.value) }} onKeyDown={e => { if (e.key === 'Enter') nextMatch() }} style={{
-            fontSize: '12px', padding: '4px 8px', width: '140px', borderRadius: '6px',
-            border: '0.5px solid var(--color-border-tertiary)', background: 'var(--color-background-secondary)',
-            color: 'var(--color-text-primary)', outline: 'none'
-          }} />
+          <input
+            type="text"
+            value={searchTerm}
+            placeholder="Search in note..."
+            onChange={e => {
+              setSearchTerm(e.target.value)
+              doSearch(e.target.value)
+            }}
+            onKeyDown={e => {
+              if (e.key === 'Enter') nextMatch()
+              if (e.key === 'Escape') {
+                setSearchTerm('')
+                clearSearchHighlights()
+                setMatchCount(0)
+                setCurrentMatch(0)
+              }
+            }}
+            style={{
+              fontSize: '12px', padding: '4px 8px', width: '140px', borderRadius: '6px',
+              border: '0.5px solid var(--color-border-tertiary)', background: 'var(--color-background-secondary)',
+              color: 'var(--color-text-primary)', outline: 'none'
+            }}
+          />
           {matchCount > 0 && <span style={{ fontSize: '11px', color: 'var(--color-text-secondary)' }}>{currentMatch}/{matchCount}</span>}
           {matchCount > 1 && (
             <>
@@ -774,118 +1244,207 @@ ${html}
 
           <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             <style>{`
-              .note-editor-body {
-                flex: 1;
-                overflow-y: auto;
-                padding: 24px 40px;
-                font-size: 14px;
-                line-height: 1.7;
-                outline: none;
-                min-height: 0;
-              }
-              .note-editor-body h1 {
-                font-size: 22px;
-                font-weight: 600;
-                margin: 0 0 16px;
-                color: #1a1523;
-              }
-              .note-editor-body h2 {
-                font-size: 17px;
-                font-weight: 600;
-                color: #3C3489;
-                margin: 24px 0 10px;
-                padding-bottom: 5px;
-                border-bottom: 1px solid #EDE9FE;
-              }
-              .note-editor-body h3 {
-                font-size: 14px;
-                font-weight: 600;
-                margin: 16px 0 8px;
-                color: #1a1523;
-              }
-              .note-editor-body ul {
-                list-style: none;
-                padding: 0;
-                margin: 0 0 12px;
-              }
-              .note-editor-body li {
-                margin-bottom: 8px;
-                padding: 7px 12px;
-                border-left: 2.5px solid #EDE9FE;
-                border-radius: 0 6px 6px 0;
-                background: #FAFAF9;
-                cursor: pointer;
-                transition: all 0.15s;
-              }
-              .note-editor-body li:hover {
-                border-left-color: #7C3AED;
-                background: #EDE9FE;
-              }
-              .note-editor-body strong {
-                font-weight: 600;
-                color: #1a1523;
-              }
-              .note-editor-body code {
-                background: #f3f0ff;
-                padding: 2px 5px;
-                border-radius: 3px;
-                font-size: 12px;
-                font-family: monospace;
-              }
-              .note-editor-body pre {
-                background: #1e1e2e;
-                color: #cdd6f4;
-                padding: 14px;
-                border-radius: 8px;
-                font-size: 12px;
-                font-family: monospace;
-                overflow-x: auto;
-                margin: 12px 0;
-              }
-              .note-editor-body blockquote {
-                border-left: 3px solid #7C3AED;
-                padding-left: 14px;
-                color: #6B6780;
-                font-style: italic;
-                margin: 12px 0;
-              }
-              .note-editor-body ol {
-                list-style: decimal;
-                padding-left: 24px;
-                margin-bottom: 12px;
-              }
-              .note-editor-body ol li {
-                margin-bottom: 8px;
-                padding: 6px 10px;
-                border-left: 2.5px solid #EDE9FE;
-                border-radius: 0 6px 6px 0;
-                background: none;
-              }
-              .note-editor-body p {
-                margin-bottom: 10px;
-              }
-            `}</style>
+    .note-editor-body {
+      flex: 1;
+      overflow-y: auto !important;
+      padding: 24px 40px;
+      font-size: 14px;
+      line-height: 1.8;
+      outline: none;
+      color: var(--color-text-primary);
+      min-height: 0;
+      word-wrap: break-word;
+    }
+
+    /* Force ALL elements to display as block */
+    .note-editor-body * {
+      max-width: 100%;
+    }
+
+    .note-editor-body h1 {
+      display: block !important;
+      font-size: 22px;
+      font-weight: 600;
+      margin: 0 0 16px 0;
+      padding-bottom: 10px;
+      border-bottom: 2px solid #7C3AED;
+    }
+
+    .note-editor-body h2 {
+      display: block !important;
+      font-size: 17px;
+      font-weight: 600;
+      color: #3C3489;
+      margin: 28px 0 14px 0;
+      padding-bottom: 6px;
+      border-bottom: 1px solid #EDE9FE;
+      cursor: pointer;
+      transition: color 0.15s;
+    }
+
+    .note-editor-body h2:hover {
+      color: #7C3AED;
+    }
+
+    .note-editor-body h2:hover::after {
+      content: " ↗";
+      font-size: 12px;
+      font-weight: 400;
+      color: #7C3AED;
+    }
+
+    .note-editor-body h3 {
+      display: block !important;
+      font-size: 15px;
+      font-weight: 600;
+      margin: 18px 0 8px 0;
+    }
+
+    .note-editor-body p {
+      display: block !important;
+      margin: 0 0 12px 0;
+    }
+
+    .note-editor-body ul {
+      display: block !important;
+      list-style: none !important;
+      padding: 0 !important;
+      margin: 0 0 16px 0 !important;
+    }
+
+    .note-editor-body ol {
+      display: block !important;
+      list-style: decimal !important;
+      padding-left: 22px !important;
+      margin: 0 0 16px 0 !important;
+    }
+
+    .note-editor-body li {
+      display: block !important;
+      margin-bottom: 12px !important;
+      padding: 8px 12px 8px 14px !important;
+      border-left: 3px solid #EDE9FE !important;
+      border-radius: 0 6px 6px 0 !important;
+      line-height: 1.75 !important;
+      transition: border-color 0.15s,
+                  background 0.15s;
+    }
+
+    .note-editor-body li:hover {
+      border-left-color: #7C3AED !important;
+      background: rgba(124,58,237,0.04) !important;
+    }
+
+    .note-editor-body strong,
+    .note-editor-body b {
+      font-weight: 700 !important;
+    }
+
+    .note-editor-body em,
+    .note-editor-body i {
+      font-style: italic !important;
+    }
+
+    .note-editor-body code {
+      background: #f3f0ff;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-family: 'Courier New', Consolas,
+        monospace;
+      color: #3C3489;
+    }
+
+    .note-editor-body pre {
+      display: block !important;
+      background: #1e1e2e;
+      color: #cdd6f4;
+      padding: 16px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-family: 'Courier New', monospace;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      margin: 14px 0;
+    }
+
+    .note-editor-body blockquote {
+      display: block !important;
+      border-left: 4px solid #7C3AED;
+      padding-left: 16px;
+      color: #6B6780;
+      margin: 12px 0;
+      font-style: italic;
+    }
+
+    .note-editor-body hr {
+      display: block !important;
+      border: none;
+      border-top: 1px solid #EDE9FE;
+      margin: 20px 0;
+    }
+
+    .note-editor-body table {
+      display: table !important;
+      width: 100%;
+      border-collapse: collapse;
+      margin: 14px 0;
+      font-size: 13px;
+    }
+
+    .note-editor-body th {
+      background: #EDE9FE;
+      padding: 8px 12px;
+      text-align: left;
+      font-weight: 600;
+      border: 1px solid #AFA9EC;
+    }
+
+    .note-editor-body td {
+      padding: 7px 12px;
+      border: 1px solid #EDE9FE;
+    }
+
+    .note-editor-body tr:nth-child(even) td {
+      background: #FAFAF9;
+    }
+
+    .note-editor-body img {
+      display: block !important;
+      max-width: 100%;
+      border-radius: 8px;
+      margin: 12px 0;
+      border: 1px solid #EDE9FE;
+    }
+
+    .note-editor-body mark.search-hl {
+      background-color: #FFD700 !important;
+      color: #000 !important;
+      border-radius: 2px;
+      padding: 0 1px;
+    }
+
+    .note-editor-body .note-section {
+      display: block !important;
+      margin-bottom: 20px;
+    }
+  `}</style>
             
             <div
-              ref={editorRef}
-              className="note-editor-body"
-              contentEditable={true}
-              suppressContentEditableWarning={true}
-              onInput={(e) => setEditorContent(e.currentTarget.innerHTML)}
-              onContextMenu={(e) => {
-                const selection = window.getSelection()
-                const text = selection ? selection.toString().trim() : ''
-                if (text.length >= 3) {
-                  e.preventDefault()
-                  setContextMenu({
-                    visible: true,
-                    x: e.clientX,
-                    y: e.clientY,
-                    text: text
-                  })
-                }
-              }}
-            />
+    ref={editorRef}
+    className="note-editor-body"
+    contentEditable={true}
+    suppressContentEditableWarning={true}
+    onClick={handleEditorClick}
+    onInput={e => {
+      setEditorContent(e.currentTarget.innerHTML)
+    }}
+    style={{
+      flex: 1,
+      overflowY: 'auto',
+      minHeight: 0
+    }}
+  />
           </div>
 
           {/* REFINE BAR */}
@@ -967,36 +1526,40 @@ ${html}
             </div>
             <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
               {activeFile ? (
-                <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', height: '100%' }}>
-                  <div style={{
-                    fontSize: '10px',
-                    color: '#888',
-                    padding: '4px 12px',
-                    background: '#f5f5f5'
-                  }}>
-                    Loading: {getFullPdfUrl(activeFile)}
-                  </div>
-                  <iframe
-                    key={activeFile.pdf_id}
-                    src={getFullPdfUrl(activeFile)}
-                    style={{
-                      width: '100%',
-                      flex: 1,
-                      border: 'none'
-                    }}
-                    title={activeFile.filename}
-                    onLoad={() => console.log(
+                <iframe
+                  className="source-iframe"
+                  key={activeFile.pdf_id}
+                  src={getFullPdfUrl(activeFile)}
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    border: 'none'
+                  }}
+                  title={activeFile.filename || 'Source'}
+                  onLoad={(e) => {
+                    console.log(
                       '[iframe] Loaded:',
-                      getFullPdfUrl(activeFile)
-                    )}
-                    onError={() => console.error(
-                      '[iframe] Failed:',
-                      getFullPdfUrl(activeFile)
-                    )}
-                  />
-                </div>
+                      e.target.src
+                    )
+                  }}
+                  onError={(e) => {
+                    console.error(
+                      '[iframe] Failed to load:',
+                      e.target.src
+                    )
+                  }}
+                />
               ) : (
-                <div style={{ padding: '20px', fontSize: '13px', color: 'var(--color-text-secondary)' }}>No source file selected</div>
+                <div style={{
+                  padding: '20px',
+                  fontSize: '13px',
+                  color: 'var(--color-text-secondary)',
+                  textAlign: 'center',
+                  marginTop: '40px'
+                }}>
+                  No source file loaded.
+                  Generate a note first.
+                </div>
               )}
             </div>
           </div>
@@ -1098,6 +1661,20 @@ ${html}
           {toast}
         </div>
       )}
+
+      <iframe
+        id="print-frame"
+        style={{
+          position: 'fixed',
+          right: '0',
+          bottom: '0',
+          width: '0',
+          height: '0',
+          border: 'none',
+          visibility: 'hidden'
+        }}
+        title="print"
+      />
     </div>
   )
 }

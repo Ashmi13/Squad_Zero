@@ -21,7 +21,26 @@ from pydantic import BaseModel, Field
 from m3_structurednotes.services import note_service
 from m3_structurednotes.database import get_db_connection
 
+from fastapi.responses import FileResponse
+import os
+
 router = APIRouter()
+
+
+@router.get("/images/{filename}")
+async def serve_image(filename: str):
+    """Serves extracted lecture slide images"""
+    safe_filename = os.path.basename(filename)
+    image_path = os.path.join(
+        "documents", "images", safe_filename
+    )
+    if not os.path.exists(image_path):
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=404,
+            detail="Image not found"
+        )
+    return FileResponse(image_path)
 
 
 # ─────────────────────────────────────────────────────────────

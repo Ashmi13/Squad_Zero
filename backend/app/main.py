@@ -22,18 +22,18 @@ except Exception:
         cors_origins = old_settings.CORS_ORIGINS
         debug        = old_settings.DEBUG
     except Exception as e:
-        print(f"⚠️  Config load failed: {e}")
+        print(f"[WARN]  Config load failed: {e}")
         app_name     = "NeuraNote"
-        cors_origins = ["http://localhost:3000", "http://localhost:5173"]
+        cors_origins = ["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173", "http://127.0.0.1:3000"]
         debug        = True
 
 # Database table creation
 try:
     from database import engine, Base
     Base.metadata.create_all(bind=engine)
-    print("✅ Database tables ready")
+    print("[OK] Database tables ready")
 except Exception as e:
-    print(f"⚠️  Database init skipped: {e}")
+    print(f"[WARN]  Database init skipped: {e}")
 
 # FastAPI app
 app = FastAPI(
@@ -46,16 +46,16 @@ app = FastAPI(
 try:
     from middleware.size_limit import RequestSizeLimitMiddleware
     app.add_middleware(RequestSizeLimitMiddleware, max_size=50 * 1024 * 1024)
-    print("✅ Request size limit middleware loaded (50 MB)")
+    print("[OK] Request size limit middleware loaded (50 MB)")
 except Exception as e:
-    print(f"⚠️  Size limit middleware skipped: {e}")
+    print(f"[WARN]  Size limit middleware skipped: {e}")
 
 # CORS (explicit methods and headers)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],  # explicit, not "*"
+    allow_methods=["*"],  # explicit, not "*"
     allow_headers=[
         "Content-Type",
         "Authorization",
@@ -76,9 +76,9 @@ try:
     limiter = Limiter(key_func=get_remote_address)
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-    print("✅ Rate limiting loaded")
+    print("[OK] Rate limiting loaded")
 except ImportError:
-    print("⚠️  Rate limiting skipped (slowapi not installed). Run: pip install slowapi")
+    print("[WARN]  Rate limiting skipped (slowapi not installed). Run: pip install slowapi")
 
 # Exception handlers
 try:
@@ -93,29 +93,29 @@ try:
     app.add_exception_handler(SQLAlchemyError, database_exception_handler)
     app.add_exception_handler(Exception, general_exception_handler)
 except Exception as e:
-    print(f"⚠️  Custom error handlers skipped: {e}")
+    print(f"[WARN]  Custom error handlers skipped: {e}")
 
 # Core v1 router (Auth/User)
 try:
     from app.api.v1.router import router as v1_router
     app.include_router(v1_router, prefix="/api/v1")
-    print("✅ Auth/user routes loaded")
+    print("[OK] Auth/user routes loaded")
 except ImportError as e:
     missing = str(e).replace("No module named ", "").strip("'")
-    print(f"⚠️  Auth/user routes skipped (missing dependency: {missing}). Run: pip install supabase")
+    print(f"[WARN]  Auth/user routes skipped (missing dependency: {missing}). Run: pip install supabase")
 except Exception as e:
-    print(f"⚠️  Auth/user routes skipped: {e}")
+    print(f"[WARN]  Auth/user routes skipped: {e}")
 
 # Include Member 3 Router (Smart Note Management)
 try:
     from m3_structurednotes.router import router as m3_router
     app.include_router(m3_router, prefix="/api/m3")
-    print("✅ Member 3 routes loaded (/api/m3)")
+    print("[OK] Member 3 routes loaded (/api/m3)")
 except Exception as e:
-    print(f"⚠️  Member 3 routes skipped: {e}")
+    print(f"[WARN]  Member 3 routes skipped: {e}")
 
 # Lifespan events
-@app.on_event("startup")
+# @app.on_event("startup")
 async def startup_event():
     """Run on application startup"""
     try:
@@ -124,11 +124,11 @@ async def startup_event():
         _ = note_service._ai.embeddings
         print("[Startup] Embeddings ready.")
     except Exception as e:
-        print(f"⚠️  Startup embedding pre-load failed: {e}")
+        print(f"[WARN]  Startup embedding pre-load failed: {e}")
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    print("[X] Shutting down application")
+    print("[EXIT] Shutting down application")
 
 # Root health endpoint
 @app.get("/")
@@ -147,25 +147,26 @@ try:
     app.include_router(health_router)
     app.include_router(quiz_router)
     app.include_router(history_router)
-    print("✅ Quiz routes loaded")
+    print("[OK] Quiz routes loaded")
 except ImportError as e:
     missing = str(e).replace("No module named ", "").strip("'")
-    print(f"⚠️  Quiz routes skipped (missing dependency: {missing}). Run: pip install -r requirements-m4quiz.txt")
+    print(f"[WARN]  Quiz routes skipped (missing dependency: {missing}). Run: pip install -r requirements-m4quiz.txt")
 except Exception as e:
-    print(f"⚠️  Quiz routes skipped: {e}")
+    print(f"[WARN]  Quiz routes skipped: {e}")
 
-# Structured Notes routes
-try:
-    from m3_structurednotes.router import router as notes_router
-    app.include_router(notes_router, prefix="/api/notes", tags=["notes"])
-    print("✅ Structured notes routes loaded")
-except ImportError as e:
-    missing = str(e).replace("No module named ", "").strip("'")
-    print(f"⚠️  Notes routes skipped (missing dependency: {missing}). Run: pip install -r requirements-m3m4.txt")
-except Exception as e:
-    print(f"⚠️  Notes routes skipped: {e}")
+# Removed duplicate — same router already registered at /api/m3 (line 112)
+# Having it twice under different prefixes causes route conflicts.
+# try:
+#     from m3_structurednotes.router import router as notes_router
+#     app.include_router(notes_router, prefix="/api/notes", tags=["notes"])
+#     print("[OK] Structured notes routes loaded")
+# except ImportError as e:
+#     missing = str(e).replace("No module named ", "").strip("'")
+#     print(f"[WARN]  Notes routes skipped (missing dependency: {missing}). Run: pip install -r requirements-m3m4.txt")
+# except Exception as e:
+#     print(f"[WARN]  Notes routes skipped: {e}")
 
-# ✅ FIX — routes land at /api/v1/tasks/, /api/v1/calendar/, etc.
+# [OK] FIX - routes land at /api/v1/tasks/, /api/v1/calendar/, etc.
 _optional_routes = [
     ("routes.tasks",         "router", "/api/v1/tasks",         ["tasks"]),
     ("routes.calendar",      "router", "/api/v1/calendar",      ["calendar"]),
@@ -178,9 +179,22 @@ for _module, _attr, _prefix, _tags in _optional_routes:
         _mod = importlib.import_module(_module)
         app.include_router(getattr(_mod, _attr), prefix=_prefix, tags=_tags)
     except Exception as e:
-        print(f"⚠️  {_module} skipped: {e}")
+        print(f"[WARN]  {_module} skipped: {e}")
 
 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
+
+
+# Member 3 startup - embedding pre-loader
+@app.on_event("startup")
+async def m3_startup_preload():
+    try:
+        from m3_structurednotes.services import note_service
+        _ = note_service._ai.embeddings
+        print("[M3] Embeddings pre-loaded.")
+    except Exception as e:
+        print(f"[M3] Embedding warning: {type(e).__name__}")
+        # Note: never print str(e) as it may
+        # contain credential information

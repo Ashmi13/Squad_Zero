@@ -14,10 +14,13 @@ if not settings.DATABASE_URL:
 
 # SSL for cloud databases
 _use_ssl = any(host in settings.DATABASE_URL for host in ("neon.tech", "supabase", "amazonaws"))
+_connect_args = {"connect_timeout": 10}
+if _use_ssl:
+    _connect_args["sslmode"] = "require"
 
 engine = create_engine(
     settings.DATABASE_URL,
-    connect_args={"sslmode": "require"} if _use_ssl else {},
+    connect_args=_connect_args,
     pool_pre_ping=True,    # detect stale connections before using them
     pool_size=5,
     max_overflow=10,

@@ -1,8 +1,6 @@
 import React from 'react';
-import { Search, Bell, ShieldAlert, Moon, Sun, LogOut } from 'lucide-react';
-import { useTheme } from '@/context/ThemeContext';
-import { config } from '@/config/env';
-import { clearTokens, getAccessToken } from '@/utils/tokenStorage';
+import { Search, Moon, Sun } from 'lucide-react';
+import NotificationBell from '../NotificationBell';
 
 const TopBar = ({ folderName }) => {
   const { isDark, toggleTheme, theme } = useTheme();
@@ -152,102 +150,8 @@ const TopBar = ({ folderName }) => {
           />
         </div>
 
-        {/* Notification Bell */}
-        <div style={{ position: 'relative' }}>
-          <div
-            style={iconButtonStyle}
-            onClick={() => {
-              setShowNotifications((prev) => !prev);
-              setShowAlerts(false);
-            }}
-            title="Notifications"
-          >
-            <Bell size={18} color={theme.colors.text.secondary} />
-            <div style={{
-              position: 'absolute', top: '6px', right: '6px',
-              width: '8px', height: '8px', borderRadius: '50%',
-              backgroundColor: '#ff4d4d'
-            }} />
-          </div>
-
-          {showNotifications && (
-            <div style={popoverStyle}>
-              <div style={{ padding: '10px 12px', borderBottom: `1px solid ${theme.colors.ui.border}`, fontWeight: 600, fontSize: '13px', color: theme.colors.text.primary }}>
-                Notifications
-              </div>
-              <div style={{ padding: '12px', fontSize: '13px', color: theme.colors.text.secondary }}>
-                No new notifications.
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Admin Alerts */}
-        <div style={{ position: 'relative' }}>
-          <div
-            style={iconButtonStyle}
-            onClick={() => {
-              setShowAlerts((prev) => !prev);
-              setShowNotifications(false);
-            }}
-            title="Admin Alerts"
-          >
-            <ShieldAlert size={18} color={theme.colors.text.secondary} />
-            {adminAlerts.length > 0 && (
-              <div style={{
-                position: 'absolute', top: '5px', right: '5px',
-                minWidth: '14px', height: '14px', borderRadius: '7px',
-                padding: '0 4px',
-                backgroundColor: '#d14343',
-                color: '#fff',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: '10px', fontWeight: 700,
-              }}>
-                {adminAlerts.length}
-              </div>
-            )}
-          </div>
-
-          {showAlerts && (
-            <div style={popoverStyle}>
-              <div style={{ padding: '10px 12px', borderBottom: `1px solid ${theme.colors.ui.border}`, fontWeight: 600, fontSize: '13px', color: theme.colors.text.primary }}>
-                Admin Alerts
-              </div>
-
-              {alertsLoading ? (
-                <div style={{ padding: '12px', fontSize: '13px', color: theme.colors.text.secondary }}>
-                  Loading alerts...
-                </div>
-              ) : adminAlerts.length === 0 ? (
-                <div style={{ padding: '12px', fontSize: '13px', color: theme.colors.text.secondary }}>
-                  No admin alerts available.
-                </div>
-              ) : (
-                adminAlerts.map((alert, index) => (
-                  <div
-                    key={String(alert?.id || index)}
-                    style={{
-                      padding: '10px 12px',
-                      borderBottom: index === adminAlerts.length - 1 ? 'none' : `1px solid ${theme.colors.ui.border}`,
-                    }}
-                  >
-                    <div style={{ fontSize: '13px', fontWeight: 600, color: theme.colors.text.primary }}>
-                      {alert?.title || 'Admin Message'}
-                    </div>
-                    <div style={{ marginTop: '4px', fontSize: '12px', color: theme.colors.text.secondary, lineHeight: 1.4 }}>
-                      {alert?.message || 'No message body'}
-                    </div>
-                    {alert?.sent_at && (
-                      <div style={{ marginTop: '6px', fontSize: '11px', color: theme.colors.text.tertiary }}>
-                        {new Date(alert.sent_at).toLocaleString()}
-                      </div>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-          )}
-        </div>
+        {/* Bell */}
+        <NotificationBell size={18} color="#555" />
 
         {/* Dark mode toggle */}
         <div

@@ -197,30 +197,10 @@ const FileManagerPage = ({ activeView, setActiveView }) => {
               </p>
             </div>
 
-            <button
-              type="button"
-              onClick={() => navigate('/files/create-note')}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '8px',
-                border: 'none',
-                borderRadius: '12px',
-                padding: '12px 16px',
-                background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
-                color: '#fff',
-                fontWeight: 700,
-                fontSize: '14px',
-                cursor: 'pointer',
-                boxShadow: '0 10px 22px rgba(79, 70, 229, 0.24)',
-              }}
-              title="Create Notes"
-            >
-              <FilePlus size={16} />
-              Create Notes
-            </button>
-          </div>
-        )}
+        {/* Top Bar */}
+        <TopBar 
+            folderName={activeView === 'home' ? 'Home' : (selectedFolder?.name || 'My Files')} 
+        />
 
         {/* Content */}
         <div style={{ display: 'flex', flex: 1, overflow: activeView === 'home' ? 'auto' : 'hidden' }}>

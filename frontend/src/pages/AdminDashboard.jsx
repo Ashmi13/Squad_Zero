@@ -40,6 +40,7 @@ const AdminDashboard = () => {
   const [announcementForm, setAnnouncementForm] = useState({ title: '', content: '', type: 'info' });
   const [isPosting, setIsPosting] = useState(false);
   const [editingAnnouncement, setEditingAnnouncement] = useState(null);
+  const [expandedId, setExpandedId] = useState(null);
 
   useEffect(() => {
     fetchData();
@@ -72,10 +73,16 @@ const AdminDashboard = () => {
         setAnnouncements(prev => prev.map(a => a.id === editingAnnouncement.id ? res.data : a));
       } else {
         const res = await axiosInstance.post('/api/v1/admin/announcements', announcementForm);
+        // Ensure we immediately see the new announcement at the top
         setAnnouncements(prev => [res.data, ...prev]);
       }
+      // Reset form and UI state
       setAnnouncementForm({ title: '', content: '', type: 'info' });
       setEditingAnnouncement(null);
+      
+      // Optional: switch to broadcast tab if they aren't there
+      setActiveTab('broadcast'); 
+      
     } catch (err) {
       console.error('Announcement Error:', err);
     } finally {
@@ -314,7 +321,7 @@ const AdminDashboard = () => {
                         type="button"
                         onClick={() => {
                             setEditingAnnouncement(null);
-                            setAnnouncementForm({ title: '', content: '' });
+                            setAnnouncementForm({ title: '', content: '', type: 'info' });
                         }}
                         className="w-full bg-white/5 hover:bg-white/10 text-slate-300 font-bold py-4 rounded-2xl transition-all"
                       >
@@ -338,8 +345,26 @@ const AdminDashboard = () => {
                       <div key={item.id} className="bg-[#1e293b]/40 backdrop-blur-md border border-white/10 rounded-3xl p-6 shadow-md hover:shadow-lg transition-all group">
                         <div className="flex justify-between items-start gap-4">
                           <div className="flex-1">
-                            <h3 className="font-bold text-white text-lg mb-1">{item.title}</h3>
-                            <p className="text-slate-400 text-sm line-clamp-2">{item.content}</p>
+                            <div className="flex items-center gap-3 mb-1">
+                              <h3 className="font-bold text-white text-lg">{item.title}</h3>
+                              <span className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-widest border
+                                ${item.type === 'urgent' ? 'bg-red-500/10 text-red-400 border-red-500/20' : 
+                                  item.type === 'warning' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' : 
+                                  'bg-blue-500/10 text-blue-400 border-blue-500/20'}`}>
+                                {item.type || 'info'}
+                              </span>
+                            </div>
+                            <p className={`text-slate-400 text-sm whitespace-pre-wrap ${expandedId === item.id ? '' : 'line-clamp-2'}`}>
+                              {item.content}
+                            </p>
+                            {item.content && item.content.length > 100 && (
+                              <button 
+                                onClick={() => setExpandedId(expandedId === item.id ? null : item.id)}
+                                className="mt-2 text-xs font-bold text-blue-400 hover:text-blue-300"
+                              >
+                                {expandedId === item.id ? 'Show Less' : 'Read More'}
+                              </button>
+                            )}
                             <div className="mt-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">
                               {new Date(item.created_at).toLocaleString()}
                             </div>
@@ -348,7 +373,7 @@ const AdminDashboard = () => {
                             <button 
                               onClick={() => {
                                 setEditingAnnouncement(item);
-                                setAnnouncementForm({ title: item.title, content: item.content });
+                                setAnnouncementForm({ title: item.title, content: item.content, type: item.type || 'info' });
                               }}
                               className="p-2 hover:bg-blue-500/10 rounded-xl text-blue-500 transition-colors"
                             >

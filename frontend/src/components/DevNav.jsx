@@ -9,14 +9,14 @@ const MEMBERS = [
     name: 'Nihaaj',
     color: '#6366f1',
     routes: [
-      { label: 'Landing Page',      path: '/' },
-      { label: 'Sign In',           path: '/login' },
-      { label: 'Sign Up',           path: '/signup' },
-      { label: 'OAuth Callback',    path: '/oauth/callback' },
-      { label: 'Dashboard',         path: '/dashboard' },
-      { label: 'Forgot Password',   path: '/forgot-password' },
-      { label: 'Account Verified',  path: '/account-verified' },
-      { label: '⚡ Go to Tasks',     path: '/login' },
+      { label: 'Landing Page',   path: '/' },
+      { label: 'Sign In',        path: '/login' },
+      { label: 'Sign Up',        path: '/signup' },
+      { label: 'Google Signin', path: '/api/v1/auth/google-login' },
+      { label: 'Dashboard',      path: '/dashboard' } ,
+      { label: 'Admin dashboard',      path: '/admin' } ,
+      { label: 'Mail related pages',      path: '' } ,
+
     ],
   },
  {

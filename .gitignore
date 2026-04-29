@@ -105,3 +105,21 @@ Squad_Zero_Sync/
 run_servers.batbackend/.env
 backend/dump.sql
 .env.backup
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Accidental shell files
+git
+tatus
+cd
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# History files
+.history/

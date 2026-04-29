@@ -26,4 +26,3 @@ class UserProfile(BaseModel):
 class UserMeResponse(BaseModel):
     """Response for /me endpoint"""
     profile: UserProfile = Field(..., description="User profile")
-

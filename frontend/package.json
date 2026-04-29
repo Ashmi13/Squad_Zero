@@ -19,6 +19,8 @@
     "@mui/material": "^7.3.9",
     "@supabase/supabase-js": "^2.103.0",
     "axios": "^1.13.5",
+    "docx": "^9.6.1",
+    "jspdf": "^4.2.1",
     "lucide-react": "^0.564.0",
     "marked": "^18.0.0",
     "mermaid": "^11.14.0",

@@ -14,7 +14,6 @@ sentence-transformers
 chromadb
 
 # ===== DOCUMENT PROCESSING (Member 3) =====
-PyMuPDF
 PyPDF2
 python-pptx
 python-docx

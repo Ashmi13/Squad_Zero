@@ -145,3 +145,54 @@ async def delete_file(
     service = WorkspaceService(supabase)
     result = service.delete_file(user_id=user_id, file_id=file_id)
     return {"status": "success", **result}
+
+
+@router.get("/files/search")
+async def search_files(
+    query: str = "",
+    file_type: Optional[str] = None,
+    limit: int = 20,
+    user_id: str = Depends(get_current_user_id),
+    supabase: Client = Depends(get_supabase_service_client),
+):
+    """
+    Search for files by name or type for cross-module access.
+    Used by Quiz, Structured Notes, and other modules to discover available files.
+    
+    Query parameters:
+    - query: Search by file name (partial match, case-insensitive)
+    - file_type: Filter by file type (PDF, TXT, DOCX, etc.)
+    - limit: Maximum number of results
+    
+    Returns: List of files matching search criteria
+    """
+    service = WorkspaceService(supabase)
+    return service.search_files(user_id=user_id, query=query, file_type=file_type, limit=limit)
+
+
+@router.post("/files/{file_id}/export-to-module")
+async def export_file_to_module(
+    file_id: str,
+    module_name: str = Form(...),
+    module_ref_id: Optional[str] = Form(None),
+    user_id: str = Depends(get_current_user_id),
+    supabase: Client = Depends(get_supabase_service_client),
+):
+    """
+    Export/link a workspace file to another module (Quiz, Structured Notes, etc.).
+    Creates a reference in the target module without copying or moving the file.
+    
+    Parameters:
+    - file_id: ID of the file to export
+    - module_name: Target module name (quiz, structured_notes, etc.)
+    - module_ref_id: Optional reference ID in the target module
+    
+    Returns: Export/reference information
+    """
+    service = WorkspaceService(supabase)
+    return service.export_file_to_module(
+        user_id=user_id,
+        file_id=file_id,
+        module_name=module_name,
+        module_ref_id=module_ref_id,
+    )

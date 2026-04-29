@@ -352,4 +352,8 @@ async def ask_context_question(
         raise
     except Exception as exc:
         logger.error(f"Error answering context question: {str(exc)}")
-        raise HTTPException(status_code=500, detail=f"Error answering question: {str(exc)}")
+        detail = str(exc).strip()
+        prefix = "Error answering question:"
+        if detail.lower().startswith(prefix.lower()):
+            detail = detail[len(prefix):].strip()
+        raise HTTPException(status_code=500, detail=f"Error answering question: {detail}")

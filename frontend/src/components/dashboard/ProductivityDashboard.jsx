@@ -97,28 +97,44 @@ const createAlarm = () => {
   const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
   if (!AudioContextCtor) return null;
   const audioContext = new AudioContextCtor();
+  
   const playTone = (frequency, startTime, duration) => {
     const oscillator = audioContext.createOscillator();
     const gainNode = audioContext.createGain();
-    oscillator.type = 'sine';
-    oscillator.frequency.value = frequency;
-    gainNode.gain.value = 0.001;
+    oscillator.type = 'triangle'; // Louder and more distinct than sine
+    oscillator.frequency.setValueAtTime(frequency, startTime);
+    
+    // Start at 0 volume
+    gainNode.gain.setValueAtTime(0, startTime);
+    
     oscillator.connect(gainNode);
     gainNode.connect(audioContext.destination);
     oscillator.start(startTime);
-    gainNode.gain.exponentialRampToValueAtTime(0.3, startTime + 0.02);
-    gainNode.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
-    oscillator.stop(startTime + duration + 0.03);
+    
+    // Ramp up quickly, hold, then ramp down to avoid clicks
+    gainNode.gain.linearRampToValueAtTime(0.5, startTime + 0.05);
+    gainNode.gain.setValueAtTime(0.5, startTime + duration - 0.05);
+    gainNode.gain.linearRampToValueAtTime(0, startTime + duration);
+    
+    oscillator.stop(startTime + duration + 0.1);
   };
 
   const play = async () => {
-    if (audioContext.state === 'suspended') {
-      await audioContext.resume();
+    try {
+      if (audioContext.state === 'suspended') {
+        await audioContext.resume();
+      }
+      const now = audioContext.currentTime;
+      // Play a classic digital alarm sound (3 rapid beeps, repeated)
+      for (let i = 0; i < 3; i++) {
+        const offset = now + (i * 0.8);
+        playTone(880, offset, 0.15);
+        playTone(880, offset + 0.25, 0.15);
+        playTone(880, offset + 0.5, 0.15);
+      }
+    } catch (e) {
+      console.warn("Audio alarm failed to play:", e);
     }
-    const now = audioContext.currentTime;
-    playTone(880, now, 0.28);
-    playTone(660, now + 0.33, 0.28);
-    playTone(880, now + 0.66, 0.34);
   };
 
   return { play, audioContext };
@@ -183,10 +199,10 @@ const ProductivityDashboard = () => {
       if (showLoader) setLoading(true);
       const [stats, files] = await Promise.all([
         workspaceApi.getProductivityDashboard(),
-        workspaceApi.getRecentFiles(5),
+        workspaceApi.getRecentFiles(20),
       ]);
       setDashboard(normalizeDashboardStats(stats));
-      setRecentFiles(normalizeRecentFiles(files));
+      setRecentFiles(normalizeRecentFiles(files).slice(0, 5));
     } catch (err) {
       setError(err.message || 'Failed to refresh productivity dashboard');
     } finally {
@@ -202,11 +218,11 @@ const ProductivityDashboard = () => {
       try {
         const [stats, files] = await Promise.all([
           workspaceApi.getProductivityDashboard(),
-          workspaceApi.getRecentFiles(5),
+          workspaceApi.getRecentFiles(20),
         ]);
         if (!mounted) return;
         setDashboard(normalizeDashboardStats(stats));
-        setRecentFiles(normalizeRecentFiles(files));
+        setRecentFiles(normalizeRecentFiles(files).slice(0, 5));
       } catch (err) {
         if (!mounted) return;
         setError(err.message || 'Failed to load productivity dashboard');

@@ -19,6 +19,9 @@ import FileManagerPage from '@/pages/FileManagerPage';
 import Rail from '@/components/filemanager/Rail';
 import FolderPanel from '@/components/filemanager/FolderPanel';
 
+// ===== SHARED DASHBOARD =====
+import Dashboard from '@/pages/Dashboard';
+
 // ===== MEMBER 3 (Sandavi) - Structured Notes =====
 import M3Dashboard from './m3_structurednotes/pages/Dashboard';
 import NoteEditor from './m3_structurednotes/pages/NoteEditor';

@@ -64,13 +64,14 @@ export const LoginCard = () => {
 
       // Store JWT tokens securely
       setTokens(response.data.access_token, response.data.refresh_token);
+      localStorage.setItem('user', JSON.stringify(response.data.user));
 
       // Success state
       setIsSuccess(true);
 
-      // Redirect to dashboard or home page
+      // Redirect to files dashboard
       setTimeout(() => {
-        window.location.href = '/dashboard';
+        window.location.href = '/files';
       }, 1000);
     } catch (error) {
       // Error handling

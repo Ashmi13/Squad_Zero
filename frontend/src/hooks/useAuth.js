@@ -39,9 +39,10 @@ export const useAuth = () => {
 
   const logout = useCallback(() => {
     clearTokens();
+    localStorage.removeItem('user');
     setUser(null);
     setIsAuthenticated(false);
-    window.location.href = '/login';
+    window.location.href = 'http://localhost:5173/';
   }, []);
 
   const checkAuth = useCallback(() => {

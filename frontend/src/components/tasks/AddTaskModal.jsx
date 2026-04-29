@@ -11,6 +11,7 @@ const PRIORITIES = [
   { value: 'medium', label: 'Medium', color: '#f59e0b' },
   { value: 'high',   label: 'High',   color: '#ef4444' },
 ];
+
 const REMINDERS = [
   { value: null,  label: 'No reminder' },
   { value: 5,     label: '5 min before' },
@@ -19,8 +20,10 @@ const REMINDERS = [
   { value: 60,    label: '1 hour before' },
   { value: 1440,  label: '1 day before' },
 ];
+
 const COLORS = ['#6366f1','#ec4899','#10b981','#f59e0b','#ef4444','#3b82f6','#8b5cf6','#f97316'];
 
+// shared dark-theme field styles
 const FIELD_SX = {
   '& .MuiOutlinedInput-root': {
     color: '#f3f4f6',
@@ -43,6 +46,7 @@ export default function AddTaskModal({ open, onClose, onSave, categories, defaul
   const [reminder,    setReminder]    = useState(null);
   const [color,       setColor]       = useState('#6366f1');
 
+  // populate fields when editing an existing task, or reset for a new one
   useEffect(() => {
     if (!open) return;
     if (initial) {
@@ -136,6 +140,7 @@ export default function AddTaskModal({ open, onClose, onSave, categories, defaul
           </FormControl>
         </Box>
 
+        {/* color picker row */}
         <Box>
           <Typography sx={{ color: '#9ca3af', fontSize: 11, mb: 1, fontWeight: 700, letterSpacing: '0.08em' }}>COLOR</Typography>
           <Box sx={{ display: 'flex', gap: 1 }}>
@@ -147,37 +152,26 @@ export default function AddTaskModal({ open, onClose, onSave, categories, defaul
             ))}
           </Box>
         </Box>
-      {/* Notebook tag scaffold — enable after notebook sprint merges */}
+
+        {/* notebook link — placeholder until notes sprint merges */}
         <Box>
-          <Typography sx={{
-            color: '#9ca3af', fontSize: 11, mb: 1, fontWeight: 700,
-            letterSpacing: '0.08em', display: 'flex', alignItems: 'center', gap: 0.5,
-          }}>
+          <Typography sx={{ color: '#9ca3af', fontSize: 11, mb: 1, fontWeight: 700, letterSpacing: '0.08em',
+                            display: 'flex', alignItems: 'center', gap: 0.5 }}>
             <MenuBookOutlinedIcon sx={{ fontSize: 13 }} />
             NOTEBOOK
-            <Box component="span" sx={{
-              ml: 1, fontSize: 9, px: 0.7, py: 0.2,
+            <Box component="span" sx={{ ml: 1, fontSize: 9, px: 0.7, py: 0.2,
               bgcolor: 'rgba(99,102,241,0.15)', color: '#818cf8',
-              border: '1px solid rgba(99,102,241,0.3)',
-              borderRadius: 1, fontWeight: 700, letterSpacing: '0.06em',
-            }}>
+              border: '1px solid rgba(99,102,241,0.3)', borderRadius: 1, fontWeight: 700, letterSpacing: '0.06em' }}>
               COMING SOON
             </Box>
           </Typography>
-          <Box sx={{
-            display: 'flex', alignItems: 'center', gap: 1,
-            padding: '10px 12px', borderRadius: 2,
-            border: '1px solid rgba(255,255,255,0.07)',
-            background: 'rgba(255,255,255,0.02)',
-            opacity: 0.45, cursor: 'not-allowed',
-          }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, padding: '10px 12px', borderRadius: 2,
+            border: '1px solid rgba(255,255,255,0.07)', background: 'rgba(255,255,255,0.02)',
+            opacity: 0.45, cursor: 'not-allowed' }}>
             <MenuBookOutlinedIcon sx={{ fontSize: 16, color: '#6b7280' }} />
-            <Typography sx={{ color: '#6b7280', fontSize: '0.85rem' }}>
-              Link a notebook to this task…
-            </Typography>
+            <Typography sx={{ color: '#6b7280', fontSize: '0.85rem' }}>Link a notebook to this task…</Typography>
           </Box>
         </Box>
-
       </DialogContent>
 
       <DialogActions sx={{ borderTop: '1px solid rgba(255,255,255,0.08)', px: 3, py: 2 }}>

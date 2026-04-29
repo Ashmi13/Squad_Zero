@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_BASE_URL = 'http://127.0.0.1:8000';
+const API_BASE_URL = 'http://127.0.0.1:8000/api/m3';
 
 const api = axios.create({
     baseURL: API_BASE_URL,
@@ -35,14 +35,21 @@ export const uploadPDF = async (files) => {
     }
 };
 
-export const generateNote = async (pdfId, userId, instruction, language = "English") => {
+export const generateNote = async (
+    pdfIds,
+    userId,
+    instruction,
+    language = "English",
+    ordering = "ai"
+) => {
     const response = await api.post('/generate-note', {
-        pdf_id: pdfId,
+        pdf_ids: pdfIds,
         user_id: userId,
         instruction: instruction,
-        language: language
+        language: language,
+        ordering: ordering
     });
-    return response.data;
+    return response.data.content;
 };
 
 export const refineText = async (pdfId, selectedText, instruction) => {
@@ -50,6 +57,21 @@ export const refineText = async (pdfId, selectedText, instruction) => {
         pdf_id: pdfId,
         selected_text: selectedText,
         instruction,
+    });
+    return response.data;
+};
+
+export const discussNote = async (
+    noteContent,
+    userQuestion,
+    pdfId = null,
+    conversationHistory = null
+) => {
+    const response = await api.post('/discuss-note', {
+        note_content: noteContent,
+        user_question: userQuestion,
+        pdf_id: pdfId,
+        conversation_history: conversationHistory
     });
     return response.data;
 };
@@ -99,6 +121,19 @@ export const getNotes = async (userId, folderId = null) => {
 
     const response = await api.get('/notes', {
         params: params,
+    });
+    return response.data;
+};
+
+export const getNote = async (noteId) => {
+    const response = await api.get(`/notes/${noteId}`);
+    return response.data;
+};
+
+export const summarizePrompts = async (prompts, originalText) => {
+    const response = await api.post('/summarize-prompts', {
+        prompts: prompts,
+        original_text: originalText
     });
     return response.data;
 };

@@ -1,0 +1,34 @@
+# requirements — Quiz Module
+
+# OpenRouter / OpenAI-compatible client
+openai>=1.0.0
+
+# Document extraction
+PyPDF2
+python-docx
+
+# Spreadsheet extraction
+openpyxl
+
+# Presentation extraction
+python-pptx
+
+# Image OCR
+pytesseract
+Pillow
+
+# Scanned PDF OCR (renders PDF pages as images for Tesseract)
+PyMuPDF
+
+# EPUB extraction
+ebooklib
+beautifulsoup4
+
+# RTF extraction
+striprtf
+
+# PDF report generation
+reportlab
+
+# Rate limiting
+slowapi

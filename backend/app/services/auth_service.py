@@ -34,8 +34,15 @@ class AuthService:
         """
         try:
             # Create user in Supabase Auth
+            # Add specific redirect URL for email verification
             auth_response = self.db.auth.sign_up(
-                {"email": email, "password": password}
+                {
+                    "email": email, 
+                    "password": password,
+                    "options": {
+                        "email_redirect_to": f"{settings.frontend_url}/account-verified"
+                    }
+                }
             )
             
             if not auth_response.user:
@@ -43,21 +50,24 @@ class AuthService:
             
             user_id = auth_response.user.id
             
-            # Create entry in users table
-            user_response = self.db.table("users").insert({
-                "id": user_id,
-                "email": email,
-                "full_name": full_name,
-            }).execute()
-            
-            if not user_response.data:
-                raise Exception("Failed to create user record")
-            
-            return {
+            # Use UPSERT logic/ check existence to prevent "duplicate key" error for cases when SQL trigger might have already created a record
+            user_data = {
                 "id": user_id,
                 "email": email,
                 "full_name": full_name,
             }
+            
+            # UPSERT: Insert or update if exists
+            user_response = self.db.table("users").upsert(user_data).execute()
+            
+            if not user_response.data:
+                # If upsert fails but no exception, try selecting
+                user_record = await self.get_user_by_id(user_id)
+                if not user_record:
+                    raise Exception("Failed to create/retrieve user record")
+                return user_record
+            
+            return user_response.data[0]
             
         except Exception as e:
             raise Exception(f"Signup failed: {str(e)}")
@@ -98,6 +108,7 @@ class AuthService:
                     "email": auth_response.user.email,
                     "full_name": user.get("full_name"),
                     "avatar_url": user.get("avatar_url"),
+                    "role": user.get("role", "user"),
                 },
                 "access_token": auth_response.session.access_token,
                 "refresh_token": auth_response.session.refresh_token,
@@ -147,3 +158,82 @@ class AuthService:
             return True
         except Exception:
             return False
+
+    async def get_or_create_google_user(
+        self,
+        google_user_info: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Get or create a user from Google OAuth profile
+        
+        Args:
+            google_user_info: User profile data from Google (id, email, name, picture)
+            
+        Returns:
+            Dictionary with user data
+        """
+        try:
+            email = google_user_info.get("email")
+            full_name = google_user_info.get("name")
+            avatar_url = google_user_info.get("picture")
+            
+            # 1. Search for existing user in our users table
+            user_response = self.db.table("users").select("*").eq("email", email).execute()
+            
+            if user_response.data and len(user_response.data) > 0:
+                user = user_response.data[0]
+                # Sync info from Google if missing
+                update_data = {}
+                if not user.get("avatar_url"):
+                    update_data["avatar_url"] = avatar_url
+                if not user.get("full_name") or user.get("full_name") == "User":
+                    update_data["full_name"] = full_name
+                
+                if update_data:
+                    self.db.table("users").update(update_data).eq("id", user["id"]).execute()
+                    user.update(update_data)
+                
+                return user
+            
+            # 2. If user doesn't exist in users table, search in Supabase Auth
+            auth_users_res = self.db.auth.admin.list_users()
+            existing_auth_user = next((u for u in auth_users_res if u.email == email), None)
+            
+            if existing_auth_user:
+                # User exists in Auth, but not in our 'users' table. Create it nicely.
+                new_user_data = {
+                    "id": existing_auth_user.id,
+                    "email": email,
+                    "full_name": full_name or "User",
+                    "avatar_url": avatar_url
+                }
+                create_res = self.db.table("users").upsert(new_user_data).execute()
+                return create_res.data[0]
+
+            # Create new user in Auth if not found (Manual flow for Google)
+            import secrets
+            import string
+            random_password = ''.join(secrets.choice(string.ascii_letters + string.digits) for i in range(20))
+            
+            new_auth = self.db.auth.admin.create_user({
+                "email": email,
+                "password": random_password,
+                "email_confirm": True,
+                "user_metadata": {
+                    "full_name": full_name,
+                    "avatar_url": avatar_url
+                }
+            })
+            
+            if new_auth and new_auth.user:
+                # Trigger handle_new_user(). build the users profile, 
+                return {
+                    "id": new_auth.user.id,
+                    "email": email,
+                    "full_name": full_name,
+                    "avatar_url": avatar_url
+                }
+                
+            raise Exception(f"Failed to create Auth user for {email}")
+            
+        except Exception as e:
+            raise Exception(f"Google OAuth user integration failed: {str(e)}")

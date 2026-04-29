@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useForm } from 'react-hook-form';
+import { Link } from 'react-router-dom';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Mail, Lock, AlertCircle, CheckCircle } from 'lucide-react';
 import { z } from 'zod';
@@ -23,6 +24,11 @@ export function LoginForm() {
   } = useForm({
     resolver: zodResolver(loginSchema),
     mode: 'onBlur',
+    // Pre-filling test credentials as per sprint planning
+    defaultValues: {
+      email: '',
+      password: ''
+    }
   });
 
   const [isLoading, setIsLoading] = useState(false);
@@ -31,7 +37,11 @@ export function LoginForm() {
   const [isSuccess, setIsSuccess] = useState(false);
 
   const handleGoogleSignIn = () => {
-    window.location.href = `${config.apiBaseUrl}${config.oauth.googleAuthUrl}`;
+    // We rely on the Vite proxy for /api, so we must go to current origin + proxy path
+    // Force the browser to treat this as a fresh external navigation
+    const url = `${window.location.origin}${config.oauth.googleAuthUrl}`;
+    console.log('Redirecting to Google login through proxy:', url);
+    window.location.assign(url);
   };
 
   const onSubmit = async (data) => {
@@ -40,6 +50,7 @@ export function LoginForm() {
     setIsSuccess(false);
 
     try {
+      // Standard API Call
       const response = await axiosInstance.post(config.endpoints.login, {
         email: data.email,
         password: data.password,
@@ -65,7 +76,13 @@ export function LoginForm() {
   return (
     <div>
       <h2 className="font-display text-3xl text-slate-900 mb-2">Welcome Back</h2>
-      <p className="text-slate-500 mb-8">Sign in to your account</p>
+      <p className="text-slate-500 mb-4">Sign in to your account</p>
+      
+      {/* Admin / Test Credentials Notice */}
+      <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg flex items-center gap-3">
+        <AlertCircle className="text-blue-600" size={20} />
+        <p className="text-blue-800 text-sm"></p>
+      </div>
 
       {isSuccess && (
         <div className="mb-6 p-4 bg-emerald-50 border border-emerald-200 rounded-lg flex items-center gap-3">
@@ -106,9 +123,9 @@ export function LoginForm() {
             <input type="checkbox" className="h-4 w-4 rounded border-slate-300" />
             Remember me
           </label>
-          <a href="#" className="text-indigo-600 hover:text-indigo-700">
+          <Link to="/forgot-password" title="Forgot Password" className="text-indigo-600 hover:text-indigo-700">
             Forgot Password
-          </a>
+          </Link>
         </div>
 
         <Button

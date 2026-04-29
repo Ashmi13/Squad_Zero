@@ -1,8 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { Clock, Calendar, TrendingUp, Award, BarChart3, Eye, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
-import './QuizHistory.css';
+import './styles/QuizHistory.css';
 
-const QuizHistory = ({ userId, onBack }) => {
+import { API } from '@/config/api';
+import { getAuthHeaders } from '@/utils/tokenStorage';
+import { useAuth } from '@/hooks/useAuth.jsx';
+
+const QuizHistory = ({ onBack }) => {
+
+  // Get user from auth context
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('history'); // 'history' or 'analytics'
   const [history, setHistory] = useState([]);
   const [analytics, setAnalytics] = useState(null);
@@ -11,6 +18,7 @@ const QuizHistory = ({ userId, onBack }) => {
   const [selectedAttempt, setSelectedAttempt] = useState(null);
   const [pagination, setPagination] = useState({ limit: 10, offset: 0 });
   const [totalCount, setTotalCount] = useState(0);
+  const [pendingDeleteId, setPendingDeleteId] = useState(null);
 
   useEffect(() => {
     if (activeTab === 'history') {
@@ -26,7 +34,8 @@ const QuizHistory = ({ userId, onBack }) => {
     
     try {
       const response = await fetch(
-        `http://localhost:8000/api/quizzes/history/${userId}?limit=${pagination.limit}&offset=${pagination.offset}`
+        `${API.history}?limit=${pagination.limit}&offset=${pagination.offset}`,
+        { headers: getAuthHeaders() }
       );
       
       if (!response.ok) {
@@ -49,7 +58,8 @@ const QuizHistory = ({ userId, onBack }) => {
     
     try {
       const response = await fetch(
-        `http://localhost:8000/api/quizzes/analytics/${userId}`
+        API.analytics,
+        { headers: getAuthHeaders() }
       );
       
       if (!response.ok) {
@@ -68,7 +78,8 @@ const QuizHistory = ({ userId, onBack }) => {
   const handleViewDetails = async (attemptId) => {
     try {
       const response = await fetch(
-        `http://localhost:8000/api/quizzes/attempt/${attemptId}/details?user_id=${userId}`
+        API.attemptDetails(attemptId),
+        { headers: getAuthHeaders() }
       );
       
       if (!response.ok) {
@@ -78,29 +89,31 @@ const QuizHistory = ({ userId, onBack }) => {
       const data = await response.json();
       setSelectedAttempt(data);
     } catch (err) {
-      alert('Failed to load attempt details: ' + err.message);
+      setError('Failed to load attempt details: ' + err.message);
     }
   };
 
-  const handleDeleteAttempt = async (attemptId) => {
-    if (!window.confirm('Are you sure you want to delete this quiz attempt?')) {
-      return;
-    }
+  const handleDeleteAttempt = (attemptId) => {
+    setPendingDeleteId(attemptId);
+  };
+
+  const confirmDelete = async () => {
+    const attemptId = pendingDeleteId;
+    setPendingDeleteId(null);
     
     try {
       const response = await fetch(
-        `http://localhost:8000/api/quizzes/history/${attemptId}?user_id=${userId}`,
-        { method: 'DELETE' }
+        API.deleteAttempt(attemptId),
+        { method: 'DELETE', headers: getAuthHeaders() }
       );
       
       if (!response.ok) {
         throw new Error('Failed to delete attempt');
       }
       
-      // Refresh history
       fetchHistory();
     } catch (err) {
-      alert('Failed to delete attempt: ' + err.message);
+      setError('Failed to delete attempt: ' + err.message);
     }
   };
 
@@ -552,6 +565,27 @@ const QuizHistory = ({ userId, onBack }) => {
       </div>
 
       {renderAttemptDetails()}
+
+      {/* Inline delete confirmation */}
+      {pendingDeleteId && (
+        <div className="confirm-overlay" onClick={() => setPendingDeleteId(null)}>
+          <div className="confirm-modal" onClick={e => e.stopPropagation()}>
+            <p className="confirm-message">Delete this quiz attempt? This cannot be undone.</p>
+            <div className="confirm-actions">
+              <button className="confirm-cancel-btn" onClick={() => setPendingDeleteId(null)}>
+                Cancel
+              </button>
+              <button
+                className="confirm-ok-btn"
+                style={{ background: '#ef4444' }}
+                onClick={confirmDelete}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

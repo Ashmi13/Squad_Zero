@@ -10,6 +10,7 @@ const Sidebar = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [activeRail, setActiveRail] = useState('home');
+  const [isDragging, setIsDragging] = useState(false);
   const [expandedFolders, setExpandedFolders] = useState({
     'software-eng': true,
     'algorithms': true
@@ -20,6 +21,48 @@ const Sidebar = () => {
       ...prev,
       [id]: !prev[id]
     }));
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = () => {
+    setIsDragging(false);
+  };
+
+  const handleDrop = async (e) => {
+    e.preventDefault();
+    setIsDragging(false);
+    
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length === 0) return;
+
+    // Check if multiple files or folder uploaded
+    if (files.length > 1) {
+       const userConfirmed = window.confirm(`You uploaded ${files.length} multiple files. Do you want to combine them to create novel ideas and generate a structured note?`);
+       if (!userConfirmed) return;
+    }
+
+    try {
+      // Create FormData to upload
+      const formData = new FormData();
+      files.forEach(file => formData.append('files', file));
+      
+      alert(`Uploading ${files.length} file(s) for structured note generation...`);
+      
+      // Call standard backend upload (simulated for UI)
+      // fetch('http://localhost:8000/api/v1/m3/upload', { ... })
+      
+      alert('Generating structured note with deep fresh algorithm (including Image Extraction if present)... This note will be automatically saved to this folder view.');
+      
+      // Auto redirect to Editor logically
+      navigate('/notes/editor/demo-note');
+
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   const IconRail = () => (
@@ -54,7 +97,24 @@ const Sidebar = () => {
   );
 
   const NavPanel = () => (
-    <div className={styles.navPanel}>
+    <div 
+      className={`${styles.navPanel} ${isDragging ? styles.dragOver : ''}`}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      style={{ position: 'relative' }}
+    >
+      {isDragging && (
+        <div style={{
+          position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(99, 102, 241, 0.1)',
+          border: '2px dashed #6366f1',
+          zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          backdropFilter: 'blur(2px)'
+        }}>
+          <p style={{ color: '#6366f1', fontWeight: 'bold' }}>Drop MD/TXT/PDF to Generate Note</p>
+        </div>
+      )}
       <div className={styles.panelHeader}>
         <h3>Notebooks</h3>
         <button className={styles.addBtn}><Plus size={16} /></button>

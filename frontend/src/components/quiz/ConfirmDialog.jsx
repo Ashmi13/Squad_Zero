@@ -2,26 +2,17 @@ import { useEffect } from 'react';
 import ReactDOM from 'react-dom';
 
 /**
- * ConfirmDialog — renders via React portal directly on document.body.
- * This bypasses ALL parent stacking contexts, overflow:hidden, z-index issues.
- *
- * Props:
- *   isOpen     {bool}    whether to show
- *   type       {string}  'unanswered' | 'submit' | 'cancel'
- *   message    {string}  body text
- *   okLabel    {string}  confirm button label
- *   cancelLabel{string}  dismiss button label
- *   onConfirm  {fn}      called when user clicks OK
- *   onCancel   {fn}      called when user clicks Cancel / backdrop
+ * ConfirmDialog — render via React portal directly on document.body.
+ * To bypass all parent stacking contexts, overflow:hidden, z-index issues.      
  */
 const ConfirmDialog = ({
-  isOpen,
-  type = 'submit',
-  message,
-  okLabel = 'Confirm',
-  cancelLabel = 'Cancel',
-  onConfirm,
-  onCancel,
+  isOpen,                   // whether to show {bool}
+  type = 'submit',          // 'unanswered' / 'submit' / 'cancel' {string}
+  message,                  // body text {string}
+  okLabel = 'Confirm',      // confirm button label {string}
+  cancelLabel = 'Cancel',   // dismiss button label {string}
+  onConfirm,                // called when user clicks OK {fn}
+  onCancel,                 // called when user clicks Cancel / backdrop {fn}
 }) => {
   // Lock body scroll while open
   useEffect(() => {

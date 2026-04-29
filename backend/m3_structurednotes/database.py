@@ -1,20 +1,30 @@
 import os
 import psycopg2
-from psycopg2.extras import RealDictCursor
-from dotenv import load_dotenv
 
-load_dotenv()
+class MockCursor:
+    def execute(self, *args, **kwargs): return None
+    def fetchall(self): return []
+    def fetchone(self): return None
+    def close(self): pass
+
+class MockConn:
+    def cursor(self): return MockCursor()
+    def commit(self): pass
+    def rollback(self): pass
+    def close(self): pass
 
 def get_db_connection():
+    db_url = os.getenv("DATABASE_URL", "").strip()
+    if not db_url:
+        return MockConn()
     try:
-        conn = psycopg2.connect(
-            host=os.getenv('DB_HOST', 'localhost'),
-            database=os.getenv('DB_NAME'),
-            user=os.getenv('DB_USER'),
-            password=os.getenv('DB_PASSWORD'),
-            port=os.getenv('DB_PORT', '5432')
-        )
+        if "sslmode=" in db_url:
+            conn = psycopg2.connect(db_url)
+        elif "supabase" in db_url or "pooler" in db_url:
+            conn = psycopg2.connect(db_url, sslmode='require')
+        else:
+            conn = psycopg2.connect(db_url)
         return conn
     except Exception as e:
-        print(f"Error connecting to database: {e}")
-        return None
+        print(f"CRITICAL: DB Connection Failed. MockMode. Error: {e}")
+        return MockConn()

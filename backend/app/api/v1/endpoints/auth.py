@@ -1,8 +1,11 @@
 """Authentication endpoints: signup, signin, session, logout, password reset"""
-from fastapi import APIRouter, HTTPException, Response, Depends
+from fastapi import APIRouter, HTTPException, Response, Depends, Request
+from fastapi.responses import RedirectResponse
 from fastapi.security import HTTPBearer
 from supabase import Client
 from datetime import timedelta
+import httpx
+import json
 from app.core.security import (
     create_access_token,
     create_refresh_token,
@@ -55,6 +58,7 @@ async def signup(
             data={
                 "sub": user_data["id"],
                 "email": user_data["email"],
+                "role": user_data.get("role", "user"),
             }
         )
         
@@ -62,6 +66,7 @@ async def signup(
             data={
                 "sub": user_data["id"],
                 "email": user_data["email"],
+                "role": user_data.get("role", "user"),
             }
         )
         
@@ -76,6 +81,7 @@ async def signup(
                 id=user_data["id"],
                 email=user_data["email"],
                 full_name=user_data.get("full_name"),
+                role=user_data.get("role", "user"),
             ),
         )
         
@@ -109,6 +115,7 @@ async def signin(
             data={
                 "sub": user_data["id"],
                 "email": user_data["email"],
+                "role": user_data.get("role", "user"),
             }
         )
         
@@ -116,6 +123,7 @@ async def signin(
             data={
                 "sub": user_data["id"],
                 "email": user_data["email"],
+                "role": user_data.get("role", "user"),
             }
         )
         
@@ -130,6 +138,7 @@ async def signin(
                 id=user_data["id"],
                 email=user_data["email"],
                 full_name=user_data.get("full_name"),
+                role=user_data.get("role", "user"),
             ),
         )
         
@@ -183,6 +192,7 @@ async def refresh_token(
             data={
                 "sub": claims.get("sub"),
                 "email": claims.get("email"),
+                "role": claims.get("role", "user"),
             }
         )
         
@@ -196,11 +206,106 @@ async def refresh_token(
             user=UserResponse(
                 id=claims.get("sub"),
                 email=claims.get("email"),
+                role=claims.get("role", "user"),
             ),
         )
         
     except Exception as e:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
+
+
+@router.get("/google-login")
+async def google_login():
+    """Build and return the Google OAuth authorization URL"""
+    print(f"DEBUG: google_login called. Client ID: {settings.google_client_id}")
+    if not settings.google_client_id:
+        raise HTTPException(status_code=400, detail="Google OAuth not configured")
+        
+    google_auth_url = (
+        "https://accounts.google.com/o/oauth2/v2/auth"
+        f"?response_type=code"
+        f"&client_id={settings.google_client_id}"
+        f"&redirect_uri={settings.google_redirect_uri}"
+        f"&scope=openid%20email%20profile"
+        f"&access_type=offline"
+        f"&prompt=select_account"
+    )
+    print(f"DEBUG: Redirecting to {google_auth_url}")
+    return RedirectResponse(url=google_auth_url)
+
+
+@router.get("/google/callback")
+async def google_callback(
+    code: str, 
+    response: Response,
+    supabase_client: Client = Depends(get_supabase_service_client)
+):
+    """Handle Google OAuth callback, exchange code for token, and log in user"""
+    if not settings.google_client_id or not settings.google_client_secret:
+        raise HTTPException(status_code=400, detail="Google OAuth not configured")
+
+    # Exchange the code for access token
+    token_url = "https://oauth2.googleapis.com/token"
+    token_data = {
+        "code": code,
+        "client_id": settings.google_client_id,
+        "client_secret": settings.google_client_secret,
+        "redirect_uri": settings.google_redirect_uri,
+        "grant_type": "authorization_code",
+    }
+    
+    # Priority on localhost:5173 for Vite development
+    frontend_url = next((o for o in settings.cors_origins_list if "5173" in o), settings.cors_origins_list[0])
+    
+    async with httpx.AsyncClient() as client:
+        token_response = await client.post(token_url, data=token_data)
+        if token_response.status_code != 200:
+            return RedirectResponse(url=f"{frontend_url}/signin?error=CodeExchangeFailed")
+        
+        tokens = token_response.json()
+        access_token = tokens.get("access_token")
+        
+        # Use access token to get user info from Google
+        user_info_response = await client.get(
+            "https://www.googleapis.com/oauth2/v3/userinfo", 
+            headers={"Authorization": f"Bearer {access_token}"}
+        )
+        if user_info_response.status_code != 200:
+            return RedirectResponse(url=f"{frontend_url}/signin?error=UserInfoFailed")
+        
+        google_user = user_info_response.json()
+        
+    # Handle user in our auth system
+    auth_service = AuthService(supabase_client)
+    try:
+        user_record = await auth_service.get_or_create_google_user(google_user)
+        
+        # Create internal JWT tokens
+        token_payload = {
+            "sub": user_record["id"],
+            "email": user_record["email"],
+            "full_name": user_record.get("full_name"),
+            "avatar_url": user_record.get("avatar_url"),
+            "role": user_record.get("role", "user")
+        }
+        
+        internal_access_token = create_access_token(data=token_payload)
+        
+        # Set session cookie
+        set_session_cookie(response, internal_access_token)
+        
+        # Redirect back to frontend
+        # Instead of just /dashboard, we pass the user data and token in the URL fragment 
+        # so the frontend can "see" it and initialize localStorage properly.
+        # This is the "Bridge" between Cookie-based Backend and LocalStorage-based Frontend.
+        import urllib.parse
+        user_json = urllib.parse.quote(json.dumps(token_payload))
+        target_url = f"{frontend_url}/oauth/callback#access={internal_access_token}&user={user_json}"
+        
+        return RedirectResponse(url=target_url)
+        
+    except Exception as e:
+        return RedirectResponse(url=f"{frontend_url}/login?error={str(e)}")
 
 
 @router.post("/request-password-reset")

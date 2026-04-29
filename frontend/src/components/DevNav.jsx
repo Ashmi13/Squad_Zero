@@ -47,18 +47,20 @@ const MEMBERS = [
     name: 'You (M5)',
     color: '#ec4899',
     routes: [
-      { label: 'Task Dashboard', path: '/tasks' },
+      { label: 'Task Dashboard', path: '/tasks'        },
+      { label: 'Second Brain',   path: '/second-brain' },
     ],
   },
 ];
 
 export default function DevNav() {
-  if (!import.meta.env.DEV) return null;
-
   const navigate = useNavigate();
   const location = useLocation();
   const [open, setOpen] = useState(false);
   const [activeTab, setActiveTab] = useState(1);
+
+  const isDev = import.meta.env.DEV;
+  if (!isDev) return null;
 
   const activeMember = MEMBERS.find(m => m.id === activeTab);
 

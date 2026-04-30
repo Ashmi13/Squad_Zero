@@ -3,31 +3,37 @@ import {
   Box, Typography, IconButton, Button,
   Dialog, DialogTitle, DialogContent, DialogActions, TextField,
 } from '@mui/material';
-import CloseIcon        from '@mui/icons-material/Close';
-import ChevronLeftIcon  from '@mui/icons-material/ChevronLeft';
-import ChevronRightIcon from '@mui/icons-material/ChevronRight';
-import AddIcon          from '@mui/icons-material/Add';
+import CloseIcon         from '@mui/icons-material/Close';
+import ChevronLeftIcon   from '@mui/icons-material/ChevronLeft';
+import ChevronRightIcon  from '@mui/icons-material/ChevronRight';
+import AddIcon           from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import EditOutlinedIcon  from '@mui/icons-material/EditOutlined';
 
 const MONTHS   = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const DAYS     = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 const COLORS   = ['#6366f1','#ec4899','#10b981','#f59e0b','#ef4444','#3b82f6','#8b5cf6','#f97316'];
+
 const FIELD_SX = {
-  '& .MuiOutlinedInput-root': { color: '#f3f4f6', '& fieldset': { borderColor: 'rgba(255,255,255,0.12)' }, '&:hover fieldset': { borderColor: '#6366f1' }, '&.Mui-focused fieldset': { borderColor: '#6366f1' } },
-  '& .MuiInputLabel-root': { color: '#9ca3af' }, '& .MuiInputLabel-root.Mui-focused': { color: '#6366f1' },
+  '& .MuiOutlinedInput-root': { color: '#f3f4f6', '& fieldset': { borderColor: 'rgba(255,255,255,0.12)' },
+    '&:hover fieldset': { borderColor: '#6366f1' }, '&.Mui-focused fieldset': { borderColor: '#6366f1' } },
+  '& .MuiInputLabel-root': { color: '#9ca3af' },
+  '& .MuiInputLabel-root.Mui-focused': { color: '#6366f1' },
 };
-const MENU_SX = { PaperProps: { sx: { bgcolor: '#1a1f2e', color: '#f3f4f6' } } };
 
 export default function ExpandedCalendar({ tasks, events, onClose, onAddEvent, onDeleteEvent, onUpdateEvent }) {
   const today = new Date();
-  const [year,         setYear]         = useState(today.getFullYear());
-  const [month,        setMonth]        = useState(today.getMonth());
-  const [selectedDay,  setSelectedDay]  = useState(today.getDate());
-const [addOpen,      setAddOpen]      = useState(false);
+  const [year,        setYear]        = useState(today.getFullYear());
+  const [month,       setMonth]       = useState(today.getMonth());
+  const [selectedDay, setSelectedDay] = useState(today.getDate());
+  const [addOpen,     setAddOpen]     = useState(false);
+  const [editOpen,    setEditOpen]    = useState(false);
+
+  // form state for adding a new event
   const [ev, setEv] = useState({ title: '', description: '', start: '', end: '', color: '#6366f1' });
-  const [editOpen,     setEditOpen]     = useState(false);
-  const [editEv,       setEditEv]       = useState({ id: '', title: '', description: '', start: '', end: '', color: '#6366f1' });
+
+  // form state for editing an existing event
+  const [editEv, setEditEv] = useState({ id: '', title: '', description: '', start: '', end: '', color: '#6366f1' });
 
   const prev = () => month === 0  ? (setMonth(11), setYear(y => y - 1)) : setMonth(m => m - 1);
   const next = () => month === 11 ? (setMonth(0),  setYear(y => y + 1)) : setMonth(m => m + 1);
@@ -36,36 +42,27 @@ const [addOpen,      setAddOpen]      = useState(false);
   const firstDay    = new Date(year, month, 1).getDay();
   const isToday     = d => d === today.getDate() && month === today.getMonth() && year === today.getFullYear();
 
-  // Build day map
+  // build a map of day -> list of tasks and events for that day
   const dayMap = {};
   const push   = (day, item) => { if (!dayMap[day]) dayMap[day] = []; dayMap[day].push(item); };
+
   tasks.forEach(t => {
     if (!t.due_date) return;
     const d = new Date(t.due_date);
     if (d.getFullYear() === year && d.getMonth() === month)
       push(d.getDate(), { ...t, _type: 'task', _color: t.color || '#6366f1' });
   });
+
   events.forEach(e => {
     const d = new Date(e.start_time);
     if (d.getFullYear() === year && d.getMonth() === month)
       push(d.getDate(), { ...e, _type: 'event', _color: e.color || '#ec4899' });
   });
 
-  const cells = [...Array(firstDay).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)];
+  const cells        = [...Array(firstDay).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)];
   const selectedItems = selectedDay ? (dayMap[selectedDay] || []) : [];
 
- const handleEdit = async () => {
-    if (!editEv.title.trim() || !editEv.start) return;
-    await onUpdateEvent(editEv.id, {
-      title: editEv.title,
-      description: editEv.description || null,
-      start_time: new Date(editEv.start).toISOString(),
-      end_time: new Date(editEv.end || editEv.start).toISOString(),
-      color: editEv.color,
-    });
-    setEditOpen(false);
-  };
-
+  // save a new event
   const handleAdd = async () => {
     if (!ev.title.trim() || !ev.start) return;
     await onAddEvent({
@@ -78,9 +75,22 @@ const [addOpen,      setAddOpen]      = useState(false);
     setEv({ title: '', description: '', start: '', end: '', color: '#6366f1' });
   };
 
+  // save edits to an existing event
+  const handleEdit = async () => {
+    if (!editEv.title.trim() || !editEv.start) return;
+    await onUpdateEvent(editEv.id, {
+      title: editEv.title, description: editEv.description || null,
+      start_time: new Date(editEv.start).toISOString(),
+      end_time:   new Date(editEv.end || editEv.start).toISOString(),
+      color: editEv.color,
+    });
+    setEditOpen(false);
+  };
+
   return (
     <Box className="exp-cal-overlay">
-      {/* ── HEADER ── */}
+
+      {/* top bar with month nav and add button */}
       <Box className="exp-cal-header">
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
           <IconButton onClick={prev} sx={{ color: '#9ca3af' }}><ChevronLeftIcon /></IconButton>
@@ -99,10 +109,9 @@ const [addOpen,      setAddOpen]      = useState(false);
         </IconButton>
       </Box>
 
-      {/* ── BODY ── */}
+      {/* main area: calendar grid on the left, day detail panel on the right */}
       <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 270px', flex: 1, overflow: 'hidden' }}>
 
-        {/* Calendar grid */}
         <Box sx={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', p: 2 }}>
           <Box className="exp-cal-grid">
             {DAYS.map(d => <Box key={d} className="exp-day-name">{d}</Box>)}
@@ -113,12 +122,13 @@ const [addOpen,      setAddOpen]      = useState(false);
                 {day && <>
                   <span className={`exp-day-num ${isToday(day) ? 'today-num' : ''}`}>{day}</span>
                   <Box className="exp-day-items">
+                    {/* show max 3 pills per day, then a "+N more" label */}
                     {(dayMap[day] || []).slice(0, 3).map((item, j) => (
                       <Box key={j} className="exp-item-pill"
                         style={{ background: item._color + '28', borderLeft: `3px solid ${item._color}` }}>
                         <Typography sx={{ fontSize: 10, color: item._color, fontWeight: 500,
                                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {item._type === 'task' ? '📋' : '📅'} {item.title}
+                          {item._type === 'task' ? 'T' : 'E'} {item.title}
                         </Typography>
                       </Box>
                     ))}
@@ -134,15 +144,17 @@ const [addOpen,      setAddOpen]      = useState(false);
           </Box>
         </Box>
 
-        {/* Detail panel */}
+        {/* right panel: details of whatever day is selected */}
         <Box className="exp-detail-panel">
           <Typography sx={{ color: '#6b7280', fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
                             letterSpacing: '0.08em', mb: 2 }}>
             {selectedDay ? `${MONTHS[month]} ${selectedDay}` : 'Click a day'}
           </Typography>
+
           {selectedDay && selectedItems.length === 0 && (
             <Typography sx={{ color: '#374151', fontSize: 13 }}>Nothing scheduled</Typography>
           )}
+
           {selectedItems.map((item, i) => (
             <Box key={i} className="exp-detail-item" style={{ borderLeftColor: item._color }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -158,12 +170,15 @@ const [addOpen,      setAddOpen]      = useState(false);
                     }
                   </Typography>
                 </Box>
+
+                {/* edit and delete only shown for calendar events, not tasks */}
                 {item._type === 'event' && (
                   <Box sx={{ display: 'flex', flexShrink: 0 }}>
                     <IconButton size="small"
                       onClick={() => {
                         const pad = d => new Date(d).toISOString().slice(0, 16);
-                        setEditEv({ id: item.id, title: item.title, description: item.description || '', start: pad(item.start_time), end: pad(item.end_time), color: item._color });
+                        setEditEv({ id: item.id, title: item.title, description: item.description || '',
+                                    start: pad(item.start_time), end: pad(item.end_time), color: item._color });
                         setEditOpen(true);
                       }}
                       sx={{ color: '#4b5563', '&:hover': { color: '#6366f1' } }}>
@@ -181,7 +196,7 @@ const [addOpen,      setAddOpen]      = useState(false);
         </Box>
       </Box>
 
-    {/* ── EDIT EVENT DIALOG ── */}
+      {/* edit event dialog */}
       <Dialog open={editOpen} onClose={() => setEditOpen(false)} maxWidth="sm" fullWidth
         PaperProps={{ sx: { bgcolor: '#1a1f2e', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 3 } }}>
         <DialogTitle sx={{ color: '#f3f4f6', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>Edit Event</DialogTitle>
@@ -210,7 +225,7 @@ const [addOpen,      setAddOpen]      = useState(false);
         </DialogActions>
       </Dialog>
 
-      {/* ── ADD EVENT DIALOG ── */}
+      {/* add event dialog */}
       <Dialog open={addOpen} onClose={() => setAddOpen(false)} maxWidth="sm" fullWidth
         PaperProps={{ sx: { bgcolor: '#1a1f2e', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 3 } }}>
         <DialogTitle sx={{ color: '#f3f4f6', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>Add Event</DialogTitle>
@@ -238,6 +253,7 @@ const [addOpen,      setAddOpen]      = useState(false);
           <Button onClick={handleAdd} variant="contained" sx={{ bgcolor: '#6366f1', '&:hover': { bgcolor: '#4f46e5' } }}>Add Event</Button>
         </DialogActions>
       </Dialog>
+
     </Box>
   );
 }

@@ -4,6 +4,15 @@ import { useNavigate } from 'react-router-dom';
 import styles from './RecentFiles.module.css';
 import { getNotes } from '../api';
 
+const normalizeNotesPayload = (payload) => {
+    if (Array.isArray(payload)) return payload;
+    if (payload && typeof payload === 'object') {
+        if (Array.isArray(payload.notes)) return payload.notes;
+        if (Array.isArray(payload.data)) return payload.data;
+    }
+    return [];
+};
+
 const RecentFiles = ({ selectedNotes, onToggleSelection, folderId }) => {
     const [files, setFiles] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -18,19 +27,21 @@ const RecentFiles = ({ selectedNotes, onToggleSelection, folderId }) => {
         try {
             setLoading(true);
             const data = await getNotes(USER_ID, folderId);
+            const notes = normalizeNotesPayload(data);
             // Transform backend data to UI format
-            const formattedFiles = data.map(note => ({
-                id: note.note_id,
+            const formattedFiles = notes.map(note => ({
+                id: note.note_id || note.id,
                 name: note.title || 'Untitled Note',
                 size: '2.4 MB', // Mock size as we don't store it yet
-                date: new Date(note.created_date).toLocaleString(),
+                date: new Date(note.created_date || note.created_at || Date.now()).toLocaleString(),
                 type: 'ai', // Distinction for icon
                 status: 'Processed',
                 color: '#6C5DD3'
-            }));
+            })).filter((file) => Boolean(file.id));
             setFiles(formattedFiles);
         } catch (error) {
             console.error("Failed to fetch notes", error);
+            setFiles([]);
         } finally {
             setLoading(false);
         }
@@ -47,11 +58,11 @@ const RecentFiles = ({ selectedNotes, onToggleSelection, folderId }) => {
 
             {loading ? <p>Loading notes...</p> : (
                 <div className={styles.grid}>
-                    {files.length === 0 ? <p>No notes found. Create one above!</p> : files.map((file, index) => {
+                    {files.length === 0 ? <p>No notes found. Create one above!</p> : files.map((file) => {
                         const isSelected = selectedNotes?.has(file.id);
                         return (
                             <div
-                                key={index}
+                                key={file.id}
                                 className={`${styles.card} ${isSelected ? styles.selected : ''}`}
                                 onClick={(e) => {
                                     // Navigate to note unless clicking selection

@@ -46,7 +46,7 @@
   background: var(--color-primary-light);
 }
 
-/* ── Tabs ────────────────────────────────────── */
+/* Tabs*/
 .tabs {
   display: flex;
   padding: 0 2rem;
@@ -556,3 +556,40 @@
   .difficulty-stats { grid-template-columns: 1fr; }
   .history-item .history-header { flex-direction: column; gap: 0.5rem; }
 }
+
+/* DARK MODE OVERRIDES*/
+html.dark .history-header              { background: #1a1f2e; border-bottom-color: #2d3748; }
+html.dark .back-btn                    { background: #1a1f2e; border-color: #2d3748; }
+html.dark .back-btn:hover              { background: #1e1a3d; }
+
+html.dark .tabs                        { background: #1a1f2e; border-bottom-color: #2d3748; }
+
+html.dark .stat-card                   { background: #1a1f2e; border-color: #2d3748; }
+html.dark .history-item                { background: #1a1f2e; border-color: #2d3748; }
+html.dark .history-item:hover          { border-color: #4a5568; box-shadow: 0 1px 6px rgba(0,0,0,0.3); }
+html.dark .history-item .history-header{ background: transparent; }
+
+html.dark .action-btn                  { background: #252d3d; border-color: #2d3748; color: #a0aac0; }
+html.dark .action-btn:hover,
+html.dark .action-btn.view:hover       { background: #1e1a3d; }
+html.dark .action-btn.delete:hover     { background: #2d1212; }
+
+html.dark .page-btn                    { background: #1a1f2e; border-color: #2d3748; color: #a0aac0; }
+html.dark .page-btn:hover:not(:disabled){ border-color: var(--color-primary); color: var(--color-primary); }
+
+html.dark .analytics-section           { background: #1a1f2e; border-color: #2d3748; }
+html.dark .stat-box                    { background: #252d3d; border-color: #2d3748; }
+html.dark .difficulty-card             { border-color: #2d3748; }
+html.dark .difficulty-header           { background: #252d3d; }
+html.dark .best-attempt-item           { background: #252d3d; border-color: #2d3748; }
+html.dark .time-stat                   { background: #252d3d; border-color: #2d3748; }
+
+html.dark .empty-state                 { background: #1a1f2e; border-color: #4c1d95; }
+
+html.dark .modal-content               { background: #1a1f2e; box-shadow: 0 20px 60px rgba(0,0,0,0.6); }
+html.dark .modal-header                { border-bottom-color: #2d3748; }
+html.dark .close-btn:hover             { background: #252d3d; }
+
+html.dark .confirm-modal               { background: #1a1f2e; box-shadow: 0 20px 60px rgba(0,0,0,0.6); }
+html.dark .confirm-cancel-btn          { background: #252d3d; border-color: #2d3748; color: #a0aac0; }
+html.dark .confirm-cancel-btn:hover    { background: #1e1a3d; border-color: var(--color-primary); color: var(--color-primary); }

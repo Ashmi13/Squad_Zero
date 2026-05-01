@@ -1,6 +1,4 @@
-/* ══════════════════════════════════════════════════
-   TOAST NOTIFICATIONS
-   ══════════════════════════════════════════════════ */
+/* TOAST NOTIFICATIONS */
 
 .toast {
   display: flex;
@@ -78,4 +76,21 @@
 .toast-close:hover {
   color: var(--color-text);
   background: var(--color-bg-subtle);
+}
+
+/* DARK MODE */
+html.dark .toast {
+  background: #1a1f2e;
+  border-color: #2d3748;
+  color: #e8eef2;
+}
+html.dark .toast-message {
+  color: #e8eef2;
+}
+html.dark .toast-close {
+  color: #a0aac0;
+}
+html.dark .toast-close:hover {
+  color: #e8eef2;
+  background: #252d3d;
 }

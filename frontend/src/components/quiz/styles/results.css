@@ -1,10 +1,6 @@
-/* ═══════════════════════════════════════════════════
-   results.css — Quiz results & answer review:
-   score donut, stat cards, level progression path,
-   action buttons, and detailed answer review items.
-   ═══════════════════════════════════════════════════ */
+/* results.css — Quiz results & answer review*/
 
-/* ── Container ──────────────────────────────────── */
+/* Container */
 .results-container {
   max-width: 1100px;
   margin: 0 auto;
@@ -24,7 +20,7 @@
   letter-spacing: -0.02em;
 }
 
-/* ── Score donut ────────────────────────────────── */
+/* Score donut*/
 .score-card-new {
   background: white;
   border: 1px solid var(--color-border);
@@ -52,7 +48,7 @@
   margin: 0;
 }
 
-/* ── Stat cards row ─────────────────────────────── */
+/* Stat cards row */
 .stat-cards-row {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -69,9 +65,9 @@
   border: 1.5px solid transparent;
 }
 
-.stat-card--correct   { background: var(--color-correct-bg);   border-color: var(--color-correct-border); }
+.stat-card--correct   { background: var(--color-correct-bg); border-color: var(--color-correct-border); }
 .stat-card--incorrect { background: var(--color-incorrect-bg); border-color: var(--color-incorrect-border); }
-.stat-card--time      { background: #f5f3ff;                   border-color: #c4b5fd; }
+.stat-card--time      { background: #f5f3ff; border-color: #c4b5fd; }
 
 .stat-card-icon {
   width: 36px;
@@ -93,7 +89,7 @@
 .stat-card-label { font-size: 0.72rem; font-weight: 600; color: var(--color-text-subtle); text-transform: uppercase; letter-spacing: 0.04em; }
 .stat-card-value { font-size: 1.5rem; font-weight: 800; color: var(--color-text); line-height: 1.1; }
 
-/* ── Level progression card ─────────────────────── */
+/* Level progression card */
 .level-progression-card {
   background: white;
   border: 1px solid var(--color-border);
@@ -195,7 +191,7 @@
 .next-level-btn:disabled,
 .retry-level-btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
 
-/* ── All-levels completion card ─────────────────── */
+/* All-levels completion card */
 .completion-card {
   background: #ecfdf5;
   border: 1px solid var(--color-correct-border);
@@ -208,7 +204,7 @@
 .completion-card h3 { font-size: 1.25rem; font-weight: 800; color: #065f46; margin: 0.75rem 0 0.5rem; }
 .completion-card p  { color: #059669; margin: 0; }
 
-/* ── Results action buttons ─────────────────────── */
+/* Results action buttons */
 .results-actions {
   display: flex;
   gap: 0.75rem;
@@ -237,7 +233,7 @@
 .action-btn.secondary            { background: white; border-color: var(--color-border); color: #374151; }
 .action-btn.secondary:hover      { border-color: var(--color-primary); color: var(--color-primary); background: #faf5ff; }
 
-/* ── Answer review section ──────────────────────── */
+/* Answer review section */
 .review-section {
   background: white;
   border: 1px solid var(--color-border);
@@ -328,3 +324,31 @@
 .correct-text   { color: #059669; font-weight: 600; }
 .incorrect-text { color: #dc2626; font-weight: 600; }
 .review-text    { color: #92400e; font-weight: 600; }
+
+/* DARK MODE OVERRIDES */
+html.dark .score-card-new              { background: #1a1f2e; }
+html.dark .stat-card--time             { background: #1a1a3d; border-color: #4c1d95; }
+html.dark .stat-card--time .stat-card-icon { background: #2d1f5e; }
+
+html.dark .level-progression-card              { background: #1a1f2e; }
+html.dark .level-progression-card.can-progress { background: #1f1a0d; border-color: #78350f; }
+html.dark .level-progression-card.needs-retry  { background: #1e1a3d; border-color: #4c1d95; }
+html.dark .level-connector                      { background: #2d3748; }
+
+html.dark .completion-card             { background: #0d2e1f; border-color: #065f46; }
+html.dark .completion-card h3          { color: #6ee7b7; }
+html.dark .completion-card p           { color: #34d399; }
+
+html.dark .action-btn.secondary        { background: #1a1f2e; border-color: #2d3748; color: #a0aac0; }
+html.dark .action-btn.secondary:hover  { background: #1e1a3d; border-color: var(--color-primary); color: var(--color-primary); }
+
+html.dark .review-section              { background: #1a1f2e; }
+html.dark .review-item                 { border-color: #2d3748; background: #1a1f2e; }
+html.dark .review-item.needs-review    { background: #1f1a0d; border-color: #78350f; }
+html.dark .type-badge                  { background: #0d1f3d; color: #93c5fd; }
+html.dark .correct-text                { color: #6ee7b7; }
+html.dark .incorrect-text             { color: #fca5a5; }
+html.dark .review-text                 { color: #fcd34d; }
+html.dark .review-badge.correct      { color: #ffffff; }
+html.dark .review-badge.incorrect    { color: #ffffff; }
+html.dark .review-badge.needs-review { color: #ffffff; }

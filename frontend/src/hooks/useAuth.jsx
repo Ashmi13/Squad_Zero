@@ -12,10 +12,7 @@ export const useAuth = () => {
         const token = getAccessToken();
         if (token) {
           const decoded = decodeToken(token);
-<<<<<<< HEAD:frontend/src/hooks/useAuth.jsx
 
-=======
->>>>>>> d36a44c8d6a533e5db7b65f80dbea0c9fa5f689f:frontend/src/hooks/useAuth.js
           if (decoded) {
             const currentTime = Date.now() / 1000;
             if (decoded.exp && decoded.exp > currentTime) {
@@ -23,17 +20,9 @@ export const useAuth = () => {
                 id: decoded.sub,
                 email: decoded.email,
                 fullName: decoded.full_name,
-<<<<<<< HEAD:frontend/src/hooks/useAuth.jsx
               });
               setIsAuthenticated(true);
             } else {
-              // Token expired — clear and fall to unauthenticated state
-=======
-                role: decoded.role || 'user',
-              });
-              setIsAuthenticated(true);
-            } else {
->>>>>>> d36a44c8d6a533e5db7b65f80dbea0c9fa5f689f:frontend/src/hooks/useAuth.js
               clearTokens();
             }
           }

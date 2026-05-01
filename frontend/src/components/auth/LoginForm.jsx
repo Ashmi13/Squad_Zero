@@ -24,14 +24,11 @@ export function LoginForm() {
   } = useForm({
     resolver: zodResolver(loginSchema),
     mode: 'onBlur',
-<<<<<<< HEAD
     // Pre-filling test credentials as per sprint planning
     defaultValues: {
       email: '',
       password: ''
     }
-=======
->>>>>>> d36a44c8d6a533e5db7b65f80dbea0c9fa5f689f
   });
 
   const [isLoading, setIsLoading] = useState(false);
@@ -53,10 +50,7 @@ export function LoginForm() {
     setIsSuccess(false);
 
     try {
-<<<<<<< HEAD
       // Standard API Call
-=======
->>>>>>> d36a44c8d6a533e5db7b65f80dbea0c9fa5f689f
       const response = await axiosInstance.post(config.endpoints.login, {
         email: data.email,
         password: data.password,
@@ -82,7 +76,6 @@ export function LoginForm() {
   return (
     <div>
       <h2 className="font-display text-3xl text-slate-900 mb-2">Welcome Back</h2>
-<<<<<<< HEAD
       <p className="text-slate-500 mb-4">Sign in to your account</p>
       
       {/* Admin / Test Credentials Notice */}
@@ -90,9 +83,7 @@ export function LoginForm() {
         <AlertCircle className="text-blue-600" size={20} />
         <p className="text-blue-800 text-sm"></p>
       </div>
-=======
       <p className="text-slate-500 mb-8">Sign in to your account</p>
->>>>>>> d36a44c8d6a533e5db7b65f80dbea0c9fa5f689f
 
       {isSuccess && (
         <div className="mb-6 p-4 bg-emerald-50 border border-emerald-200 rounded-lg flex items-center gap-3">

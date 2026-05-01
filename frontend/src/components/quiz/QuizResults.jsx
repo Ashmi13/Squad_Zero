@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useContext } from 'react';
 import { FileText, Download, BarChart3, Sparkles, TrendingUp, Award } from 'lucide-react';
+import { ThemeContext } from '@/context/ThemeContext';
 
 const QuizResults = ({
   results,
@@ -14,6 +15,7 @@ const QuizResults = ({
   onNextLevel,
   onRetryLevel,
 }) => {
+  const { isDark } = useContext(ThemeContext);
   if (!results) return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', gap: '1rem' }}>
       <div className='spinner spinner--lg'></div>
@@ -69,7 +71,7 @@ const QuizResults = ({
             transform="rotate(-90 90 90)"
             style={{ transition: 'stroke-dashoffset 0.8s ease' }}
           />
-          <text x="90" y="95" textAnchor="middle" fontSize="30" fontWeight="800" fill="#111827">
+          <text x="90" y="95" textAnchor="middle" fontSize="30" fontWeight="800" fill={isDark ? '#ffffff' : '#111827'}>
             {Math.round(percentage)}%
           </text>
         </svg>

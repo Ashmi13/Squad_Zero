@@ -1,22 +1,16 @@
-/* ═══════════════════════════════════════════════════
-   homepage.css — Quiz homepage: settings sidebar,
-   file upload dropzone, file list, action buttons,
-   guest banner, and generating overlay/modal.
-   ═══════════════════════════════════════════════════ */
+/* homepage.css — Quiz homepage: settings sidebar*/
 
-/* ── Upload Step: workspace layout ─────────────── */
+/* Upload Step: workspace layout */
 .quiz-workspace {
   display: flex;
   min-height: 100vh;
 }
 
-/* ══════════════════════════════════════════════════
-   SETTINGS SIDEBAR
-   ══════════════════════════════════════════════════ */
+/* SETTINGS SIDEBAR */
 .settings-sidebar {
   width: 280px;
   min-width: 280px;
-  background: #ffffff;
+  background: #f8f9fb;
   border-right: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
@@ -37,11 +31,11 @@
   display: flex;
   align-items: center;
   gap: 0.625rem;
-  padding: 1.25rem 1.25rem 1rem;
+  padding: 2.2rem 1.25rem 0.8rem;
   border-bottom: 1px solid var(--color-bg-subtle);
   position: sticky;
   top: 0;
-  background: white;
+  background: #f8f9fb;
   z-index: 1;
 }
 
@@ -215,13 +209,12 @@
   flex-shrink: 0;
 }
 
-/* ══════════════════════════════════════════════════
-   MAIN UPLOAD CONTENT
-   ══════════════════════════════════════════════════ */
+/* MAIN UPLOAD CONTENT */
 .quiz-main-content {
   flex: 1;
   padding: 2rem 2.5rem;
   min-width: 0;
+  background: #f8f9fb;
 }
 
 .upload-header {
@@ -531,9 +524,7 @@
   background: #faf5ff;
 }
 
-/* ══════════════════════════════════════════════════
-   GENERATING OVERLAY (blur + modal)
-   ══════════════════════════════════════════════════ */
+/* GENERATING OVERLAY (blur + modal) */
 .generating-overlay {
   position: absolute;
   inset: 0;
@@ -585,9 +576,7 @@
   margin-bottom: 0.5rem;
 }
 
-/* ══════════════════════════════════════════════════
-   GUEST BANNER
-   ══════════════════════════════════════════════════ */
+/* GUEST BANNER */
 .guest-banner {
   display: flex;
   align-items: center;
@@ -611,3 +600,80 @@
 }
 
 .guest-banner-link:hover { text-decoration: underline; }
+
+/* DARK MODE OVERRIDES*/
+html.dark .settings-sidebar            { background: #1a1f2e; border-right-color: #2d3748; }
+html.dark .sidebar-header              { background: #1a1f2e; border-bottom-color: #252d3d; }
+html.dark .sidebar-pill:hover          { background: #252d3d; border-color: #4a5568; color: #e8eef2; }
+html.dark .sidebar-pill--active        { background: color-mix(in srgb, var(--pill-color, var(--color-primary)) 18%, #1a1f2e); }
+html.dark .sidebar-option:hover        { background: #252d3d; border-color: #4a5568; }
+html.dark .sidebar-option--active      { background: #1e1a3d; border-color: var(--color-primary); }
+html.dark .sidebar-input:focus         { background: #1a1f2e; }
+
+html.dark .quiz-main-content           { background: #0f1419; }
+
+html.dark .upload-dropzone             { background: #1a1f2e; border-color: #2d3748; }
+html.dark .upload-dropzone:hover,
+html.dark .upload-dropzone.drag-active { background: #1e2a3d; border-color: var(--color-primary); box-shadow: 0 0 0 4px rgba(147,51,234,0.15); }
+html.dark .dropzone-icon               { background: #252d3d; }
+html.dark .upload-dropzone:hover .dropzone-icon { background: #2d1f5e; }
+
+html.dark .uploaded-files-panel        { background: #1a1f2e; border-color: #2d3748; }
+html.dark .files-count                 { background: #1e1a3d; }
+html.dark .remove-btn                  { background: #252d3d; border-color: #3d4a5c; }
+html.dark .remove-btn:hover            { background: #3d1212; }
+html.dark .file-limit-info             { background: #0d1f3d; border-color: #1e40af; color: #93c5fd; }
+
+html.dark .upload-tips                 { background: #1a1f2e; border-color: #2d3748; }
+
+html.dark .main-history-btn            { background: #1a1f2e; color: #a0aac0; border-color: #2d3748; }
+html.dark .main-history-btn:hover      { background: #1e1a3d; border-color: var(--color-primary); color: var(--color-primary); }
+
+html.dark .generating-overlay          { background: rgba(15,20,25,0.7); }
+html.dark .generating-modal            { background: #1a1f2e; border-color: #2d3748; box-shadow: 0 8px 40px rgba(0,0,0,0.5); }
+
+html.dark .guest-banner                { background: #1f1a0d; border-color: #78350f; color: #fcd34d; }
+
+/* Collapsible settings sidebar */
+.settings-sidebar--collapsed {
+  width: 56px;
+  min-width: 56px;
+  overflow: hidden;
+  padding: 0;
+  align-items: center;
+}
+
+.settings-sidebar--collapsed .sidebar-header {
+  width: 100%;
+  justify-content: center;
+  padding: 1.5rem 0 1.5rem 0;
+  border-bottom: 1px solid var(--color-border);
+  background: #f8f9fb;
+}
+
+.sidebar-collapse-btn {
+  margin-left: auto;
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 0.3rem 0.4rem;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
+}
+
+.settings-sidebar--collapsed .sidebar-collapse-btn {
+  margin-left: 0;
+}
+
+.sidebar-collapse-btn:hover {
+  background: var(--color-bg-subtle);
+  color: var(--color-text);
+}
+
+html.dark .settings-sidebar--collapsed .sidebar-header { background: #1a1f2e; }
+html.dark .sidebar-collapse-btn        { border-color: #2d3748; color: #a0aac0; }
+html.dark .sidebar-collapse-btn:hover  { background: #252d3d; color: #e8eef2; }

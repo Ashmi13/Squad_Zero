@@ -53,7 +53,6 @@ export const decodeToken = (token) => {
   try {
     if (!token || typeof token !== 'string') return null;
     const base64Url = token.split('.')[1];
-<<<<<<< HEAD
     const base64    = base64Url.replace(/-/g, '+').replace(/_/g, '/');
     return JSON.parse(decodeURIComponent(
       atob(base64).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join('')
@@ -62,10 +61,6 @@ export const decodeToken = (token) => {
 };
 
 // Guest session helpers
-/**
- * Returns or create a random guest session ID stored in sessionStorage.
- * Deleted automatically when the browser tab/window closes.
- */
 export const getGuestSessionId = () => {
   try {
     let id = sessionStorage.getItem(GUEST_SESSION_KEY);
@@ -77,19 +72,6 @@ export const getGuestSessionId = () => {
     }
     return id;
   } catch {
-=======
-    if (!base64Url) return null;
-    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-    const jsonPayload = decodeURIComponent(
-      atob(base64)
-        .split('')
-        .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
-        .join('')
-    );
-    return JSON.parse(jsonPayload);
-  } catch (error) {
-    console.error('Error decoding token:', error);
->>>>>>> d36a44c8d6a533e5db7b65f80dbea0c9fa5f689f
     return null;
   }
 };

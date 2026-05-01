@@ -1,6 +1,6 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import { isAuthenticated } from '@/utils/tokenStorage';
-import { Upload, X, Sparkles, BarChart3, Settings } from 'lucide-react';
+import { Upload, X, Sparkles, BarChart3, Settings, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 
 const MAX_FILES = 20;
 
@@ -19,6 +19,7 @@ const QuizHomePage = ({
   showToast,
 }) => {
   const fileInputRef = useRef(null);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const getDifficultyIcon = (d) => ({ easy: '⭐', medium: '⭐⭐', hard: '⭐⭐⭐' }[d] || '⭐');
 
@@ -38,8 +39,8 @@ const QuizHomePage = ({
   };
 
   return (
-    <div className="quiz-workspace" style={{ position: 'relative' }}>
-      {/* ── Blur overlay while generating ── */}
+    <div className={`quiz-workspace${sidebarOpen ? '' : ' sidebar-collapsed'}`} style={{ position: 'relative' }}>
+      {/* Blur overlay while generating */}
       {isGenerating && (
         <div className="generating-overlay">
           <div className="generating-modal">
@@ -54,11 +55,19 @@ const QuizHomePage = ({
       )}
 
       {/*Settings Sidebar*/}
-      <aside className="settings-sidebar" style={isGenerating ? { filter: 'blur(3px)', pointerEvents: 'none', userSelect: 'none' } : {}}>
+      <aside className={`settings-sidebar${sidebarOpen ? '' : ' settings-sidebar--collapsed'}`} style={isGenerating ? { filter: 'blur(3px)', pointerEvents: 'none', userSelect: 'none' } : {}}>
         <div className="sidebar-header">
-          <div className="sidebar-header-icon"><Settings size={18} /></div>
-          <h2>Quiz Settings</h2>
+          {sidebarOpen && <div className="sidebar-header-icon"><Settings size={18} /></div>}
+          {sidebarOpen && <h2>Quiz Settings</h2>}
+          <button
+            className="sidebar-collapse-btn"
+            onClick={() => setSidebarOpen(o => !o)}
+            title={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
+          >
+            {sidebarOpen ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}
+          </button>
         </div>
+        {sidebarOpen && (<>
 
         <div className="sidebar-section">
           <label className="sidebar-label">Questions</label>
@@ -158,9 +167,10 @@ const QuizHomePage = ({
             ))}
           </div>
         </div>
+        </>)}
       </aside>
 
-      {/* ── Main Content ── */}
+      {/* Main Content */}
       <main
         className="quiz-main-content"
         style={isGenerating ? { filter: 'blur(3px)', pointerEvents: 'none', userSelect: 'none' } : {}}

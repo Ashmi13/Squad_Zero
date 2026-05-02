@@ -10,6 +10,8 @@ import {
   deleteFolderHandleBinding,
   renameFolderOnLocalMachine,
   getFolderHandleBinding,
+  saveFileToLocalFolder,
+  removeFileFromLocalFolder,
 } from '@/utils/localFsSync';
 
 const LOCAL_FOLDER_MAP_KEY = 'neuranote_local_folder_map';
@@ -66,6 +68,7 @@ const FolderPanel = ({ selectedFolder, onSelectFolder, onSelectFile, onFolderDel
   const [statusType, setStatusType] = useState('info');
   const [dragOverFolderId, setDragOverFolderId] = useState(null);
   const [isMovingFile, setIsMovingFile] = useState(false);
+  const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0, file: null, folder: null });
 
   const showStatus = (message, type = 'info') => {
     setStatusMessage(message);
@@ -176,6 +179,64 @@ const FolderPanel = ({ selectedFolder, onSelectFolder, onSelectFile, onFolderDel
       }
       return { ...prev, [id]: nextExpanded };
     });
+  };
+
+  useEffect(() => {
+    const onDocClick = () => setContextMenu({ visible: false, x: 0, y: 0, file: null, folder: null });
+    window.addEventListener('click', onDocClick);
+    return () => window.removeEventListener('click', onDocClick);
+  }, []);
+
+  const handleContextRename = async (fileNode, folder) => {
+    setContextMenu({ visible: false, x: 0, y: 0, file: null, folder: null });
+    const newName = window.prompt('Rename file', fileNode.name);
+    if (!newName || !newName.trim() || newName.trim() === fileNode.name) return;
+    try {
+      await workspaceApi.renameFile(fileNode.id, newName.trim());
+
+      // Best-effort local rename: try to fetch preview and write new file, then remove old local copy
+      try {
+        const preview = await workspaceApi.getFilePreview(fileNode.id).catch(() => null);
+        if (preview?.url) {
+          const resp = await fetch(preview.url);
+          if (resp.ok) {
+            const blob = await resp.blob();
+            const fileObj = new File([blob], `${newName.trim()}${fileNode.originalFilename?.match(/\.[^.]+$/) ? '' : ''}`, { type: blob.type });
+            await saveFileToLocalFolder(folder, fileObj).catch(() => null);
+            await removeFileFromLocalFolder(folder, fileNode.name).catch(() => null);
+          }
+        }
+      } catch (localErr) {
+        // ignore local rename errors
+      }
+
+      await loadFolderFiles(folder.id, { force: true });
+      window.dispatchEvent(new Event('neuranote:files-updated'));
+      showStatus('File renamed.', 'success');
+    } catch (e) {
+      window.alert(e.message || 'Failed to rename file');
+    }
+  };
+
+  const handleContextDelete = async (fileNode, folder) => {
+    setContextMenu({ visible: false, x: 0, y: 0, file: null, folder: null });
+    if (!window.confirm(`Delete "${fileNode.name}"? This will remove it from the workspace.`)) return;
+    try {
+      await workspaceApi.deleteFile(fileNode.id);
+
+      // Best-effort: remove local copy if present
+      try {
+        await removeFileFromLocalFolder(folder, fileNode.name).catch(() => null);
+      } catch {
+        // ignore
+      }
+
+      await loadFolderFiles(folder.id, { force: true });
+      window.dispatchEvent(new Event('neuranote:files-updated'));
+      showStatus('File deleted.', 'success');
+    } catch (e) {
+      window.alert(e.message || 'Failed to delete file');
+    }
   };
 
   const validateFolderName = (name) => {
@@ -514,6 +575,11 @@ const FolderPanel = ({ selectedFolder, onSelectFolder, onSelectFile, onFolderDel
               e.currentTarget.draggable = false;
               mouseDownPosNode = null;
             }}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setContextMenu({ visible: true, x: e.clientX, y: e.clientY, file: fileNode, folder });
+            }}
             onClick={() => {
               if (onSelectFile) {
                 onSelectFile({
@@ -686,6 +752,28 @@ const FolderPanel = ({ selectedFolder, onSelectFolder, onSelectFile, onFolderDel
       {loading && <p style={{ padding: '8px 16px', color: '#999', fontSize: '12px' }}>Loading folders...</p>}
       {error && <p style={{ padding: '8px 16px', color: '#d14343', fontSize: '12px' }}>{error}</p>}
       {!loading && !error && folders.map(folder => renderFolder(folder))}
+
+      {/* Context menu for file nodes */}
+      {contextMenu.visible && (
+        <div
+          style={{
+            position: 'fixed',
+            left: contextMenu.x,
+            top: contextMenu.y,
+            background: '#fff',
+            border: '1px solid #e5e7eb',
+            borderRadius: 8,
+            boxShadow: '0 6px 20px rgba(0,0,0,0.12)',
+            zIndex: 9999,
+            minWidth: 140,
+            overflow: 'hidden',
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button onClick={() => handleContextRename(contextMenu.file, contextMenu.folder)} style={{ display: 'block', width: '100%', padding: '8px 12px', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer' }}>Rename</button>
+          <button onClick={() => handleContextDelete(contextMenu.file, contextMenu.folder)} style={{ display: 'block', width: '100%', padding: '8px 12px', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', color: '#d14343' }}>Delete</button>
+        </div>
+      )}
     </div>
   );
 };

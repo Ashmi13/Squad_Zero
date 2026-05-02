@@ -54,64 +54,29 @@ export const workspaceApi = {
 
   async getRecentFiles(limit = 5) {
     try {
-      const [filesRes, foldersRes] = await Promise.all([
-        request('/api/v1/workspace/files'),
-        request('/api/v1/workspace/folders')
-      ]);
-
+      const res = await request(`/api/v1/workspace/files/recent?limit=${encodeURIComponent(limit)}`);
+      
+      // Optionally sync with local history for immediate client-side feedback
       const historyJson = localStorage.getItem('neuranote_file_history');
-      const localHistory = historyJson ? JSON.parse(historyJson) : {};
-
-      const folders = foldersRes?.folders || [];
-      const folderMap = {};
-      folders.forEach(f => folderMap[f.id] = f);
-
-      const buildFolderPath = (folderId) => {
-        const parts = [];
-        let curr = folderMap[folderId];
-        while (curr) {
-          if (curr.name) parts.push(curr.name);
-          curr = folderMap[curr.parent_folder_id || curr.parent_id];
-        }
-        return parts.length ? parts.reverse().join(' → ') : null;
-      };
-
-      let files = filesRes?.files || [];
-
-      files = files.map(f => {
-        const localTime = localHistory[f.id];
-        const recentTime = localTime || f.created_at || new Date().toISOString();
-        
-        let folderName = null;
-        let folderPath = null;
-        let parentFolderPath = null;
-
-        if (f.folder_id && folderMap[f.folder_id]) {
-          const folder = folderMap[f.folder_id];
-          folderName = folder.name;
-          folderPath = buildFolderPath(f.folder_id);
-          const parentId = folder.parent_folder_id || folder.parent_id;
-          if (parentId) {
-            parentFolderPath = buildFolderPath(parentId);
+      if (historyJson && res && res.files) {
+        const localHistory = JSON.parse(historyJson);
+        res.files = res.files.map(f => {
+          if (localHistory[f.id]) {
+             // Use local timestamp if it's newer
+             const localTime = new Date(localHistory[f.id]);
+             const serverTime = new Date(f.recent_timestamp || f.created_at);
+             if (localTime > serverTime) {
+                return { ...f, recent_timestamp: localHistory[f.id] };
+             }
           }
-        }
-
-        return {
-          ...f,
-          recent_timestamp: recentTime,
-          folder_name: folderName,
-          folder_path: folderPath,
-          parent_folder_path: parentFolderPath,
-          preview_available: Boolean(f.file_url || f.storage_url || f.storage_path || f.file_content || f.summary)
-        };
-      });
-
-      files.sort((a, b) => new Date(b.recent_timestamp) - new Date(a.recent_timestamp));
-
-      return { files: files.slice(0, limit) };
+          return f;
+        });
+        res.files.sort((a, b) => new Date(b.recent_timestamp || b.created_at) - new Date(a.recent_timestamp || a.created_at));
+      }
+      return res;
     } catch (err) {
-      console.warn("Failed to sort recent files locally, falling back to backend", err);
-      return request(`/api/v1/workspace/files/recent?limit=${encodeURIComponent(limit)}`);
+      console.error("Failed to fetch recent files", err);
+      throw err;
     }
   },
 
@@ -195,6 +160,14 @@ export const workspaceApi = {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ folder_id: folderId }),
+    });
+  },
+
+  renameFile(fileId, name) {
+    return request(`/api/v1/workspace/files/${fileId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
     });
   },
 

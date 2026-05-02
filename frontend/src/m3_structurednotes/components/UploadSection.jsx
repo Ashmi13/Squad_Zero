@@ -12,7 +12,6 @@
  *  - Accessible: keyboard nav, aria-labels, focus rings
  *  - CSS Module classes preserved; new classes added at bottom
  */
-
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   CloudUpload, FolderOpen, Loader2, FileText, X,
@@ -395,73 +394,7 @@ const UploadSection = ({ userId: userIdProp }) => {
         {/* ── Main Grid ── */}
         <div className={styles.mainGrid}>
 
-          {/* LEFT: Notebook Explorer */}
-          <div className={styles.explorerSection}>
-            <div className={styles.sectionHeader}>
-              <FolderOpen size={16} />
-              <span>My Notebooks</span>
-            </div>
-
-            <div className={styles.treeContainer}>
-              {folders.length === 0 ? (
-                <div className={styles.emptyTree}>
-                  <BookOpen size={18} style={{ opacity: 0.4 }} />
-                  <span>No notebooks found</span>
-                </div>
-              ) : (
-                folders.map(folder => (
-                  <div key={folder.id} className={styles.folderNode}>
-                    <button
-                      className={styles.folderRow}
-                      onClick={() => toggleFolder(folder.name)}
-                      aria-expanded={!!expandedFolders[folder.name]}
-                    >
-                      {expandedFolders[folder.name]
-                        ? <ChevronDown size={13} />
-                        : <ChevronRight size={13} />}
-                      <Folder size={13} className={styles.folderIcon} />
-                      <span>{folder.name}</span>
-                    </button>
-
-                    {expandedFolders[folder.name] && (
-                      <div className={styles.fileNodes}>
-                        {(filesByFolder[folder.name] || []).length === 0 && (
-                          <span className={styles.emptyFolder}>Empty folder</span>
-                        )}
-                        {(filesByFolder[folder.name] || []).map(file => {
-                          const isAdded = notebookNotes.some(n => n.id === file.id);
-                          return (
-                            <div
-                              key={file.id}
-                              className={`${styles.fileRow} ${isAdded ? styles.fileRowAdded : ''}`}
-                              draggable={!isAdded}
-                              onDragStart={(e) => handleDragStart(e, file)}
-                              onClick={() => !isAdded && addNotebookNote(file)}
-                              role="button"
-                              tabIndex={0}
-                              aria-label={`Add ${file.name} to selection`}
-                              onKeyDown={(e) => e.key === 'Enter' && !isAdded && addNotebookNote(file)}
-                            >
-                              <FileText size={12} className={styles.fileIconSmall} />
-                              <span className={styles.fileRowName}>{file.name}</span>
-                              {isAdded && (
-                                <CheckCircle2 size={12} className={styles.addedCheck} />
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-
-            <p className={styles.hintText}>
-              💡 Drag notes to the drop zone, or click to add
-            </p>
-          </div>
-
+         
           {/* RIGHT: Drop Zone + File List */}
           <div className={styles.actionSection}>
 

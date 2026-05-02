@@ -427,32 +427,8 @@ const FileList = ({ selectedFolder, files, onSelectFile, onFilesUpdate }) => {
 const FileRow = ({ file, depth, onSelectFile, onDelete }) => {
   const isPdf = (file.type || '').toUpperCase() === 'PDF';
   const [isDragging, setIsDragging] = useState(false);
-  const mouseDownPos = React.useRef(null);
-
-  const handleMouseDown = (e) => {
-    mouseDownPos.current = { x: e.clientX, y: e.clientY };
-    e.currentTarget.draggable = false;
-  };
-
-  const handleMouseMove = (e) => {
-    if (!mouseDownPos.current) return;
-    const dx = Math.abs(e.clientX - mouseDownPos.current.x);
-    const dy = Math.abs(e.clientY - mouseDownPos.current.y);
-    if (dx > 5 || dy > 5) {
-      e.currentTarget.draggable = true;
-    }
-  };
-
-  const handleMouseUp = (e) => {
-    mouseDownPos.current = null;
-    e.currentTarget.draggable = false;
-  };
 
   const handleDragStart = (e) => {
-    if (!e.currentTarget.draggable) {
-      e.preventDefault();
-      return;
-    }
     setIsDragging(true);
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('application/json', JSON.stringify({
@@ -461,22 +437,19 @@ const FileRow = ({ file, depth, onSelectFile, onDelete }) => {
       fileType: file.file_type || file.mime_type || file.type,
       sourceFolderId: file.folderId,
     }));
-    e.currentTarget.style.opacity = '0.5';
+    // Use setTimeout so the dragged ghost image doesn't appear 50% transparent initially on some browsers
+    setTimeout(() => { e.target.style.opacity = '0.5'; }, 0);
   };
 
   const handleDragEnd = (e) => {
     setIsDragging(false);
-    mouseDownPos.current = null;
-    e.currentTarget.style.opacity = '1';
-    e.currentTarget.draggable = false;
+    e.target.style.opacity = '1';
   };
 
   return (
     <div>
       <div
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
+        draggable={true}
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
         onClick={() => onSelectFile(file)}

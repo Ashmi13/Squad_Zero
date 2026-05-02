@@ -64,7 +64,9 @@ export const LoginCard = () => {
 
       // Store JWT tokens securely
       setTokens(response.data.access_token, response.data.refresh_token);
+      // Persist user record and notify UI listeners so profile appears immediately
       localStorage.setItem('user', JSON.stringify(response.data.user));
+      window.dispatchEvent(new Event('user-profile-updated'));
 
       // Success state
       setIsSuccess(true);

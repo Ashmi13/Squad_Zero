@@ -15,19 +15,36 @@ function flattenFolders(nodes, output = []) {
 }
 
 const WorkspaceFolderPanel = ({ onSelectFolder, selectedFolderId }) => {
-  const [folders, setFolders] = useState([]);
-  const [expanded, setExpanded] = useState({});
+  const [folders, setFolders] = useState(() => {
+    try {
+      const saved = localStorage.getItem('neuranote_folders');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [expanded, setExpanded] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('neuranote_expanded_folders') || '{}');
+    } catch {
+      return {};
+    }
+  });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   const allFlatFolders = useMemo(() => flattenFolders([...folders]), [folders]);
 
   const loadFolders = async () => {
-    setLoading(true);
+    if (!folders || folders.length === 0) {
+      setLoading(true);
+    }
     setError('');
     try {
       const data = await workspaceApi.getFolders();
-      setFolders(data.folders || []);
+      const nextFolders = data.folders || [];
+      setFolders(nextFolders);
+      localStorage.setItem('neuranote_folders', JSON.stringify(nextFolders));
     } catch (err) {
       setError(err.message || 'Failed to load folders');
     } finally {
@@ -40,7 +57,11 @@ const WorkspaceFolderPanel = ({ onSelectFolder, selectedFolderId }) => {
   }, []);
 
   const toggleExpand = (id) => {
-    setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
+    setExpanded((prev) => {
+      const newState = { ...prev, [id]: !prev[id] };
+      localStorage.setItem('neuranote_expanded_folders', JSON.stringify(newState));
+      return newState;
+    });
   };
 
   const createLocalFolder = async (name) => {
@@ -79,7 +100,11 @@ const WorkspaceFolderPanel = ({ onSelectFolder, selectedFolderId }) => {
       await loadFolders();
 
       if (parentFolderId) {
-        setExpanded((prev) => ({ ...prev, [parentFolderId]: true }));
+        setExpanded((prev) => {
+          const newState = { ...prev, [parentFolderId]: true };
+          localStorage.setItem('neuranote_expanded_folders', JSON.stringify(newState));
+          return newState;
+        });
       }
     } catch (err) {
       if (localCreation?.parentHandle) {
@@ -182,13 +207,13 @@ const WorkspaceFolderPanel = ({ onSelectFolder, selectedFolderId }) => {
         </button>
       </div>
 
-      {loading && <p style={{ padding: 12, margin: 0, fontSize: 13, color: '#888' }}>Loading folders...</p>}
+      {loading && folders.length === 0 && <p style={{ padding: 12, margin: 0, fontSize: 13, color: '#888' }}>Loading folders...</p>}
       {error && <p style={{ padding: 12, margin: 0, fontSize: 13, color: '#d14343' }}>{error}</p>}
       {!loading && !error && folders.length === 0 && (
         <p style={{ padding: 12, margin: 0, fontSize: 13, color: '#888' }}>No folders yet. Create one to start organizing files.</p>
       )}
 
-      {!loading && !error && folders.map((folder) => renderNode(folder))}
+      {folders.map((folder) => renderNode(folder))}
 
       {/* Hidden metadata in case parent layouts need all folders later */}
       <div style={{ display: 'none' }} data-folder-count={allFlatFolders.length} />

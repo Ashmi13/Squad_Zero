@@ -30,6 +30,8 @@ export default function OAuthCallback() {
         
         // 2. Store user record for Dashboard.jsx persistence
         localStorage.setItem('user', JSON.stringify(user));
+        // Notify other components that user profile is available
+        window.dispatchEvent(new Event('user-profile-updated'));
         
         console.log('OAuth Login Successful, redirecting to files...');
         navigate('/files', { replace: true });

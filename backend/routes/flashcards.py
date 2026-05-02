@@ -17,8 +17,7 @@ from app.api.deps import get_current_user_id
 router = APIRouter(tags=["flashcards"])
 logger = logging.getLogger(__name__)
 
-OPENROUTER_PRIMARY_MODEL = "mistralai/mistral-7b-instruct:free"
-OPENROUTER_FALLBACK_MODEL = "google/gemma-3-4b-it:free"
+from app.services.openai_service import OPENROUTER_PRIMARY_MODEL, OPENROUTER_FALLBACK_MODEL
 
 
 # ──────────────────────────────────────────────
@@ -166,26 +165,37 @@ def _generate_local_flashcards(text: str, target: int = 12) -> List[Flashcard]:
 
 def _parse_flashcards(raw: str) -> List[Flashcard]:
     """Parse AI response into flashcard list."""
-    try:
-        clean = raw.strip()
-        clean = re.sub(r"^```(?:json)?\s*", "", clean)
-        clean = re.sub(r"\s*```$", "", clean)
-        data = json.loads(clean)
-        if isinstance(data, list):
-            return [Flashcard(question=item["question"], answer=item["answer"]) for item in data]
-    except Exception:
-        pass
+    # 1. Try to extract JSON array
+    json_match = re.search(r'\[\s*\{.*?\}\s*\]', raw, re.DOTALL)
+    if json_match:
+        try:
+            data = json.loads(json_match.group(0))
+            if isinstance(data, list):
+                parsed = [Flashcard(question=item.get("question", ""), answer=item.get("answer", "")) for item in data if isinstance(item, dict) and "question" in item and "answer" in item]
+                if parsed:
+                    return parsed
+        except Exception:
+            pass
 
+    # 2. Try to parse as Q: A: format if JSON fails
     cards = []
     blocks = re.split(r"\n\s*\n", raw.strip())
     for block in blocks:
-        q_match = re.search(r"(?:Q:|Question:)\s*(.+)", block, re.IGNORECASE)
-        a_match = re.search(r"(?:A:|Answer:)\s*(.+)", block, re.IGNORECASE | re.DOTALL)
+        q_match = re.search(r"(?:Q:|Question:|Q\s*\d*\.?)\s*(.+?)(?=\n(?:A:|Answer:|A\s*\d*\.?)|$)", block, re.IGNORECASE | re.DOTALL)
+        a_match = re.search(r"(?:A:|Answer:|A\s*\d*\.?)\s*(.+)", block, re.IGNORECASE | re.DOTALL)
         if q_match and a_match:
             cards.append(Flashcard(
                 question=q_match.group(1).strip(),
                 answer=a_match.group(1).strip(),
             ))
+            
+    # 3. Last resort fallback
+    if not cards:
+        lines = [line.strip() for line in raw.split('\n') if line.strip() and not line.startswith('```') and not line.startswith('{') and not line.startswith('[') and not line.startswith('}') and not line.startswith(']')]
+        for i in range(0, len(lines)-1):
+            if lines[i].endswith('?') or lines[i].startswith('Q:'):
+                cards.append(Flashcard(question=re.sub(r'^Q:\s*', '', lines[i]), answer=re.sub(r'^A:\s*', '', lines[i+1])))
+                
     return cards
 
 
@@ -275,15 +285,29 @@ async def generate_flashcards(
         flashcards: List[Flashcard] = []
         source = "ai"
 
-        # Try AI first, fall back to local on any failure
         try:
             flashcards = _try_ai_flashcards(text_input)
             if not flashcards:
-                raise ValueError("AI returned empty flashcard list")
+                raise ValueError("AI returned empty flashcard list after parsing")
         except Exception as ai_exc:
             logger.warning(f"AI flashcard generation failed ({type(ai_exc).__name__}): {ai_exc}. Using local fallback.")
             flashcards = _generate_local_flashcards(extracted_text)
             source = "local"
+            
+        # If local fallback also fails (0 cards), create a generic flashcard so the UI doesn't crash with 500
+        if not flashcards:
+            logger.warning("Local flashcard generation also yielded 0 cards. Creating generic fallback cards.")
+            flashcards = [
+                Flashcard(
+                    question="What is the main topic of this document?",
+                    answer="Please review the document to identify its core themes and subjects, as the automated extractor could not confidently determine specific facts."
+                ),
+                Flashcard(
+                    question="How can I get better flashcards?",
+                    answer="Try uploading a document with clear definitions, headings, and bullet points. Our AI works best with structured study material."
+                )
+            ]
+            source = "fallback_generic"
 
         if not flashcards:
             raise HTTPException(status_code=500, detail="Could not generate flashcards from this document")

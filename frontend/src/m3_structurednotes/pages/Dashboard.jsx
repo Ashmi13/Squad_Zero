@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import Header from '../../components/Header';
+
 import UploadSection from '../components/UploadSection';
 import FolderGrid from '../components/FolderGrid';
 import RecentFiles from '../components/RecentFiles';
@@ -49,7 +49,7 @@ const Dashboard = () => {
     return (
         <div className={styles.app}>
             <main className={styles.mainContent}>
-                <Header />
+
                 <UploadSection />
 
                 <div className={styles.sectionHeader}>

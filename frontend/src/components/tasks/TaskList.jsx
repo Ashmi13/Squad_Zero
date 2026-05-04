@@ -1,11 +1,11 @@
 ﻿import React from 'react';
 import { Box, Typography, Chip, Button } from '@mui/material';
 import AddRoundedIcon from '@mui/icons-material/AddRounded';
-import MenuBookOutlinedIcon from '@mui/icons-material/MenuBookOutlined';
 import TaskItem from './TaskItem';
 import { TaskIcon } from './taskIcons';
 
 export default function TaskList({ category, tasks, onToggle, onAdd, onEdit, onDelete }) {
+  // nothing to show if no list is selected
   if (!category) return (
     <Box display="flex" alignItems="center" justifyContent="center" height="100%">
       <Typography sx={{ color: '#6b7280' }}>No list selected — click + to create one.</Typography>
@@ -29,20 +29,15 @@ export default function TaskList({ category, tasks, onToggle, onAdd, onEdit, onD
           <Chip label={`${done}/${total}`} size="small" className="task-counter" />
         </Box>
 
-        {/* ── CUSTOM PROGRESS BAR (replaces broken MUI LinearProgress) ── */}
-       {total > 0 && (
+        {/* progress bar — only shows if there are tasks */}
+        {total > 0 && (
           <div style={{ marginBottom: '6px' }}>
             <div style={{
-              height: '5px',
-              borderRadius: '99px',
-              backgroundColor: '#1c2333',
-              overflow: 'hidden',
-              marginBottom: '4px',
+              height: '5px', borderRadius: '99px',
+              backgroundColor: '#1c2333', overflow: 'hidden', marginBottom: '4px',
             }}>
               <div style={{
-                height: '100%',
-                width: `${progress}%`,
-                borderRadius: '99px',
+                height: '100%', width: `${progress}%`, borderRadius: '99px',
                 background: `linear-gradient(90deg, ${category.color}, #ec4899)`,
                 transition: 'width 0.5s cubic-bezier(0.4,0,0.2,1)',
                 boxShadow: `0 0 10px ${category.color}70`,
@@ -58,8 +53,7 @@ export default function TaskList({ category, tasks, onToggle, onAdd, onEdit, onD
       <Button fullWidth variant="outlined" startIcon={<AddRoundedIcon />} onClick={onAdd}
         className="add-task-btn"
         sx={{
-          borderColor: category.color,
-          color: category.color,
+          borderColor: category.color, color: category.color,
           '&:hover': { borderColor: category.color, bgcolor: `${category.color}18` },
         }}>
         Add Task

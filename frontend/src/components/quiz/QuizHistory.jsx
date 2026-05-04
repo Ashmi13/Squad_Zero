@@ -1,14 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { Clock, Calendar, TrendingUp, Award, BarChart3, Eye, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
-import './styles/QuizHistory.css';
+import './QuizHistory.css';
 
 import { API } from '@/config/api';
-import { getAuthHeaders } from '@/utils/tokenStorage';
-import { useAuth } from '@/hooks/useAuth.jsx';
+import { getAccessToken } from '@/utils/tokenStorage';
+import { useAuth } from '@/hooks/useAuth';
 
 const QuizHistory = ({ onBack }) => {
+  const getAuthHeaders = () => {
+    const token = getAccessToken();
+    return token ? { 'Authorization': `Bearer ${token}` } : {};
+  };
 
-  // Get user from auth context
+  // Get user from auth context — not use client-supplied userId
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('history'); // 'history' or 'analytics'
   const [history, setHistory] = useState([]);

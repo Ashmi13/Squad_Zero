@@ -1,4 +1,6 @@
--- Supabase PostgreSQL Schema
+========================================
+-- Supabase PostgreSQL Schema for SquadZero
+-- ========================================
 
 -- Create users table (extends Supabase auth.users)
 CREATE TABLE IF NOT EXISTS users (
@@ -29,7 +31,7 @@ ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE password_reset_tokens ENABLE ROW LEVEL SECURITY;
 
 -- Synchronize users table with Supabase Auth
--- To ensures a user's added to 'users'when  signs up
+-- This ensures when a user signs up via OAuth or email, they are added to 'users' automatically
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS trigger AS $$
 BEGIN
@@ -79,7 +81,9 @@ CREATE POLICY IF NOT EXISTS password_reset_tokens_select ON password_reset_token
         CURRENT_SETTING('request.jwt.claims')::json->>'role' = 'service_role'
     );
 
--- TASKS TABLE
+-- ========================================
+-- M5 TASKS TABLE
+-- ========================================
 
 CREATE TABLE IF NOT EXISTS tasks (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -112,7 +116,9 @@ CREATE POLICY IF NOT EXISTS tasks_self_access ON tasks
 CREATE POLICY IF NOT EXISTS tasks_service_role ON tasks
     FOR ALL TO service_role USING (true) WITH CHECK (true);
 
--- RLS Policies for uploads
+-- ========================================
+-- RLS Policies for uploads (M1)
+-- ========================================
 
 CREATE POLICY IF NOT EXISTS uploads_select ON uploads
     FOR SELECT USING (

@@ -1,5 +1,4 @@
 import React, { useRef } from 'react';
-import { isAuthenticated } from '@/utils/tokenStorage';
 import { Upload, X, Sparkles, BarChart3, Settings } from 'lucide-react';
 
 const MAX_FILES = 20;
@@ -53,7 +52,7 @@ const QuizHomePage = ({
         </div>
       )}
 
-      {/*Settings Sidebar*/}
+      {/* ── Settings Sidebar ── */}
       <aside className="settings-sidebar" style={isGenerating ? { filter: 'blur(3px)', pointerEvents: 'none', userSelect: 'none' } : {}}>
         <div className="sidebar-header">
           <div className="sidebar-header-icon"><Settings size={18} /></div>
@@ -165,13 +164,6 @@ const QuizHomePage = ({
         className="quiz-main-content"
         style={isGenerating ? { filter: 'blur(3px)', pointerEvents: 'none', userSelect: 'none' } : {}}
       >
-        {!isAuthenticated() && (
-          <div className="guest-banner">
-            <span>👋 You're using NeuraNote as a guest.</span>
-            <span>Your quiz history will be cleared when you close this tab.</span>
-            <a href="/login" className="guest-banner-link">Sign in to save your progress →</a>
-          </div>
-        )}
         <div className="upload-header">
           <div className="header-icon"><Sparkles size={28} /></div>
           <div>

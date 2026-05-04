@@ -22,3 +22,35 @@ ON public.announcements FOR ALL
 USING (
   (SELECT role FROM public.users WHERE id = auth.uid()) = 'admin'
 );
+
+-- 5. Per-user read status table
+CREATE TABLE IF NOT EXISTS public.user_announcement_status (
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    announcement_id BIGINT NOT NULL REFERENCES public.announcements(id) ON DELETE CASCADE,
+    is_read BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    PRIMARY KEY (user_id, announcement_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_announcement_status_user_id
+ON public.user_announcement_status (user_id);
+
+CREATE INDEX IF NOT EXISTS idx_user_announcement_status_announcement_id
+ON public.user_announcement_status (announcement_id);
+
+-- 6. Enable RLS and lock each row to its owner
+ALTER TABLE public.user_announcement_status ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view their own announcement status"
+ON public.user_announcement_status FOR SELECT
+USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert their own announcement status"
+ON public.user_announcement_status FOR INSERT
+WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can update their own announcement status"
+ON public.user_announcement_status FOR UPDATE
+USING (auth.uid() = user_id)
+WITH CHECK (auth.uid() = user_id);

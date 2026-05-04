@@ -46,7 +46,7 @@ class UserResponse(BaseModel):
     email: str = Field(..., description="User email")
     full_name: Optional[str] = Field(None, description="User full name")
     avatar_url: Optional[str] = Field(None, description="User avatar URL")
-    role: Optional[str] = Field(None, description="User role (admin/user)")
+    role: Optional[str] = Field("user", description="User role")
 
 
 # Update forward references

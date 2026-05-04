@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
-import { Home, FolderOpen, BrainCircuit, CheckSquare, Edit3, Settings, BadgeHelp } from 'lucide-react';
+import { Home, FolderOpen, BrainCircuit, CheckSquare, Edit3, Settings, BadgeHelp, ShieldAlert } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import SettingsPanel from './SettingsPanel';
 import SecondBrainIcon from '@/components/modules/secondbrain/SecondBrainIcon';
+import { useAuth } from '@/hooks/useAuth';
 
 const Rail = ({ activeView, setActiveView }) => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [showSettings, setShowSettings] = useState(false);
 
   const navItems = [
@@ -112,6 +114,27 @@ const Rail = ({ activeView, setActiveView }) => {
           <Icon size={22} strokeWidth={1.5} />
         </div>
       ))}
+
+      {user?.role === 'admin' && (
+        <div
+          onClick={() => navigate('/admin')}
+          style={{
+            width: '44px',
+            height: '44px',
+            borderRadius: '12px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            backgroundColor: activeView === 'admin' ? '#6C5DD3' : 'transparent',
+            color: activeView === 'admin' ? 'white' : '#888',
+            transition: 'all 0.2s',
+          }}
+          title="Admin Dashboard"
+        >
+          <ShieldAlert size={22} strokeWidth={1.5} />
+        </div>
+      )}
 
       <div
         onClick={() => setShowSettings(true)}

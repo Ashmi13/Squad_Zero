@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { ThemeProvider } from '@/context/ThemeContext';
+import { Toaster } from '@/lib/simpleToast';
 
 // ===== MEMBER 1 (Nihaaj) - Auth =====
 import LandingPage from '@/pages/LandingPage';
@@ -65,7 +66,8 @@ const AppLayout = () => {
   const showWorkspacePanel = showRail &&
     location.pathname !== '/dashboard' &&
     location.pathname !== '/files' &&
-    location.pathname !== '/files/create-note';
+    location.pathname !== '/files/create-note' &&
+    !location.pathname.includes('/admin');
 
   useEffect(() => {
     if (selectedWorkspaceFolder) {
@@ -146,7 +148,7 @@ const AppLayout = () => {
       )}
 
       {/* Page content */}
-      <div style={{ flex: 1, overflow: 'hidden' }}>
+      <div style={{ flex: 1, overflow: 'auto' }}>
         <Routes>
           {/* Member 1 - Auth */}
           <Route path="/"                 element={<LandingPage />} />
@@ -187,6 +189,7 @@ const AppLayout = () => {
 
       {/* Dev panel — floats on every page */}
       <DevNav />
+      <Toaster />
     </div>
   );
 };

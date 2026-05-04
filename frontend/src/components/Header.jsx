@@ -23,7 +23,6 @@ const Header = ({ title = "Dashboard", subtitle = "Manage your study materials a
     const [notifications, setNotifications] = useState([]);
     const [showDropdown, setShowDropdown] = useState(false);
     const [showModal, setShowModal] = useState(false);
-    const [unreadCount, setUnreadCount] = useState(0);
     const [loading, setLoading] = useState(true);
     const [modalTab, setModalTab] = useState('inbox'); // inbox, pinned, important
     const [selectedNote, setSelectedNote] = useState(null);
@@ -31,20 +30,17 @@ const Header = ({ title = "Dashboard", subtitle = "Manage your study materials a
         const saved = localStorage.getItem('pinned_announcements');
         return saved ? JSON.parse(saved) : [];
     });
-    const [readIds, setReadIds] = useState(() => {
-        const saved = localStorage.getItem('read_announcements');
-        return saved ? JSON.parse(saved) : [];
-    });
+    const [readIds, setReadIds] = useState([]);
 
     const fetchAnnouncements = async () => {
         try {
             setLoading(true);
-            const response = await axiosInstance.get('/api/v1/announcements/');
-            setNotifications(response.data);
-            
-            // Calculate unread count initially
-            const unread = response.data.filter(n => !readIds.includes(n.id)).length;
-            setUnreadCount(unread);
+            const response = await axiosInstance.get('/api/v1/announcements/with-status');
+            const announcementData = response.data?.announcements || [];
+            const userReadIds = response.data?.status?.read_announcement_ids || [];
+
+            setNotifications(announcementData);
+            setReadIds(userReadIds.map(id => Number(id)));
         } catch (error) {
             console.error('Failed to fetch announcements:', error);
         } finally {
@@ -66,7 +62,6 @@ const Header = ({ title = "Dashboard", subtitle = "Manage your study materials a
                         if (prev.some(n => n.id === payload.new.id)) return prev;
                         return [payload.new, ...prev];
                     });
-                    setUnreadCount(prev => prev + 1);
                 }
             )
             .on(
@@ -83,6 +78,7 @@ const Header = ({ title = "Dashboard", subtitle = "Manage your study materials a
                 { event: 'DELETE', schema: 'public', table: 'announcements' },
                 (payload) => {
                     setNotifications(prev => prev.filter(n => n.id !== payload.old.id));
+                        setReadIds(prev => prev.filter(id => id !== Number(payload.old.id)));
                     // Deselect if active
                     setSelectedNote(prev => prev?.id === payload.old.id ? null : prev);
                 }
@@ -99,22 +95,35 @@ const Header = ({ title = "Dashboard", subtitle = "Manage your study materials a
         localStorage.setItem('pinned_announcements', JSON.stringify(pinnedIds));
     }, [pinnedIds]);
 
-    useEffect(() => {
-        localStorage.setItem('read_announcements', JSON.stringify(readIds));
-        const unread = notifications.filter(n => !readIds.includes(n.id)).length;
-        setUnreadCount(unread);
-    }, [readIds, notifications]);
-
     const togglePin = (e, id) => {
         e.stopPropagation();
         setPinnedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
     };
 
-    const markAsRead = (id) => {
-        if (!readIds.includes(id)) {
-            setReadIds(prev => [...prev, id]);
+    const markAsRead = async (id) => {
+        if (readIds.includes(id)) return;
+        setReadIds(prev => [...prev, id]);
+        try {
+            await axiosInstance.post(`/api/v1/announcements/${id}/read`);
+        } catch (error) {
+            console.error('Failed to persist read status:', error);
         }
     };
+
+    const markAllAsRead = async () => {
+        const allIds = notifications.map(n => n.id);
+        setReadIds(allIds);
+        try {
+            await axiosInstance.post('/api/v1/announcements/read-all');
+        } catch (error) {
+            console.error('Failed to persist read-all status:', error);
+        }
+    };
+
+    const unreadCount = useMemo(
+        () => notifications.filter(n => !readIds.includes(Number(n.id))).length,
+        [notifications, readIds]
+    );
 
     const filteredNotes = useMemo(() => {
         switch (modalTab) {
@@ -191,7 +200,7 @@ const Header = ({ title = "Dashboard", subtitle = "Manage your study materials a
                                         {notifications.map((note) => (
                                             <div 
                                                 key={note.id} 
-                                                onClick={() => { markAsRead(note.id); setShowModal(true); setSelectedNote(note); setShowDropdown(false); }}
+                                                onClick={async () => { await markAsRead(note.id); setShowModal(true); setSelectedNote(note); setShowDropdown(false); }}
                                                 className={`p-4 hover:bg-white/[0.04] transition-all cursor-pointer relative group ${!(readIds || []).includes(note.id) ? 'bg-indigo-500/[0.03]' : ''}`}
                                             >
                                                 <div className="flex gap-3">
@@ -273,7 +282,7 @@ const Header = ({ title = "Dashboard", subtitle = "Manage your study materials a
 
                                     <div className="p-4 mt-auto">
                                         <button 
-                                            onClick={() => setReadIds(notifications.map(n => n.id))}
+                                            onClick={markAllAsRead}
                                             className="w-full py-3 rounded-xl border border-white/5 text-xs font-bold text-zinc-400 hover:bg-white/5 hover:text-white transition-all flex items-center justify-center gap-2"
                                         >
                                             <CheckCircle2 size={14} />
@@ -302,7 +311,7 @@ const Header = ({ title = "Dashboard", subtitle = "Manage your study materials a
                                             filteredNotes.map(note => (
                                                 <div 
                                                     key={note.id}
-                                                    onClick={() => { setSelectedNote(note); markAsRead(note.id); }}
+                                                    onClick={async () => { setSelectedNote(note); await markAsRead(note.id); }}
                                                     className={`group relative p-5 rounded-3xl mb-2 transition-all cursor-pointer border ${
                                                         selectedNote?.id === note.id 
                                                             ? 'bg-indigo-600/10 border-indigo-500/30' 
@@ -337,7 +346,7 @@ const Header = ({ title = "Dashboard", subtitle = "Manage your study materials a
                                                             </div>
                                                         </div>
                                                         {!readIds.includes(note.id) && (
-                                                            <div className="absolute left-1 top-1/2 -tranzinc-y-1/2 w-1.5 h-6 bg-indigo-500 rounded-r-full" />
+                                                            <div className="absolute left-1 top-1/2 -translate-y-1/2 w-1.5 h-6 bg-indigo-500 rounded-r-full" />
                                                         )}
                                                     </div>
                                                 </div>

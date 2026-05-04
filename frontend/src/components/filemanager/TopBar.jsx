@@ -3,6 +3,7 @@ import { Search, Bell, ShieldAlert, Moon, Sun, LogOut } from 'lucide-react';
 import { useTheme } from '@/context/ThemeContext';
 import { config } from '@/config/env';
 import { clearTokens, getAccessToken } from '@/utils/tokenStorage';
+import NotificationBell from '@/components/NotificationBell';
 
 const TopBar = ({ folderName }) => {
   const { isDark, toggleTheme, theme } = useTheme();
@@ -153,34 +154,7 @@ const TopBar = ({ folderName }) => {
         </div>
 
         {/* Notification Bell */}
-        <div style={{ position: 'relative' }}>
-          <div
-            style={iconButtonStyle}
-            onClick={() => {
-              setShowNotifications((prev) => !prev);
-              setShowAlerts(false);
-            }}
-            title="Notifications"
-          >
-            <Bell size={18} color={theme.colors.text.secondary} />
-            <div style={{
-              position: 'absolute', top: '6px', right: '6px',
-              width: '8px', height: '8px', borderRadius: '50%',
-              backgroundColor: '#ff4d4d'
-            }} />
-          </div>
-
-          {showNotifications && (
-            <div style={popoverStyle}>
-              <div style={{ padding: '10px 12px', borderBottom: `1px solid ${theme.colors.ui.border}`, fontWeight: 600, fontSize: '13px', color: theme.colors.text.primary }}>
-                Notifications
-              </div>
-              <div style={{ padding: '12px', fontSize: '13px', color: theme.colors.text.secondary }}>
-                No new notifications.
-              </div>
-            </div>
-          )}
-        </div>
+        <NotificationBell size={18} color={theme.colors.text.secondary} />
 
         {/* Admin Alerts */}
         <div style={{ position: 'relative' }}>

@@ -1,472 +1,585 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
-    Bell, X, Maximize2, Inbox, Pin, Star, CheckCircle2, Clock,
-    Info, AlertTriangle, AlertCircle, Edit2, Check, ChevronRight, ActivitySquare, LayoutGrid
+    Bell, X, Inbox, Pin, CheckCircle2, Maximize2,
+    Info, AlertTriangle, AlertCircle, Edit2
 } from 'lucide-react';
 import { axiosInstance } from '../lib/axios';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
+import { useTheme } from '../context/ThemeContext';
 
-// Internal sub-components
-const TabButton = ({ active, onClick, icon, label, count }) => (
-    <button 
-        onClick={onClick}
-        className={`w-full flex items-center justify-between p-4 rounded-2xl transition-all duration-300 font-bold text-sm ${
-            active 
-                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20' 
-                : 'text-zinc-400 hover:bg-white/5 hover:text-zinc-200'
-        }`}
-    >
-        <div className="flex items-center gap-3">
-            {icon}
-            {label}
-        </div>
-        {count > 0 && (
-            <span className={`text-[10px] px-2 py-0.5 rounded-full ${active ? 'bg-white/20' : 'bg-white/5'}`}>
-                {count}
-            </span>
-        )}
-    </button>
-);
-
-export default function NotificationBell({ size = 20, color = "#555" }) {
-    const { user } = useAuth();
+export default function NotificationBell({ size = 20, color = 'currentColor' }) {
+    const { theme } = useTheme();
+    const { user, isLoading: authLoading } = useAuth();
     const isAdmin = user?.role === 'admin';
+    
     const [notifications, setNotifications] = useState([]);
-    const [showDropdown, setShowDropdown] = useState(false);
     const [showModal, setShowModal] = useState(false);
-    const [unreadCount, setUnreadCount] = useState(0);
-    const [loading, setLoading] = useState(true);
-    const [modalTab, setModalTab] = useState('inbox'); 
-    const [selectedNote, setSelectedNote] = useState(null);
+    const [showDropdown, setShowDropdown] = useState(false);
+    const [loading, setLoading] = useState(false);
+    const [readIds, setReadIds] = useState([]);
+    const [pinnedIds, setPinnedIds] = useState([]);
+    const [pulseBadge, setPulseBadge] = useState(false);
+    const [hoveredId, setHoveredId] = useState(null);
     const [isEditing, setIsEditing] = useState(false);
+    const [filterTab, setFilterTab] = useState('inbox');
+    const [selectedId, setSelectedId] = useState(null);
     const [editForm, setEditForm] = useState({ title: '', content: '', type: 'info' });
-    const [pinnedIds, setPinnedIds] = useState(() => {
-        const saved = localStorage.getItem('pinned_announcements');
-        return saved ? JSON.parse(saved) : [];
-    });
-    const [readIds, setReadIds] = useState(() => {
-        const saved = localStorage.getItem('read_announcements');
-        return saved ? JSON.parse(saved) : [];
-    });
 
-    const fetchAnnouncements = async () => {
+    const markAsRead = async (id) => {
+        if (!id || readIds.includes(id)) return;
+        // Optimistic client update so badge decrements immediately.
+        setReadIds(prev => [...prev, id]);
         try {
-            setLoading(true);
-            const response = await axiosInstance.get('/api/v1/announcements/');
-            setNotifications(response.data);
-            setUnreadCount(response.data.filter(n => !readIds.includes(n.id)).length);
-        } catch (error) {
-            console.error('Failed to fetch announcements:', error);
-        } finally {
-            setLoading(false);
+            await axiosInstance.post(`/api/v1/announcements/${id}/read`);
+        } catch (err) {
+            console.error('Failed to mark read on server:', err);
         }
     };
 
+    // Fetch announcements
     useEffect(() => {
-        fetchAnnouncements();
+        const fetchNotifications = async () => {
+            try {
+                setLoading(true);
+                const response = await axiosInstance.get('/api/v1/announcements/with-status');
+                const announcementData = response.data?.announcements || [];
+                const userReadIds = response.data?.status?.read_announcement_ids || [];
 
+                setNotifications(announcementData.sort((a, b) => new Date(b.created_at) - new Date(a.created_at)));
+                setReadIds(userReadIds.map(id => Number(id)));
+            } catch (error) {
+                console.error('Error fetching announcements:', error);
+            } finally {
+                setLoading(false);
+            }
+        };
+        if (!authLoading) {
+            fetchNotifications();
+        }
+    }, [authLoading]);
+
+    // Realtime subscription
+    useEffect(() => {
+        if (!supabase) return;
         const channel = supabase
             .channel('public:announcements')
-            .on(
-                'postgres_changes',
-                { event: 'INSERT', schema: 'public', table: 'announcements' },
-                (payload) => {
-                    setNotifications(prev => {
-                        if (prev.some(n => n.id === payload.new.id)) return prev;
-                        return [payload.new, ...prev];
-                    });
-                    setUnreadCount(prev => prev + 1);
-                }
-            )
-            .on(
-                'postgres_changes',
-                { event: 'UPDATE', schema: 'public', table: 'announcements' },
-                (payload) => {
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'announcements' }, (payload) => {
+                if (payload.eventType === 'INSERT') {
+                    setNotifications(prev => [payload.new, ...prev]);
+                    // Pulse badge to indicate new message
+                    setPulseBadge(true);
+                    window.setTimeout(() => setPulseBadge(false), 900);
+                } else if (payload.eventType === 'UPDATE') {
                     setNotifications(prev => prev.map(n => n.id === payload.new.id ? payload.new : n));
-                    setSelectedNote(prev => prev?.id === payload.new.id ? payload.new : prev);
-                }
-            )
-            .on(
-                'postgres_changes',
-                { event: 'DELETE', schema: 'public', table: 'announcements' },
-                (payload) => {
+                } else if (payload.eventType === 'DELETE') {
                     setNotifications(prev => prev.filter(n => n.id !== payload.old.id));
-                    setSelectedNote(prev => prev?.id === payload.old.id ? null : prev);
+                    setReadIds(prev => prev.filter(id => id !== Number(payload.old.id)));
                 }
-            )
+            })
             .subscribe();
-
-        return () => {
-            supabase.removeChannel(channel);
-        };
+        return () => channel.unsubscribe();
     }, []);
 
-    useEffect(() => {
-        localStorage.setItem('pinned_announcements', JSON.stringify(pinnedIds));
-    }, [pinnedIds]);
-
-    useEffect(() => {
-        localStorage.setItem('read_announcements', JSON.stringify(readIds));
-        const unread = notifications.filter(n => !readIds.includes(n.id)).length;
-        setUnreadCount(unread);
-    }, [readIds, notifications]);
-
-    const markAsRead = (id) => {
-        if (!readIds.includes(id)) {
-            const newReadIds = [...readIds, id];
-            setReadIds(newReadIds);
-            localStorage.setItem('read_announcements', JSON.stringify(newReadIds));
-            setUnreadCount(prev => Math.max(0, prev - 1));
+    const getIcon = (type, size = 16) => {
+        const iconProps = { size, strokeWidth: 2 };
+        switch (type) {
+            case 'urgent': return <AlertCircle {...iconProps} color={theme.colors.error} />;
+            case 'warning': return <AlertTriangle {...iconProps} color={theme.colors.warning} />;
+            default: return <Info {...iconProps} color={theme.colors.primary} />;
         }
-    };
-
-    const togglePin = (id, e) => {
-        e.stopPropagation();
-        const newPinnedIds = pinnedIds.includes(id)
-            ? pinnedIds.filter(pid => pid !== id)
-            : [...pinnedIds, id];
-        setPinnedIds(newPinnedIds);
-        localStorage.setItem('pinned_announcements', JSON.stringify(newPinnedIds));
     };
 
     const filteredNotes = useMemo(() => {
-        switch (modalTab) {
-            case 'pinned': return notifications.filter(n => pinnedIds.includes(n.id));
-            case 'important': return notifications.filter(n => n.type === 'urgent' || n.type === 'warning');
-            default: return notifications;
-        }
-    }, [modalTab, notifications, pinnedIds]);
+        if (filterTab === 'important') return notifications.filter(n => n.type === 'urgent' || n.type === 'warning');
+        if (filterTab === 'pinned') return notifications.filter(n => pinnedIds.includes(n.id));
+        return notifications;
+    }, [notifications, filterTab, pinnedIds]);
 
-    const getIcon = (type, s = 20) => {
-        switch (type) {
-            case 'urgent': return <AlertCircle className="text-red-500" size={s} />;
-            case 'warning': return <AlertTriangle className="text-amber-500" size={s} />;
-            default: return <Info className="text-indigo-500" size={s} />;
-        }
+    const selectedNote = filteredNotes.find(n => n.id === selectedId);
+
+    const togglePin = (id, e) => {
+        e?.stopPropagation?.();
+        setPinnedIds(prev => prev.includes(id) ? prev.filter(pid => pid !== id) : [...prev, id]);
     };
 
-    const handleCloseModal = () => {
-        setShowModal(false);
-        setIsEditing(false); // Reset edit state
-    };
+    const unreadCount = notifications.filter(n => !readIds.includes(n.id)).length;
 
     return (
-        <div className="relative">
-            <div 
+        <div style={{ position: 'relative', display: 'inline-block' }}>
+            {/* Bell Button */}
+            <button
                 onClick={() => setShowDropdown(!showDropdown)}
                 style={{
-                  position: 'relative', cursor: 'pointer',
-                  width: '36px', height: '36px', borderRadius: '50%',
-                  backgroundColor: '#f5f5f5',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center'
+                    backgroundColor: 'transparent', border: 'none', cursor: 'pointer',
+                    padding: '8px', borderRadius: '8px', display: 'flex', alignItems: 'center',
+                    justifyContent: 'center', position: 'relative',
+                    transition: 'all 0.15s'
                 }}
             >
                 <Bell size={size} color={color} />
                 {unreadCount > 0 && (
-                    <div style={{
-                        position: 'absolute', top: '1px', right: '1px',
-                        minWidth: '16px', height: '16px', borderRadius: '999px',
-                        backgroundColor: '#ef4444', color: 'white', fontSize: '10px',
-                        fontWeight: 'bold', display: 'flex', alignItems: 'center',
-                        justifyContent: 'center', border: '2px solid #fff', padding: '0 4px'
+                    <span style={{
+                        position: 'absolute', top: -6, right: -6, minWidth: '18px', height: '18px',
+                        padding: '0 5px', backgroundColor: '#ef4444', borderRadius: '999px',
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: '11px', fontWeight: '700', color: 'white',
+                        border: `2px solid #1e293b`,
+                        transform: pulseBadge ? 'scale(1.12)' : 'scale(1)',
+                        boxShadow: pulseBadge ? '0 0 0 8px rgba(239,68,68,0.09)' : 'none',
+                        transition: 'transform 200ms ease, box-shadow 300ms ease'
                     }}>
-                        {unreadCount}
-                    </div>
+                        {Math.min(unreadCount, 99)}
+                    </span>
                 )}
-            </div>
-
-            {/* Dropdown */}
-            {showDropdown && (
-                <div className="absolute right-0 mt-3 w-80 bg-zinc-900 border border-white/10 rounded-2xl shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-                    <div className="p-4 border-b border-white/5 flex justify-between items-center bg-white/[0.02]">
-                        <h3 className="font-bold text-white text-sm">Recent Updates</h3>
-                        <div className="flex gap-2">
-                            <button 
-                                onClick={() => { setShowModal(true); setShowDropdown(false); }}
-                                className="p-1.5 hover:bg-white/5 rounded-lg text-zinc-400 hover:text-indigo-400 transition-colors"
-                            >
-                                <Maximize2 size={16} />
-                            </button>
-                            <button onClick={() => setShowDropdown(false)} className="p-1.5 hover:bg-white/5 rounded-lg text-zinc-400">
-                                <X size={16} />
-                            </button>
-                        </div>
-                    </div>
-                    <div className="max-h-[360px] overflow-y-auto custom-scrollbar">
-                        {loading ? (
-                            <div className="p-8 space-y-4">
-                                {[1, 2, 3].map(i => (
-                                    <div key={i} className="flex gap-3 animate-pulse">
-                                        <div className="w-8 h-8 bg-white/5 rounded-full shrink-0" />
-                                        <div className="flex-1 space-y-2">
-                                            <div className="h-3 bg-white/5 rounded w-3/4" />
-                                            <div className="h-2 bg-white/5 rounded w-1/2" />
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        ) : (notifications && notifications.length > 0) ? (
-                            <div className="divide-y divide-white/5">
-                                {notifications.map((note) => (
-                                    <div 
-                                        key={note.id} 
-                                        onClick={() => { markAsRead(note.id); setShowModal(true); setSelectedNote(note); setShowDropdown(false); }}
-                                        className={`p-4 hover:bg-white/[0.04] transition-all cursor-pointer relative group ${!(readIds || []).includes(note.id) ? 'bg-indigo-500/[0.03]' : ''}`}
-                                    >
-                                        <div className="flex gap-3">
-                                            <div className="mt-1 transition-transform group-hover:scale-110 duration-200">{getIcon(note.type, 18)}</div>
-                                            <div className="flex-1">
-                                                <div className="flex justify-between items-start">
-                                                    <div className="text-xs font-bold text-white pr-2 group-hover:text-indigo-400 transition-colors uppercase tracking-wider">{note.title}</div>
-                                                    <div className="flex items-center gap-2">
-                                                        {(pinnedIds || []).includes(note.id) && <Pin size={10} className="text-amber-400 fill-amber-400" />}
-                                                        {!(readIds || []).includes(note.id) && <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full shadow-[0_0_8px_rgba(59,130,246,0.5)]" />}
-                                                    </div>
-                                                </div>
-                                                <div className="text-[11px] text-zinc-400 mt-1 line-clamp-2 leading-relaxed italic">
-                                                    {note.content}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        ) : (
-                            <div className="p-10 text-center text-zinc-500 text-xs italic">
-                                No announcements found
-                            </div>
-                        )}
-                    </div>
-                </div>
-            )}
+            </button>
 
             {/* Modal */}
             {showModal && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-10 bg-zinc-950/80 backdrop-blur-sm animate-in fade-in duration-300">
-                    <div className="bg-zinc-900 w-full max-w-6xl h-[85vh] rounded-2xl border border-white/10 shadow-2xl flex flex-col md:flex-row overflow-hidden animate-in zoom-in-95 duration-300">
+                <div style={{
+                    position: 'fixed', inset: 0, zIndex: 100,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    padding: '16px', backgroundColor: '#000000dd'
+                }}>
+                    <div style={{
+                        width: '100%', maxWidth: '1200px', height: '80vh',
+                        display: 'flex', borderRadius: '12px', border: `1px solid #475569`,
+                        overflow: 'hidden', boxShadow: '0 25px 50px rgba(0, 0, 0, 0.5)'
+                    }}>
                         
-                        {/* Sidebar */}
-                        <aside className="w-full md:w-64 bg-zinc-900 border-r border-white/5 flex flex-col z-10 shrink-0">
-                            <div className="p-8 border-b border-white/5 flex justify-between items-center md:block">
-                                <h2 className="text-xl font-black text-white tracking-tight flex items-center gap-3 mb-2">
-                                    <div className="p-2 bg-indigo-500/10 rounded-xl"><Bell className="text-indigo-400" size={20} /></div>
-                                    Comms Center
-                                </h2>
-                                <p className="text-xs font-bold text-zinc-500 uppercase tracking-widest hidden md:block">
-                                    {notifications.length} Total Signals
-                                </p>
-                                <button onClick={handleCloseModal} className="md:hidden text-zinc-400 hover:text-white"><X size={20} /></button>
+                        {/* COLUMN 1: NAVIGATION (20%) */}
+                        <div style={{
+                            width: '20%', backgroundColor: '#1e293b', borderRight: `1px solid #475569`,
+                            display: 'flex', flexDirection: 'column', overflowY: 'auto'
+                        }}>
+                            <div style={{ padding: '20px', borderBottom: `1px solid #475569` }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                                    <Bell size={18} color={theme.colors.primary} />
+                                    <h3 style={{ fontSize: '16px', fontWeight: '700', color: '#f1f5f9' }}>Announcements</h3>
+                                </div>
+                                <p style={{ fontSize: '12px', color: '#94a3b8' }}>{notifications.length} messages</p>
                             </div>
                             
-                            <nav className="flex-1 p-4 space-y-2 border-b border-white/5 overflow-y-auto">
-                                <TabButton active={modalTab === 'inbox'} onClick={() => setModalTab('inbox')} icon={<Inbox size={18} />} label="Inbox" count={notifications.length} />
-                                <TabButton active={modalTab === 'important'} onClick={() => setModalTab('important')} icon={<Star size={18} />} label="Important" count={notifications.filter(n => n.type === 'urgent' || n.type === 'warning').length} />
-                                <TabButton active={modalTab === 'pinned'} onClick={() => setModalTab('pinned')} icon={<Pin size={18} />} label="Pinned" count={pinnedIds.length} />
+                            <nav style={{ flex: 1, padding: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                {[
+                                    { id: 'inbox', label: 'Inbox', icon: <Inbox size={16} />, count: notifications.length },
+                                    { id: 'important', label: 'Important', icon: <AlertCircle size={16} />, count: notifications.filter(n => n.type === 'urgent' || n.type === 'warning').length },
+                                    { id: 'pinned', label: 'Pinned', icon: <Pin size={16} />, count: pinnedIds.length }
+                                ].map(tab => (
+                                    <button
+                                        key={tab.id}
+                                        onClick={() => { setFilterTab(tab.id); setSelectedId(null); }}
+                                        style={{
+                                            padding: '12px 16px', borderRadius: '8px', border: 'none',
+                                            backgroundColor: filterTab === tab.id ? theme.colors.primary : 'transparent',
+                                            color: filterTab === tab.id ? '#ffffff' : '#cbd5e1',
+                                            cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '12px',
+                                            justifyContent: 'space-between', fontWeight: '600', fontSize: '13px',
+                                            transition: 'all 0.2s'
+                                        }}
+                                        onMouseEnter={(e) => {
+                                            if (filterTab !== tab.id) e.target.style.backgroundColor = '#334155';
+                                        }}
+                                        onMouseLeave={(e) => {
+                                            if (filterTab !== tab.id) e.target.style.backgroundColor = 'transparent';
+                                        }}
+                                    >
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                            {tab.icon}
+                                            {tab.label}
+                                        </div>
+                                        {tab.count > 0 && (
+                                            <span style={{
+                                                backgroundColor: filterTab === tab.id ? 'rgba(255,255,255,0.3)' : '#475569',
+                                                color: '#f1f5f9', fontSize: '11px', fontWeight: '700',
+                                                padding: '2px 8px', borderRadius: '999px'
+                                            }}>
+                                                {tab.count}
+                                            </span>
+                                        )}
+                                    </button>
+                                ))}
                             </nav>
 
-                            <div className="p-4 mt-auto">
-                                <button onClick={() => setReadIds(notifications.map(n => n.id))} className="w-full py-3 rounded-xl bg-white/[0.02] border border-white/5 text-xs font-bold text-zinc-400 hover:bg-white/5 hover:text-white transition-all flex items-center justify-center gap-2 group">
-                                    <CheckCircle2 size={16} className="text-zinc-500 group-hover:text-green-400 transition-colors" /> Mark all as read
+                            <div style={{ padding: '16px', borderTop: `1px solid #475569`, marginTop: 'auto' }}>
+                                <button
+                                    onClick={async () => {
+                                        const allIds = notifications.map(n => n.id);
+                                        setReadIds(allIds);
+                                        try {
+                                            await axiosInstance.post('/api/v1/announcements/read-all');
+                                        } catch (err) {
+                                            console.error('Failed to mark all read:', err);
+                                        }
+                                    }}
+                                    style={{
+                                        width: '100%', padding: '10px', borderRadius: '6px',
+                                        backgroundColor: '#334155', border: `1px solid #475569`,
+                                        color: '#cbd5e1', cursor: 'pointer', fontSize: '12px', fontWeight: '600',
+                                        transition: 'all 0.2s'
+                                    }}
+                                    onMouseEnter={(e) => {
+                                        e.target.style.backgroundColor = '#475569';
+                                        e.target.style.color = '#f1f5f9';
+                                    }}
+                                    onMouseLeave={(e) => {
+                                        e.target.style.backgroundColor = '#334155';
+                                        e.target.style.color = '#cbd5e1';
+                                    }}
+                                >
+                                    <CheckCircle2 size={14} style={{ display: 'inline', marginRight: '6px' }} />
+                                    Mark All Read
                                 </button>
                             </div>
-                        </aside>
+                        </div>
 
-                        {/* List Area */}
-                        <main className="flex-1 flex flex-col min-w-0 bg-zinc-950/40 border-r border-white/5">
-                            <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-3">
+                        {/* COLUMN 2: MESSAGE LIST (35%) */}
+                        <div style={{
+                            width: '35%', backgroundColor: '#0f172a', borderRight: `1px solid #475569`,
+                            display: 'flex', flexDirection: 'column', overflowY: 'auto'
+                        }}>
+                            <div style={{ padding: '16px', borderBottom: `1px solid #475569` }}>
+                                <h4 style={{ fontSize: '13px', fontWeight: '700', color: '#94a3b8', textTransform: 'uppercase' }}>Messages</h4>
+                            </div>
+
+                            <div style={{ flex: 1, overflowY: 'auto' }}>
                                 {loading ? (
-                                    <div className="space-y-6">
+                                    <div style={{ padding: '16px' }}>
                                         {[1, 2, 3].map(i => (
-                                            <div key={i} className="flex gap-4 animate-pulse p-4">
-                                                <div className="w-10 h-10 bg-white/5 rounded-2xl shrink-0" />
-                                                <div className="flex-1 space-y-3">
-                                                    <div className="h-4 bg-white/5 rounded-lg w-1/3" />
-                                                    <div className="h-3 bg-white/5 rounded-lg w-full" />
-                                                </div>
+                                            <div key={i} style={{ marginBottom: '12px', padding: '12px', backgroundColor: '#1e293b', borderRadius: '6px', opacity: 0.5 }}>
+                                                <div style={{ height: '12px', backgroundColor: '#334155', borderRadius: '4px', marginBottom: '8px' }} />
+                                                <div style={{ height: '10px', backgroundColor: '#334155', borderRadius: '4px', width: '80%' }} />
                                             </div>
                                         ))}
                                     </div>
                                 ) : filteredNotes.length > 0 ? (
-                                    filteredNotes.map(note => (
-                                        <div 
-                                            key={note.id}
-                                            onClick={() => { setSelectedNote(note); markAsRead(note.id); setIsEditing(false); }}
-                                            className={`group relative p-5 rounded-2xl transition-all cursor-pointer border ${
-                                                selectedNote?.id === note.id 
-                                                    ? 'bg-indigo-600/10 border-indigo-500/30' 
-                                                    : 'bg-zinc-900/40 border-transparent hover:bg-white/[0.03]'
-                                            }`}
-                                        >
-                                            <div className="flex gap-4">
-                                                <div className="mt-1">{getIcon(note.type)}</div>
-                                                <div className="flex-1 min-w-0">
-                                                    <div className="flex justify-between items-start mb-2 gap-4">
-                                                        <div className="flex flex-col gap-1 min-w-0">
-                                                            <h4 className={`text-sm md:text-base font-bold transition-colors truncate ${selectedNote?.id === note.id ? 'text-indigo-400' : 'text-zinc-200'}`}>
+                                    filteredNotes.map(note => {
+                                        const isUnread = !readIds.includes(note.id);
+                                        const isSelected = selectedId === note.id;
+                                        const isHovered = hoveredId === note.id;
+                                        const bg = isSelected ? '#334155' : isHovered ? '#3b4252' : isUnread ? '#334155' : '#1e293b';
+                                        return (
+                                            <div
+                                                key={note.id}
+                                                onClick={() => { setSelectedId(note.id); markAsRead(note.id); }}
+                                                onMouseEnter={() => setHoveredId(note.id)}
+                                                onMouseLeave={() => setHoveredId(null)}
+                                                style={{
+                                                    padding: '14px 12px', borderBottom: `1px solid #475569`,
+                                                    backgroundColor: bg,
+                                                    cursor: 'pointer', transition: 'background-color 120ms ease'
+                                                }}
+                                            >
+                                                <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
+                                                    <div style={{ marginTop: '2px', flexShrink: 0 }}>{getIcon(note.type, 14)}</div>
+                                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: '4px', marginBottom: '4px' }}>
+                                                            <h4 style={{
+                                                                fontSize: '12px', fontWeight: '700', color: '#f1f5f9',
+                                                                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
+                                                            }}>
                                                                 {note.title}
                                                             </h4>
-                                                            <div className="flex shadow-sm items-center gap-2">
-                                                                {note.type && (
-                                                                    <span className={`text-[10px] px-2 py-0.5 rounded-md font-bold uppercase tracking-wider
-                                                                        ${note.type === 'urgent' ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 
-                                                                          note.type === 'warning' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 
-                                                                          'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'}`}>
-                                                                        {note.type}
-                                                                    </span>
-                                                                )}
-                                                            </div>
+                                                            {!readIds.includes(note.id) && (
+                                                                <div style={{
+                                                                    width: '6px', height: '6px', borderRadius: '50%',
+                                                                    backgroundColor: '#60a5fa', flexShrink: 0
+                                                                }} />
+                                                            )}
                                                         </div>
-                                                        <div className="flex items-center gap-2 shrink-0">
-                                                            <div className="hidden sm:flex text-[10px] text-zinc-500 items-center justify-center bg-zinc-950 px-2 py-1 rounded-md border border-white/5 font-medium">
-                                                                {new Date(note.created_at).toLocaleDateString()}
-                                                            </div>
-                                                            <button 
-                                                                onClick={(e) => togglePin(note.id, e)} 
-                                                                className={`p-1.5 rounded-lg transition-all ${pinnedIds.includes(note.id) ? 'bg-amber-500/10' : 'hover:bg-white/10'}`}
-                                                            >
-                                                                <Pin size={14} className={pinnedIds.includes(note.id) ? "text-amber-500 fill-amber-500" : "text-zinc-500"} />
-                                                            </button>
-                                                        </div>
+                                                        <p style={{
+                                                            fontSize: '11px', color: '#94a3b8',
+                                                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
+                                                        }}>
+                                                            {note.content}
+                                                        </p>
+                                                        {note.type && (
+                                                            <span style={{
+                                                                display: 'inline-block', marginTop: '6px',
+                                                                fontSize: '9px', fontWeight: '700', textTransform: 'uppercase',
+                                                                backgroundColor: note.type === 'urgent' ? '#7f1d1d' : 'transparent',
+                                                                color: note.type === 'urgent' ? '#fca5a5' : '#93c5fd',
+                                                                padding: '2px 6px', borderRadius: '3px'
+                                                            }}>
+                                                                {note.type}
+                                                            </span>
+                                                        )}
                                                     </div>
-                                                    <p className="text-zinc-400 text-xs md:text-sm line-clamp-2 mt-2 leading-relaxed">{note.content}</p>
                                                 </div>
                                             </div>
-                                            {!readIds.includes(note.id) && (
-                                                <div className="absolute left-0 top-1/2 -tranzinc-y-1/2 w-1 h-8 bg-indigo-500 rounded-r-full" />
-                                            )}
-                                        </div>
-                                    ))
+                                        );
+                                    })
                                 ) : (
-                                    <div className="h-full flex flex-col items-center justify-center text-zinc-500 gap-4 opacity-60">
-                                        <Inbox size={48} className="text-zinc-600" />
-                                        <p className="text-sm font-medium uppercase tracking-widest text-zinc-500">Inbox Zero</p>
+                                    <div style={{
+                                        height: '100%', display: 'flex', flexDirection: 'column',
+                                        alignItems: 'center', justifyContent: 'center', color: '#475569', gap: '12px'
+                                    }}>
+                                        <Inbox size={32} />
+                                        <p style={{ fontSize: '12px', textAlign: 'center' }}>No messages</p>
                                     </div>
                                 )}
                             </div>
-                        </main>
+                        </div>
 
-                        {/* Detail View */}
-                        <section className="hidden md:flex w-[400px] lg:w-[500px] bg-zinc-900 flex-col shrink-0 relative shadow-[-10px_0_30px_rgba(0,0,0,0.2)] z-20">
-                            <div className="flex items-center justify-between p-4 border-b border-white/5 bg-zinc-900/80 backdrop-blur-md sticky top-0 z-10">
-                                <div className="text-xs font-bold text-zinc-500 uppercase tracking-widest px-4">
-                                     {selectedNote ? 'Signal Details' : 'Preview'}
-                                </div>
-                                <button onClick={handleCloseModal} className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center text-zinc-400 hover:bg-red-500/20 hover:text-red-400 transition-all border border-transparent hover:border-red-500/20">
+                        {/* COLUMN 3: DETAIL VIEW (45%) */}
+                        <div style={{
+                            width: '45%', backgroundColor: '#0f172a', display: 'flex', flexDirection: 'column',
+                            borderLeft: `1px solid #475569`, position: 'relative'
+                        }}>
+                            {/* Header */}
+                            <div style={{
+                                padding: '16px 20px', borderBottom: `1px solid #475569`,
+                                display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+                            }}>
+                                <h3 style={{ fontSize: '14px', fontWeight: '700', color: '#f1f5f9', textTransform: 'uppercase' }}>
+                                    {selectedNote ? 'Message Details' : 'Select a Message'}
+                                </h3>
+                                <button
+                                    onClick={() => setShowModal(false)}
+                                    style={{
+                                        backgroundColor: 'transparent', border: 'none', cursor: 'pointer',
+                                        color: '#94a3b8', padding: '4px', transition: 'color 0.2s'
+                                    }}
+                                    onMouseEnter={(e) => e.target.style.color = '#f1f5f9'}
+                                    onMouseLeave={(e) => e.target.style.color = '#94a3b8'}
+                                >
                                     <X size={18} />
                                 </button>
                             </div>
 
+                            {/* Content */}
                             {selectedNote ? (
-                                <div className="p-8 md:p-10 flex-1 overflow-y-auto animate-in slide-in-from-right-4 duration-300">
-                                    <header className="mb-8 pb-8 border-b border-white/5">
-                                        <div className="flex items-center justify-between mb-4">
-                                            <div className="flex items-center gap-3">
-                                                 <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border
-                                                    ${selectedNote.type === 'urgent' ? 'bg-red-500/10 text-red-400 border-red-500/20' : 
-                                                      selectedNote.type === 'warning' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' : 
-                                                      'bg-indigo-500/10 text-indigo-400 border-indigo-500/20'}`}>
-                                                    {selectedNote.type || 'info'}
-                                                </span>
-                                                <div className="text-[11px] font-bold text-zinc-500 flex items-center gap-1.5">
-                                                    <Clock size={12} />
-                                                    {new Date(selectedNote.created_at).toLocaleString()}
-                                                </div>
-                                            </div>
-                                            {isAdmin && !isEditing && (
-                                                <button 
-                                                    onClick={() => {
-                                                        setEditForm({
-                                                            title: selectedNote.title,
-                                                            content: selectedNote.content,
-                                                            type: selectedNote.type || 'info'
-                                                        });
-                                                        setIsEditing(true);
-                                                    }}
-                                                    className="p-2 text-zinc-400 hover:text-indigo-400 hover:bg-indigo-500/10 rounded-lg transition-colors border border-transparent hover:border-indigo-500/20"
-                                                    title="Edit Announcement"
-                                                >
-                                                    <Edit2 size={16} />
-                                                </button>
-                                            )}
+                                <div style={{ flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column' }}>
+                                    {/* Metadata */}
+                                    <div style={{ marginBottom: '16px', paddingBottom: '16px', borderBottom: `1px solid #475569` }}>
+                                        <div style={{ display: 'flex', gap: '12px', alignItems: 'center', marginBottom: '8px' }}>
+                                            <span style={{
+                                                fontSize: '10px', fontWeight: '700', textTransform: 'uppercase',
+                                                backgroundColor: selectedNote.type === 'urgent' ? '#7f1d1d' : selectedNote.type === 'warning' ? '#92400e' : '#1e40af',
+                                                color: selectedNote.type === 'urgent' ? '#fca5a5' : selectedNote.type === 'warning' ? '#fcd34d' : '#93c5fd',
+                                                padding: '4px 8px', borderRadius: '4px'
+                                            }}>
+                                                {selectedNote.type || 'INFO'}
+                                            </span>
+                                            <span style={{ fontSize: '11px', color: '#94a3b8' }}>
+                                                {new Date(selectedNote.created_at).toLocaleString()}
+                                            </span>
                                         </div>
-                                        {isEditing ? (
+                                    </div>
+
+                                    {/* Title & Content */}
+                                    {isEditing ? (
+                                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '12px' }}>
                                             <input 
-                                                type="text" 
-                                                className="w-full mt-4 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-xl font-bold text-white focus:outline-none focus:border-indigo-500"
+                                                type="text"
+                                                style={{
+                                                    width: '100%', padding: '10px 12px', backgroundColor: '#1e293b',
+                                                    border: `1px solid #475569`, borderRadius: '6px',
+                                                    color: '#f1f5f9', fontSize: '14px', fontWeight: '600', outline: 'none'
+                                                }}
                                                 value={editForm.title}
                                                 onChange={(e) => setEditForm(p => ({...p, title: e.target.value}))}
                                             />
-                                        ) : (
-                                            <h3 className="text-2xl font-black text-white leading-tight">
-                                                {selectedNote.title}
-                                            </h3>
-                                        )}
-                                    </header>
-                                    
-                                    <div className="prose prose-invert max-w-none text-zinc-300 leading-relaxed text-sm whitespace-pre-wrap">
-                                        {isEditing ? (
                                             <textarea 
-                                                className="w-full h-48 bg-white/5 border border-white/10 rounded-xl p-4 text-sm text-zinc-300 focus:outline-none focus:border-indigo-500 resize-none"
+                                                style={{
+                                                    width: '100%', flex: 1, padding: '10px 12px', backgroundColor: '#1e293b',
+                                                    border: `1px solid #475569`, borderRadius: '6px',
+                                                    color: '#f1f5f9', fontSize: '13px', fontFamily: 'monospace', outline: 'none', resize: 'none'
+                                                }}
                                                 value={editForm.content}
                                                 onChange={(e) => setEditForm(p => ({...p, content: e.target.value}))}
                                             />
-                                        ) : (
-                                            <p className="whitespace-pre-wrap">{selectedNote.content}</p>
-                                        )}
-                                    </div>
-
-                                    {isEditing && (
-                                        <div className="mt-8 flex gap-3">
-                                            <button 
-                                                onClick={async () => {
-                                                    try {
-                                                        const res = await axiosInstance.patch(`/api/v1/admin/announcements/${selectedNote.id}`, editForm);
-                                                        setSelectedNote(res.data);
-                                                        setNotifications(prev => prev.map(n => n.id === res.data.id ? res.data : n));
-                                                        setIsEditing(false);
-                                                    } catch (error) {
-                                                        console.error("Error updating feature:", error);
-                                                        alert("Failed to update announcement.");
-                                                    }
-                                                }}
-                                                className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl transition-colors flex items-center justify-center gap-2"
-                                            >
-                                                <Check size={16} /> Save Changes
-                                            </button>
-                                            <button 
-                                                onClick={() => setIsEditing(false)}
-                                                className="flex-1 py-3 bg-white/5 hover:bg-white/10 text-zinc-300 font-bold rounded-xl transition-colors"
-                                            >
-                                                Cancel
-                                            </button>
+                                            <div style={{ display: 'flex', gap: '8px' }}>
+                                                <button 
+                                                    onClick={async () => {
+                                                        try {
+                                                            const res = await axiosInstance.patch(`/api/v1/admin/announcements/${selectedNote.id}`, editForm);
+                                                            setNotifications(prev => prev.map(n => n.id === res.data.id ? res.data : n));
+                                                            setIsEditing(false);
+                                                        } catch (error) {
+                                                            console.error("Error updating:", error);
+                                                            alert("Failed to update.");
+                                                        }
+                                                    }}
+                                                    style={{
+                                                        flex: 1, padding: '8px', backgroundColor: theme.colors.primary,
+                                                        color: '#ffffff', fontWeight: '600', borderRadius: '6px',
+                                                        border: 'none', cursor: 'pointer', fontSize: '12px', transition: 'opacity 0.2s'
+                                                    }}
+                                                    onMouseEnter={(e) => e.target.style.opacity = '0.85'}
+                                                    onMouseLeave={(e) => e.target.style.opacity = '1'}
+                                                >
+                                                    Save
+                                                </button>
+                                                <button 
+                                                    onClick={() => setIsEditing(false)}
+                                                    style={{
+                                                        flex: 1, padding: '8px', backgroundColor: '#334155',
+                                                        color: '#cbd5e1', fontWeight: '600', borderRadius: '6px',
+                                                        border: 'none', cursor: 'pointer', fontSize: '12px'
+                                                    }}
+                                                >
+                                                    Cancel
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div style={{ flex: 1 }}>
+                                            <h2 style={{ fontSize: '18px', fontWeight: '800', color: '#f1f5f9', marginBottom: '12px' }}>
+                                                {selectedNote.title}
+                                            </h2>
+                                            <p style={{
+                                                fontSize: '13px', color: '#cbd5e1', lineHeight: 1.6,
+                                                whiteSpace: 'pre-wrap', marginBottom: '16px'
+                                            }}>
+                                                {selectedNote.content}
+                                            </p>
                                         </div>
                                     )}
 
-                                    <div className="mt-12 pt-8 border-t border-white/5">
+                                    {/* Actions */}
+                                    <div style={{ display: 'flex', gap: '8px', paddingTop: '16px', borderTop: `1px solid #475569`, marginTop: 'auto' }}>
+                                        {isAdmin && !isEditing && (
+                                            <button 
+                                                onClick={() => {
+                                                    setEditForm({ title: selectedNote.title, content: selectedNote.content, type: selectedNote.type || 'info' });
+                                                    setIsEditing(true);
+                                                }}
+                                                style={{
+                                                    flex: 1, padding: '8px', backgroundColor: '#334155',
+                                                    color: '#cbd5e1', fontWeight: '600', borderRadius: '6px',
+                                                    border: 'none', cursor: 'pointer', fontSize: '12px', transition: 'all 0.2s'
+                                                }}
+                                                onMouseEnter={(e) => {
+                                                    e.target.style.backgroundColor = '#475569';
+                                                    e.target.style.color = '#f1f5f9';
+                                                }}
+                                                onMouseLeave={(e) => {
+                                                    e.target.style.backgroundColor = '#334155';
+                                                    e.target.style.color = '#cbd5e1';
+                                                }}
+                                            >
+                                                <Edit2 size={12} style={{ display: 'inline', marginRight: '4px' }} />
+                                                Edit
+                                            </button>
+                                        )}
                                         <button 
                                             onClick={(e) => togglePin(selectedNote.id, e)}
-                                            className={`flex items-center justify-center w-full gap-3 px-6 py-4 rounded-2xl font-bold text-sm transition-all group ${
-                                                pinnedIds.includes(selectedNote.id) 
-                                                    ? 'bg-amber-500/10 text-amber-500 border border-amber-500/20 hover:bg-amber-500/20' 
-                                                    : 'bg-white/5 text-zinc-300 hover:bg-white/10 hover:text-white border border-white/5 hover:border-white/10'
-                                            }`}
+                                            style={{
+                                                flex: 1, padding: '8px', backgroundColor: pinnedIds.includes(selectedNote.id) ? '#92400e' : '#334155',
+                                                color: pinnedIds.includes(selectedNote.id) ? '#fcd34d' : '#cbd5e1',
+                                                fontWeight: '600', borderRadius: '6px', border: 'none', cursor: 'pointer',
+                                                fontSize: '12px', transition: 'all 0.2s'
+                                            }}
+                                            onMouseEnter={(e) => {
+                                                e.target.style.backgroundColor = pinnedIds.includes(selectedNote.id) ? '#b45309' : '#475569';
+                                            }}
+                                            onMouseLeave={(e) => {
+                                                e.target.style.backgroundColor = pinnedIds.includes(selectedNote.id) ? '#92400e' : '#334155';
+                                            }}
                                         >
-                                            <Pin size={18} className={pinnedIds.includes(selectedNote.id) ? "fill-amber-500 group-hover:scale-110 transition-transform" : "group-hover:scale-110 transition-transform"} />
-                                            {pinnedIds.includes(selectedNote.id) ? 'Keep Pinned to Top' : 'Pin for Later'}
+                                            <Pin size={12} style={{ display: 'inline', marginRight: '4px' }} />
+                                            {pinnedIds.includes(selectedNote.id) ? 'Pinned' : 'Pin'}
                                         </button>
                                     </div>
                                 </div>
                             ) : (
-                                <div className="h-full flex flex-col items-center justify-center p-10 text-center">
-                                    <div className="w-20 h-20 rounded-full bg-zinc-950 border border-white/5 flex items-center justify-center mb-6 shadow-inner">
-                                        <Bell size={28} className="text-zinc-600" />
-                                    </div>
-                                    <h4 className="text-lg font-bold text-zinc-300 mb-2">No Signal Selected</h4>
-                                    <p className="text-sm text-zinc-500 max-w-[200px] leading-relaxed">Select an item from the list to view its full contents here.</p>
+                                <div style={{
+                                    flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center',
+                                    justifyContent: 'center', color: '#475569', gap: '12px'
+                                }}>
+                                    <Bell size={40} />
+                                    <p style={{ fontSize: '13px', textAlign: 'center' }}>Select a message to view details</p>
                                 </div>
                             )}
-                        </section>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Dropdown */}
+            {showDropdown && (
+                <div style={{
+                    position: 'absolute', right: 0, marginTop: '12px', width: '320px',
+                    backgroundColor: '#1e293b',
+                    border: `1px solid #475569`,
+                    borderRadius: '12px',
+                    zIndex: 50, overflow: 'hidden'
+                }}>
+                        <div style={{
+                            padding: '16px', borderBottom: `1px solid #475569`,
+                            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                            backgroundColor: '#1e293b'
+                        }}>
+                        <h3 style={{ fontWeight: 'bold', color: '#f1f5f9', fontSize: '14px' }}>Recent Updates</h3>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <button
+                                onClick={() => {
+                                    if (!selectedId && notifications.length > 0) {
+                                        setSelectedId(notifications[0].id);
+                                    }
+                                    setShowDropdown(false);
+                                    setShowModal(true);
+                                }}
+                                style={{
+                                    padding: '6px', backgroundColor: 'transparent', border: '1px solid #475569',
+                                    borderRadius: '6px', color: '#cbd5e1', cursor: 'pointer',
+                                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center'
+                                }}
+                                title="Open full notification view"
+                            >
+                                <Maximize2 size={14} />
+                            </button>
+                            <button 
+                                onClick={() => setShowDropdown(false)}
+                                style={{
+                                    padding: '6px', backgroundColor: 'transparent',
+                                    border: '1px solid #475569', borderRadius: '6px',
+                                    color: '#cbd5e1', cursor: 'pointer'
+                                }}
+                            >
+                                <X size={16} />
+                            </button>
+                        </div>
+                    </div>
+                    <div style={{ maxHeight: '360px', overflowY: 'auto', backgroundColor: '#1e293b' }}>
+                        {notifications.length > 0 ? (
+                            <div>
+                                {notifications.slice(0, 5).map((note) => (
+                                        <div 
+                                            key={note.id} 
+                                            onClick={async () => { setShowModal(true); setShowDropdown(false); setSelectedId(note.id); await markAsRead(note.id); }}
+                                            style={{
+                                                padding: '14px 12px', borderBottom: `1px solid #475569`,
+                                                cursor: 'pointer', transition: 'background-color 120ms ease',
+                                                backgroundColor: !readIds.includes(note.id) ? '#334155' : '#1e293b',
+                                                color: '#f1f5f9'
+                                            }}
+                                        >
+                                            <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
+                                                <div style={{ marginTop: '4px' }}>{getIcon(note.type, 16)}</div>
+                                                <div style={{ flex: 1 }}>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                                                        <div style={{ fontSize: '12px', fontWeight: '700', color: '#f1f5f9', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                            {note.title}
+                                                        </div>
+                                                        {!readIds.includes(note.id) && (
+                                                            <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#60a5fa', flexShrink: 0 }} />
+                                                        )}
+                                                    </div>
+                                                    <div style={{ fontSize: '11px', color: '#cbd5e1', marginTop: '6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                        {note.content.substring(0, 50)}...
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <div style={{ padding: '40px', textAlign: 'center', color: theme.colors.text.tertiary, fontSize: '12px' }}>
+                                No announcements
+                            </div>
+                        )}
                     </div>
                 </div>
             )}

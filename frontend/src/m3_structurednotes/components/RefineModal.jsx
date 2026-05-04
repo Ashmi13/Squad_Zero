@@ -288,7 +288,6 @@ export default function RefineModal({
               {msg.role === 'ai' && i > 0 && (
                 <div style={{
                   display: 'flex',
-                  gap: '6px',
                   marginTop: '4px',
                   padding: '8px 12px',
                   background: '#F0FDF4',

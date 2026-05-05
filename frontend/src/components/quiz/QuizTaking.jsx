@@ -1,5 +1,5 @@
-import React from 'react';
-import { Clock, ChevronLeft, ChevronRight, XCircle } from 'lucide-react';
+import React, { useState } from 'react';
+import { Clock, ChevronLeft, ChevronRight, XCircle, PanelRightClose, PanelRightOpen } from 'lucide-react';
 
 const QuizTaking = ({
   quiz,
@@ -16,6 +16,8 @@ const QuizTaking = ({
   onCancelQuiz,
 }) => {
   if (!quiz) return <div>Loading quiz…</div>;
+
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const question = quiz.questions[currentQuestion];
   const progress = ((currentQuestion + 1) / quiz.questions.length) * 100;
@@ -36,8 +38,8 @@ const QuizTaking = ({
     ({ easy: '⭐', medium: '⭐⭐', hard: '⭐⭐⭐' })[d?.toLowerCase()] || '⭐';
 
   return (
-    <div className="quiz-layout">
-      {/* ── Main Column ── */}
+    <div className={`quiz-layout${sidebarOpen ? '' : ' sidebar-collapsed'}`}>
+      {/* Main Column */}
       <div className="quiz-main">
         {/* Header */}
         <div className="quiz-header">
@@ -124,38 +126,51 @@ const QuizTaking = ({
         </div>
       </div>
 
-      {/* ── Sidebar ── */}
-      <div className="quiz-sidebar">
-        <h3>Questions</h3>
-        <div className="question-grid">
-          {quiz.questions.map((_, index) => (
-            <button
-              key={index}
-              className={`question-dot
-                ${index === currentQuestion ? 'current' : ''}
-                ${answers[index] !== undefined && String(answers[index]).trim() !== '' ? 'answered' : ''}
-              `}
-              onClick={() => onQuestionNavigate(index)}
-            >
-              {index + 1}
+      {/* Sidebar*/}
+      <div className={`quiz-sidebar${sidebarOpen ? '' : ' quiz-sidebar--collapsed'}`}>
+        <div className="sidebar-toggle-row">
+          {sidebarOpen && <h3>Questions</h3>}
+          <button
+            className="sidebar-toggle-btn"
+            onClick={() => setSidebarOpen(o => !o)}
+            title={sidebarOpen ? 'Minimize sidebar' : 'Expand sidebar'}
+          >
+            {sidebarOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}
+          </button>
+        </div>
+        {sidebarOpen && (
+          <>
+            <div className="question-grid">
+              {quiz.questions.map((_, index) => (
+                <button
+                  key={index}
+                  className={`question-dot
+                    ${index === currentQuestion ? 'current' : ''}
+                    ${answers[index] !== undefined && String(answers[index]).trim() !== '' ? 'answered' : ''}
+                  `}
+                  onClick={() => onQuestionNavigate(index)}
+                >
+                  {index + 1}
+                </button>
+              ))}
+            </div>
+            <div className="sidebar-stats">
+              <div className="stat">
+                <span className="stat-value">{answeredCount}</span>
+                <span className="stat-label">Answered</span>
+              </div>
+              <div className="stat">
+                <span className="stat-value">{quiz.questions.length - answeredCount}</span>
+                <span className="stat-label">Remaining</span>
+              </div>
+            </div>
+            <button className="submit-btn sidebar-submit-btn" onClick={() => onSubmitQuiz()} disabled={isSubmitting}>
+              {isSubmitting
+                ? <><div className="spinner" style={{ borderColor: 'rgba(255,255,255,0.35)', borderTopColor: 'white' }}></div> Submitting…</>
+                : <>Submit ({answeredCount}/{quiz.questions.length})</>}
             </button>
-          ))}
-        </div>
-        <div className="sidebar-stats">
-          <div className="stat">
-            <span className="stat-value">{answeredCount}</span>
-            <span className="stat-label">Answered</span>
-          </div>
-          <div className="stat">
-            <span className="stat-value">{quiz.questions.length - answeredCount}</span>
-            <span className="stat-label">Remaining</span>
-          </div>
-        </div>
-        <button className="submit-btn sidebar-submit-btn" onClick={() => onSubmitQuiz()} disabled={isSubmitting}>
-          {isSubmitting
-            ? <><div className="spinner" style={{ borderColor: 'rgba(255,255,255,0.35)', borderTopColor: 'white' }}></div> Submitting…</>
-            : <>Submit ({answeredCount}/{quiz.questions.length})</>}
-        </button>
+          </>
+        )}
       </div>
     </div>
   );

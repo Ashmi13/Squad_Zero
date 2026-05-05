@@ -11,7 +11,7 @@ class AIService:
     """Service for AI-powered question generation via OpenRouter"""
 
     # Primary model
-    MODEL = "google/gemini-3.1-flash-lite-preview"
+    MODEL = "google/gemini-2.5-flash-lite-preview-09-2025"
     # Fallback model (if primary fails)
     FALLBACK_MODEL = "openai/gpt-oss-20b:free"
 

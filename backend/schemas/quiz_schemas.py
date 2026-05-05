@@ -1,3 +1,4 @@
+import os
 from typing import List, Optional
 from pydantic import BaseModel, Field
 from fastapi import HTTPException, UploadFile
@@ -55,7 +56,7 @@ class AttemptDetailResponse(BaseModel):
 class FileUploadValidator:
     """
     Validate uploaded files before extraction.
-    Raises HTTPException so FastAPI returns proper 400 responses.
+    Raise HTTPException so FastAPI returns proper 400 responses.
     """
 
     MAX_FILES: int = 20
@@ -84,10 +85,11 @@ class FileUploadValidator:
                 status_code=400,
                 detail=f"Too many files. Maximum allowed is {cls.MAX_FILES}.",
             )
-
+        
+        # Extension check
         for file in files:
-            # Extension check
-            ext = file.filename.split(".")[-1].lower() if "." in file.filename else ""
+            _, raw_ext = os.path.splitext(file.filename or "")
+            ext = raw_ext.lstrip(".").strip().lower()  # strip leading dot + any whitespace
             if ext not in cls.ALLOWED_EXTENSIONS:
                 raise HTTPException(
                     status_code=400,

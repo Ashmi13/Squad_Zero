@@ -176,7 +176,7 @@ async def startup_event():
     # Warm up the column-detection cache so the first real request doesn't pay
     # the cost of 18 individual Supabase probes.
     try:
-        from app.db.supabase import get_supabase_client as _get_supabase
+        from app.db.supabase import get_supabase as _get_supabase
         from app.services.workspace_service import WorkspaceService
         _sb = _get_supabase()
         _svc = WorkspaceService(_sb)

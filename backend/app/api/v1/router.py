@@ -2,8 +2,6 @@
 from fastapi import APIRouter
 from app.api.v1.endpoints import auth
 
-<<<<<<< HEAD
-=======
 _fm_loaded = False
 _pdf_loaded = False
 _tasks_loaded = False
@@ -35,7 +33,6 @@ try:
 except Exception as e:
     print(f"⚠️  calendar endpoint skipped: {e}")
 
->>>>>>> d36a44c8d6a533e5db7b65f80dbea0c9fa5f689f
 router = APIRouter()
 
 @router.get("/health")

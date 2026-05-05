@@ -3,6 +3,7 @@ import { useAuth } from '@/hooks/useAuth.jsx';
 import { useNavigate } from 'react-router-dom';
 import { getAuthHeaders, isAuthenticated } from '@/utils/tokenStorage';
 import { API } from '@/config/api';
+import { workspaceApi } from '@/services/workspaceApi';
 
 import QuizHomePage from './QuizHomePage';
 import QuizTaking   from './QuizTaking';
@@ -20,7 +21,6 @@ const QuizPage = ({ noteId }) => {
   const navigate = useNavigate();
 
   // Guests allowed — no login redirect
-
 
   const [step, setStep]               = useState('upload');
   const [showHistory, setShowHistory] = useState(false);
@@ -101,9 +101,14 @@ const QuizPage = ({ noteId }) => {
       showToast(`Cannot upload more than ${MAX_FILES} files.`, 'error'); return;
     }
     const validFiles = files.filter(file => {
-      const ext = '.' + file.name.split('.').pop().toLowerCase();
-      const ok  = ['.pdf','.doc','.docx','.txt','.xlsx','.xls','.ppt','.pptx','.jpg','.jpeg','.png','.gif','.webp','.epub'];
-      if (!ok.includes(ext)) { showToast(`"${file.name}" invalid type.`, 'error'); return false; }
+      // Use lastIndexOf so filenames like "Copy of 1. Introduction" (dots in name,
+      // no real extension) don't get " introduction" treated as an extension.
+      const lastDot = file.name.lastIndexOf('.');
+      const rawExt = lastDot !== -1 ? file.name.slice(lastDot + 1).trim().toLowerCase() : '';
+      const ext = '.' + rawExt;
+      const ok  = ['.pdf','.doc','.docx','.txt','.xlsx','.xls','.ppt','.pptx','.jpg','.jpeg','.png','.gif','.webp','.epub','.bmp','.tiff','.rtf'];
+      const isValidExt = rawExt.length > 0 && rawExt.length <= 5 && !rawExt.includes(' ') && ok.includes(ext);
+      if (!isValidExt) { showToast(`"${file.name}" has an unsupported file type.`, 'error'); return false; }
       if (file.size > MAX_FILE_SIZE) { showToast(`"${file.name}" exceeds 25MB`, 'error'); return false; }
       return true;
     });
@@ -115,8 +120,164 @@ const QuizPage = ({ noteId }) => {
   };
 
   const handleRemoveFile = (id) => { setUploadedFiles(prev => prev.filter(f => f.id !== id)); showToast('File removed', 'info', 2000); };
-  const handleDrag = (e) => { e.preventDefault(); e.stopPropagation(); setDragActive(e.type === 'dragenter' || e.type === 'dragover'); };
-  const handleDrop = (e) => { e.preventDefault(); e.stopPropagation(); setDragActive(false); if (e.dataTransfer.files?.[0]) handleFiles(e.dataTransfer.files); };
+  const handleDrag = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const types = e.dataTransfer?.types || [];
+    if (types.includes('neuranote-quiz-file') || types.includes('Files')) {
+      setDragActive(e.type === 'dragenter' || e.type === 'dragover');
+    }
+  };
+
+  // Fetch a file blob from the backend using getFilePreview.
+  const fetchFileBlob = async (fileId, displayName) => {
+    showToast(`Loading "${displayName}"…`, 'info', 2000);
+    const data       = await workspaceApi.getFilePreview(fileId);
+    // Support both { preview: { preview_url } } and { preview_url } shapes
+    const previewObj = data?.preview || data || {};
+    const signedUrl  = previewObj?.preview_url;
+    const inlineContent = previewObj?.content;
+
+    if (signedUrl) {
+      const res = await fetch(signedUrl);
+      if (!res.ok) throw new Error(`Server returned ${res.status}`);
+      return res.blob();
+    }
+
+    if (inlineContent) {
+      const text = typeof inlineContent === 'string' && inlineContent.startsWith('data:')
+        ? atob(inlineContent.split(',')[1])
+        : inlineContent;
+      return new Blob([text], { type: 'text/plain' });
+    }
+
+    throw new Error('File has no accessible content. Open it in your folder to sync it first.');
+  };
+
+  // Resolve a safe filename for a folder-tree file drop.
+  const resolveDropFileName = (fileName, fileType, content, blobMime) => {
+    // If we have text content it will be saved as a .txt blob
+    if (content) {
+      const base = fileName.replace(/\.[^.]+$/, ''); // strip any existing extension
+      return base.endsWith('.txt') ? base : `${base}.txt`;
+    }
+
+    const GENERIC = ['file', '', null, undefined];
+    const rawType = (fileType || '').toLowerCase();
+
+    if (!GENERIC.includes(rawType)) {
+      // Real type like 'pdf', 'docx', 'pptx' — append only if not already there
+      const ext = `.${rawType}`;
+      return fileName.toLowerCase().endsWith(ext) ? fileName : `${fileName}${ext}`;
+    }
+
+    // fileType is generic — try sniffing from the fileName itself
+    const dotIdx = fileName.lastIndexOf('.');
+    if (dotIdx !== -1) {
+      const sniffed = fileName.slice(dotIdx + 1).toLowerCase();
+      if (sniffed.length > 0 && sniffed.length <= 5 && !sniffed.includes(' ')) {
+        return fileName; // already has a real extension
+      }
+    }
+
+    // Fall back to blob mime type
+    const mimeToExt = {
+      'application/pdf': 'pdf',
+      'application/msword': 'doc',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+      'application/vnd.ms-powerpoint': 'ppt',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
+      'application/vnd.ms-excel': 'xls',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+      'text/plain': 'txt',
+      'image/jpeg': 'jpg',
+      'image/png': 'png',
+      'image/gif': 'gif',
+      'image/webp': 'webp',
+    };
+    if (blobMime && mimeToExt[blobMime]) return `${fileName}.${mimeToExt[blobMime]}`;
+
+    // Last resort: treat as txt so at least something goes through
+    return `${fileName}.txt`;
+  };
+
+  const handleDrop = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+
+    // Folder-panel drag
+    const raw = e.dataTransfer.getData('neuranote-quiz-file');
+    if (raw) {
+      let fileData;
+      try { fileData = JSON.parse(raw); } catch (_) { showToast('Invalid drag data.', 'error'); return; }
+
+      const { fileId, fileName, fileType, fileUrl, content } = fileData;
+      if (!fileId) { showToast('Could not identify dragged file.', 'error'); return; }
+
+      // fullName resolved after we know blob.type — placeholder for now
+      let fullName = fileName;
+
+      try {
+        let blob;
+
+        if (content) {
+          // Plain text/extracted content — no network needed
+          blob = new Blob([content], { type: 'text/plain' });
+
+        } else if (fileUrl && fileUrl.startsWith('data:')) {
+          // Inline data-URI — decode it
+          const [meta, b64] = fileUrl.split(',');
+          const mime  = meta.split(':')[1].split(';')[0];
+          const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+          blob = new Blob([bytes], { type: mime });
+
+        } else {
+          blob = await fetchFileBlob(fileId, fileName);
+        }
+
+        fullName = resolveDropFileName(fileName, fileType, content, blob.type);
+        const file = new File([blob], fullName, { type: blob.type || 'application/octet-stream' });
+        handleFiles([file]);
+      } catch (err) {
+        showToast(`Failed to load "${fullName}": ${err.message}`, 'error');
+      }
+      return;
+    }
+
+    // OS file drag
+    if (e.dataTransfer.files?.[0]) {
+      handleFiles(e.dataTransfer.files);
+    }
+  };
+
+  const handleFolderFileDrop = async (fileData) => {
+    const { fileId, fileName, fileType, fileUrl, content } = fileData || {};
+    if (!fileId) { showToast('Could not identify dragged file.', 'error'); return; }
+
+    try {
+      let blob;
+
+      if (content) {
+        blob = new Blob([content], { type: 'text/plain' });
+
+      } else if (fileUrl && fileUrl.startsWith('data:')) {
+        const [meta, b64] = fileUrl.split(',');
+        const mime  = meta.split(':')[1].split(';')[0];
+        const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+        blob = new Blob([bytes], { type: mime });
+
+      } else {
+        blob = await fetchFileBlob(fileId, fileName);
+      }
+
+      const fullName = resolveDropFileName(fileName, fileType, content, blob.type);
+      const file = new File([blob], fullName, { type: blob.type || 'application/octet-stream' });
+      handleFiles([file]);
+    } catch (err) {
+      showToast(`Failed to load "${fileName}": ${err.message}`, 'error');
+    }
+  };
 
   const handleGenerateQuiz = async (levelSourceContent = null, forceDifficulty = null) => {
     if (isGeneratingRef.current || generationPromiseRef.current) return generationPromiseRef.current;
@@ -237,7 +398,6 @@ const QuizPage = ({ noteId }) => {
     // Show loading overlay on the results page BEFORE clearing state
     setIsGenerating(true);
     // Small delay so React flushes the isGenerating=true render (shows overlay)
-    // before handleGenerateQuiz resets and re-sets the flag itself
     await new Promise(r => setTimeout(r, 0));
     setAnswers({}); setCurrentQuestion(0); setResults(null); setShowReview(false);
     await handleGenerateQuiz(sc, next_difficulty);
@@ -296,6 +456,7 @@ const QuizPage = ({ noteId }) => {
           onRemoveFile={handleRemoveFile}
           onDrag={handleDrag}
           onDrop={handleDrop}
+          onFolderFileDrop={handleFolderFileDrop}
           onGenerateQuiz={() => handleGenerateQuiz()}
           onShowHistory={() => setShowHistory(true)}
           onConfigChange={(partial) => setConfig(prev => ({ ...prev, ...partial }))}

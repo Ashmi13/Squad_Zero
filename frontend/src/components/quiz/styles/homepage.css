@@ -677,3 +677,37 @@ html.dark .guest-banner                { background: #1f1a0d; border-color: #783
 html.dark .settings-sidebar--collapsed .sidebar-header { background: #1a1f2e; }
 html.dark .sidebar-collapse-btn        { border-color: #2d3748; color: #a0aac0; }
 html.dark .sidebar-collapse-btn:hover  { background: #252d3d; color: #e8eef2; }
+
+/* Folder-drag-active dropzone state */
+.upload-dropzone.folder-drag-active {
+  border-color: #10b981;
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.07) 0%, rgba(109, 40, 217, 0.04) 100%);
+  transform: scale(1.01);
+  box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.18), 0 8px 32px rgba(16, 185, 129, 0.12);
+}
+
+.upload-dropzone.folder-drag-active .dropzone-icon {
+  color: #10b981;
+}
+
+/* From-Folder badge on file items */
+.file-folder-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #7c3aed;
+  background: rgba(109, 40, 217, 0.09);
+  border: 1px solid rgba(109, 40, 217, 0.2);
+  border-radius: 4px;
+  padding: 1px 6px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+html.dark .file-folder-badge {
+  color: #a78bfa;
+  background: rgba(167, 139, 250, 0.12);
+  border-color: rgba(167, 139, 250, 0.25);
+}

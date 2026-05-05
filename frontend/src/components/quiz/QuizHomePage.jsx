@@ -13,6 +13,7 @@ const QuizHomePage = ({
   onRemoveFile,
   onDrag,
   onDrop,
+  onFolderFileDrop,
   onGenerateQuiz,
   onShowHistory,
   onConfigChange,
@@ -20,6 +21,49 @@ const QuizHomePage = ({
 }) => {
   const fileInputRef = useRef(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [folderDragActive, setFolderDragActive] = useState(false);
+
+  const handleDropzoneDragOver = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer.types.includes('neuranote-quiz-file')) {
+      setFolderDragActive(true);
+    } else {
+      onDrag(e);
+    }
+  };
+
+  const handleDropzoneDragEnter = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer.types.includes('neuranote-quiz-file')) {
+      setFolderDragActive(true);
+    } else {
+      onDrag(e);
+    }
+  };
+
+  const handleDropzoneDragLeave = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setFolderDragActive(false);
+    onDrag(e);
+  };
+
+  const handleDropzoneDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setFolderDragActive(false);
+    const quizPayload = e.dataTransfer.getData('neuranote-quiz-file');
+    if (quizPayload) {
+      try {
+        const folderFile = JSON.parse(quizPayload);
+        if (onFolderFileDrop) onFolderFileDrop(folderFile);
+      } catch (_) {}
+      return;
+    }
+    onDrop(e);
+  };
 
   const getDifficultyIcon = (d) => ({ easy: '⭐', medium: '⭐⭐', hard: '⭐⭐⭐' }[d] || '⭐');
 
@@ -200,16 +244,18 @@ const QuizHomePage = ({
         />
 
         <div
-          className={`upload-dropzone ${dragActive ? 'drag-active' : ''}`}
-          onDragEnter={onDrag}
-          onDragLeave={onDrag}
-          onDragOver={onDrag}
-          onDrop={onDrop}
+          className={`upload-dropzone ${dragActive ? 'drag-active' : ''} ${folderDragActive ? 'folder-drag-active' : ''}`}
+          onDragEnter={handleDropzoneDragEnter}
+          onDragLeave={handleDropzoneDragLeave}
+          onDragOver={handleDropzoneDragOver}
+          onDrop={handleDropzoneDrop}
           onClick={() => fileInputRef.current?.click()}
         >
           <div className="dropzone-icon"><Upload size={32} /></div>
-          <h3>Drag &amp; Drop files here</h3>
-          <p>or click to browse</p>
+          {folderDragActive
+            ? <><h3>Drop to add from Folder</h3><p>Release to add this file to your quiz</p></>
+            : <><h3>Drag &amp; Drop files here</h3><p>or click to browse · or drag files from My Folders</p></>
+          }
           <div className="dropzone-formats">PDF · DOC · PPT · XLS · TXT · EPUB · Images</div>
           <div className="dropzone-limit">Max 25MB per file · Up to {MAX_FILES} files</div>
         </div>
@@ -226,7 +272,11 @@ const QuizHomePage = ({
                   <span className="file-icon">{getFileIcon(file.name)}</span>
                   <div className="file-info">
                     <span className="file-name">{file.name}</span>
-                    <span className="file-size">{file.size}</span>
+                    <span className="file-size">
+                      {file.fromFolder
+                        ? <span className="file-folder-badge">📁 From Folder</span>
+                        : file.size}
+                    </span>
                   </div>
                   <button className="remove-btn" onClick={(e) => { e.stopPropagation(); onRemoveFile(file.id); }}>
                     <X size={14} />

@@ -10,6 +10,9 @@ export const API = {
   // PDF download
   pdf: (qid, aid) => `${BASE}/api/quizzes/${qid}/results/${aid}/pdf`,
 
+  // Quiz retake config
+  retakeConfig: (aid) => `${BASE}/api/quizzes/history/${aid}/retake`,
+
   // History & analytics
   history:        `${BASE}/api/quizzes/history/me`,
   analytics:      `${BASE}/api/quizzes/analytics/me`,

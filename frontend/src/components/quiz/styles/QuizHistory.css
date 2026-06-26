@@ -593,3 +593,29 @@ html.dark .close-btn:hover             { background: #252d3d; }
 html.dark .confirm-modal               { background: #1a1f2e; box-shadow: 0 20px 60px rgba(0,0,0,0.6); }
 html.dark .confirm-cancel-btn          { background: #252d3d; border-color: #2d3748; color: #a0aac0; }
 html.dark .confirm-cancel-btn:hover    { background: #1e1a3d; border-color: var(--color-primary); color: var(--color-primary); }
+
+/* Retake button */
+.action-btn.retake {
+  background: linear-gradient(135deg, #8b5cf6, #7c3aed);
+  color: white;
+  border: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.15s;
+}
+
+.action-btn.retake:hover:not(:disabled) {
+  opacity: 0.88;
+  transform: translateY(-1px);
+}
+
+.action-btn.retake:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

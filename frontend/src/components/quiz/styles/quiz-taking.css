@@ -486,3 +486,43 @@ html.dark .sidebar-toggle-btn:hover {
   background: #252d3d;
   color: #e8eef2;
 }
+
+/* Long Answer */
+.long-answer-badge {
+  background: linear-gradient(135deg, #8b5cf6, #7c3aed);
+  color: white;
+}
+
+.long-answer-input {
+  min-height: 180px;
+  resize: vertical;
+}
+
+.answer-too-short {
+  border-color: #f59e0b !important;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.2) !important;
+}
+
+.word-count-indicator {
+  margin-top: 8px;
+  font-size: 0.8rem;
+  color: var(--text-secondary, #9ca3af);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.word-count-warning {
+  color: #f59e0b;
+  font-weight: 500;
+}
+
+.word-count-ok {
+  color: #10b981;
+  font-weight: 500;
+}
+
+.word-count-msg {
+  font-style: italic;
+}

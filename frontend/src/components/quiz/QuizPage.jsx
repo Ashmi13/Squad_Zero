@@ -363,6 +363,26 @@ const QuizPage = ({ noteId }) => {
     const totalQ = quiz.questions.length;
     const answered = Object.values(answers).filter(v => v !== null && v !== undefined && String(v).trim() !== '').length;
     const unanswered = totalQ - answered;
+
+    // Check long answer minimum word count
+    if (!autoSubmit) {
+      const shortLongAnswers = quiz.questions.reduce((acc, q, idx) => {
+        if (q.question_type === 'long_answer') {
+          const ans = answers[idx] || '';
+          const wc = ans.trim() ? ans.trim().split(/\s+/).length : 0;
+          if (ans.trim() && wc < 50) acc.push(idx + 1);
+        }
+        return acc;
+      }, []);
+      if (shortLongAnswers.length > 0) {
+        showToast(
+          `Question${shortLongAnswers.length > 1 ? 's' : ''} ${shortLongAnswers.join(', ')} require at least 50 words for the long answer.`,
+          'error', 6000
+        );
+        return;
+      }
+    }
+
     if (autoSubmit) { await _doSubmit(); return; }
     setDialog({
       isOpen: true, type: unanswered > 0 ? 'unanswered' : 'submit',
@@ -433,11 +453,56 @@ const QuizPage = ({ noteId }) => {
     showToast('Starting new quiz', 'info', 2000);
   };
 
+  const handleRetakeFromHistory = async (retakeConfig) => {
+    // retakeConfig = { source_content, num_questions, difficulty, time_limit, question_type }
+    setShowHistory(false);
+    setAnswers({});
+    setCurrentQuestion(0);
+    setResults(null);
+    setShowReview(false);
+    setTimeRemaining(null);
+    setQuizStartTime(null);
+    setConfig(prev => ({
+      ...prev,
+      numQuestions: retakeConfig.num_questions,
+      difficulty: retakeConfig.difficulty,
+      timeLimit: retakeConfig.time_limit,
+      questionType: retakeConfig.question_type,
+    }));
+    setIsGenerating(true);
+    await new Promise(r => setTimeout(r, 0));
+    try {
+      const formData = new FormData();
+      formData.append('source_content', retakeConfig.source_content);
+      formData.append('files', new Blob(['placeholder']), 'placeholder.txt');
+      formData.append('num_questions', retakeConfig.num_questions);
+      formData.append('difficulty', retakeConfig.difficulty);
+      formData.append('time_limit', retakeConfig.time_limit);
+      formData.append('question_type', retakeConfig.question_type);
+      formData.append('content_focus', config.contentFocus);
+
+      const response = await fetch(API.generate, { method: 'POST', headers: getAuthHeaders(), body: formData });
+      if (!response.ok) { const e = await response.json(); throw new Error(e.detail || 'Quiz generation failed'); }
+
+      const data = await response.json();
+      setQuiz(data);
+      setTimeRemaining(data.time_limit * 60);
+      setQuizStartTime(Date.now());
+      setStep('taking');
+      showToast('Retake quiz generated!', 'success', 3000);
+    } catch (err) {
+      showToast(err.message || 'Failed to generate retake quiz.', 'error');
+      setStep('upload');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
   if (showHistory) {
     return (
       <div className="quiz-page">
         <ToastLayer toasts={toasts} removeToast={removeToast} />
-        <QuizHistory onBack={() => setShowHistory(false)} />
+        <QuizHistory onBack={() => setShowHistory(false)} onRetakeQuiz={handleRetakeFromHistory} />
       </div>
     );
   }

@@ -86,7 +86,7 @@ class AIService:
             return questions[:num_questions]
 
         except Exception as primary_err:
-            print(f"⚠️  Primary model ({self.MODEL}) failed: {primary_err}. Trying fallback...")
+            print(f"⚠️  Primary model ({self.MODEL}) failed: {primary_err!r}. Trying fallback...")
             try:
                 response = await self.client.chat.completions.create(
                     model=self.FALLBACK_MODEL,
@@ -110,9 +110,10 @@ class AIService:
                 if questions:
                     print("✅ Fallback model succeeded")
                     return questions[:num_questions]
+                print(f"⚠️  Fallback model returned unparseable response: {raw[:300]}")
             except Exception as fallback_err:
-                print(f"⚠️  Fallback model also failed: {fallback_err}")
-            print("⚠️  Both models failed — returning mock questions")
+                print(f"⚠️  Fallback model also failed: {fallback_err!r}")
+            print("⚠️  Both models failed — returning mock questions. Check OPENROUTER_API_KEY and model availability.")
             return self._generate_mock_questions(num_questions, difficulty, question_type)
 
     # Private helpers
@@ -131,8 +132,10 @@ class AIService:
             type_instruction = "ALL questions must be multiple_choice type."
         elif question_type == "short_answer":
             type_instruction = "ALL questions must be short_answer type."
+        elif question_type == "long_answer":
+            type_instruction = "ALL questions must be long_answer type. Each question requires a detailed, essay-style answer of at least 50 words."
         else:
-            type_instruction = "Mix of multiple_choice and short_answer questions."
+            type_instruction = "Mix of multiple_choice, short_answer, and long_answer questions."
 
         difficulty_desc = {
             "easy": "simple recall and basic concepts",
@@ -186,13 +189,21 @@ Return ONLY a valid JSON array (no markdown, no explanation) with this exact str
     "text": "Short answer question here?",
     "type": "short_answer",
     "options": [],
-    "correct_answer": "Expected answer text"
+    "correct_answer": "Expected brief answer text"
+  }},
+  {{
+    "number": 3,
+    "text": "Long answer question requiring detailed explanation here?",
+    "type": "long_answer",
+    "options": [],
+    "correct_answer": "A comprehensive model answer of at least 50 words explaining the topic in detail, covering key concepts and providing context."
   }}
 ]
 
 Rules:
 - For multiple_choice: always provide exactly 4 options (A, B, C, D), exactly one must have is_correct=true
 - For short_answer: options array must be empty []
+- For long_answer: options array must be empty []; correct_answer should be a detailed model answer (50+ words)
 - Difficulty "{difficulty}": {difficulty_desc}
 - Return ONLY the JSON array, nothing else
 """
@@ -237,7 +248,7 @@ Rules:
                 q_type = q.get("type", "multiple_choice")
 
                 # Normalise unknown types
-                if q_type not in ("multiple_choice", "short_answer"):
+                if q_type not in ("multiple_choice", "short_answer", "long_answer"):
                     q_type = "multiple_choice"
 
                 # Override if a specific type was requested
@@ -245,6 +256,8 @@ Rules:
                     q_type = "multiple_choice"
                 elif question_type == "short_answer":
                     q_type = "short_answer"
+                elif question_type == "long_answer":
+                    q_type = "long_answer"
 
                 parsed = {
                     "number": q.get("number", i + 1),
@@ -318,11 +331,23 @@ Rules:
 
         mock_questions = []
         for i in range(num_questions):
-            use_short = (question_type == "short_answer") or (
-                question_type == "mixed" and i % 3 == 2
+            use_long = question_type == "long_answer" or (
+                question_type == "mixed" and i % 4 == 3
+            )
+            use_short = (not use_long) and (
+                question_type == "short_answer" or (question_type == "mixed" and i % 4 == 2)
             )
 
-            if use_short:
+            if use_long:
+                mock_questions.append({
+                    "number": i + 1,
+                    "text": f"Provide a detailed explanation of a key concept from the uploaded material. ({difficulty} level, question {i + 1})",
+                    "type": "long_answer",
+                    "options": [],
+                    "code_snippet": None,
+                    "correct_answer": "A comprehensive answer covering the main ideas, supporting details, and relevant examples from the study material provided.",
+                })
+            elif use_short:
                 mock_questions.append({
                     "number": i + 1,
                     "text": f"Briefly explain one important concept from the uploaded material. ({difficulty} level, question {i + 1})",

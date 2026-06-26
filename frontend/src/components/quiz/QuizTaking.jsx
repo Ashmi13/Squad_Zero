@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Clock, ChevronLeft, ChevronRight, XCircle, PanelRightClose, PanelRightOpen } from 'lucide-react';
 
+const MIN_LONG_ANSWER_WORDS = 50;
+
 const QuizTaking = ({
   quiz,
   currentQuestion,
@@ -24,6 +26,11 @@ const QuizTaking = ({
   const answeredCount = Object.values(answers).filter(
     v => v !== null && v !== undefined && String(v).trim() !== ''
   ).length;
+
+  const currentAnswer = answers[currentQuestion] || '';
+  const wordCount = currentAnswer.trim() ? currentAnswer.trim().split(/\s+/).length : 0;
+  const isLongAnswer = question.question_type === 'long_answer';
+  const longAnswerTooShort = isLongAnswer && currentAnswer.trim() !== '' && wordCount < MIN_LONG_ANSWER_WORDS;
 
   const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60);
@@ -83,6 +90,9 @@ const QuizTaking = ({
             {question.question_type === 'short_answer' && (
               <span className="question-type-badge">Short Answer</span>
             )}
+            {question.question_type === 'long_answer' && (
+              <span className="question-type-badge long-answer-badge">Long Answer</span>
+            )}
           </div>
           <h2 className="question-text">{question.question_text}</h2>
 
@@ -99,13 +109,33 @@ const QuizTaking = ({
                 </button>
               ))}
             </div>
+          ) : question.question_type === 'long_answer' ? (
+            <div className="short-answer-section">
+              <p className="short-answer-hint">📝 Write a detailed answer (minimum {MIN_LONG_ANSWER_WORDS} words required)</p>
+              <textarea
+                className={`short-answer-input long-answer-input${longAnswerTooShort ? ' answer-too-short' : ''}`}
+                placeholder="Write your detailed answer here… (at least 50 words required)"
+                value={currentAnswer}
+                onChange={onShortAnswerChange}
+                rows={8}
+              />
+              <div className={`word-count-indicator${longAnswerTooShort ? ' word-count-warning' : wordCount >= MIN_LONG_ANSWER_WORDS ? ' word-count-ok' : ''}`}>
+                {wordCount} / {MIN_LONG_ANSWER_WORDS} words minimum
+                {longAnswerTooShort && (
+                  <span className="word-count-msg"> — please write at least {MIN_LONG_ANSWER_WORDS} words to submit this answer</span>
+                )}
+                {wordCount >= MIN_LONG_ANSWER_WORDS && (
+                  <span className="word-count-msg"> ✓</span>
+                )}
+              </div>
+            </div>
           ) : (
             <div className="short-answer-section">
               <p className="short-answer-hint">💡 Write a concise answer based on your study materials</p>
               <textarea
                 className="short-answer-input"
                 placeholder="Type your answer here…"
-                value={answers[currentQuestion] || ''}
+                value={currentAnswer}
                 onChange={onShortAnswerChange}
                 rows={4}
               />
@@ -126,7 +156,7 @@ const QuizTaking = ({
         </div>
       </div>
 
-      {/* Sidebar*/}
+      {/* Sidebar */}
       <div className={`quiz-sidebar${sidebarOpen ? '' : ' quiz-sidebar--collapsed'}`}>
         <div className="sidebar-toggle-row">
           {sidebarOpen && <h3>Questions</h3>}

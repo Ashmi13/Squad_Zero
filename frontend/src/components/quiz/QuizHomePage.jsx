@@ -169,6 +169,7 @@ const QuizHomePage = ({
             {[
               { value: 'mcq',          icon: '☑️', label: 'Multiple Choice' },
               { value: 'short_answer', icon: '✏️', label: 'Short Answer'    },
+              { value: 'long_answer',  icon: '📝', label: 'Long Answer'     },
               { value: 'mixed',        icon: '🔀', label: 'Mixed'           },
             ].map(opt => (
               <button

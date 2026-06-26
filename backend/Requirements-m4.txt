@@ -32,3 +32,6 @@ reportlab
 
 # Rate limiting
 slowapi
+
+#Analytics
+Recharts

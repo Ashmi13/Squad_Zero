@@ -29,6 +29,19 @@ class ProductivityService:
         if self._has_user_id is not None:
             return
 
+        try:
+            res = self.supabase.table("focus_sessions").select("*").limit(1).execute()
+            if res.data:
+                keys = set(res.data[0].keys())
+                self._has_user_id = "user_id" in keys
+                self._has_focus_duration = "focus_duration" in keys
+                self._has_completed_at = "completed_at" in keys
+                self._has_date = "date" in keys
+                self._has_created_at = "created_at" in keys
+                return
+        except Exception:
+            pass
+
         self._has_user_id = self._column_exists("focus_sessions", "user_id")
         self._has_focus_duration = self._column_exists("focus_sessions", "focus_duration")
         self._has_completed_at = self._column_exists("focus_sessions", "completed_at")

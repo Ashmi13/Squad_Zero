@@ -1,18 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { Clock, Calendar, TrendingUp, Award, BarChart3, Eye, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
-import './QuizHistory.css';
+import { Clock, Calendar, TrendingUp, Award, BarChart3, Eye, Trash2, ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react';
+import './styles/QuizHistory.css';
 
 import { API } from '@/config/api';
-import { getAccessToken } from '@/utils/tokenStorage';
-import { useAuth } from '@/hooks/useAuth';
+import { getAuthHeaders } from '@/utils/tokenStorage';
+import { useAuth } from '@/hooks/useAuth.jsx';
 
-const QuizHistory = ({ onBack }) => {
-  const getAuthHeaders = () => {
-    const token = getAccessToken();
-    return token ? { 'Authorization': `Bearer ${token}` } : {};
-  };
+const QuizHistory = ({ onBack, onRetakeQuiz }) => {
 
-  // Get user from auth context — not use client-supplied userId
+  // Get user from auth context
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('history'); // 'history' or 'analytics'
   const [history, setHistory] = useState([]);
@@ -23,6 +19,7 @@ const QuizHistory = ({ onBack }) => {
   const [pagination, setPagination] = useState({ limit: 10, offset: 0 });
   const [totalCount, setTotalCount] = useState(0);
   const [pendingDeleteId, setPendingDeleteId] = useState(null);
+  const [retakingId, setRetakingId] = useState(null);
 
   useEffect(() => {
     if (activeTab === 'history') {
@@ -133,6 +130,24 @@ const QuizHistory = ({ onBack }) => {
       ...prev,
       offset: Math.max(0, prev.offset - prev.limit)
     }));
+  };
+
+  const handleRetakeQuiz = async (attemptId) => {
+    if (!onRetakeQuiz) return;
+    setRetakingId(attemptId);
+    try {
+      const response = await fetch(
+        API.retakeConfig(attemptId),
+        { headers: getAuthHeaders() }
+      );
+      if (!response.ok) throw new Error('Failed to fetch retake config');
+      const config = await response.json();
+      onRetakeQuiz(config);
+    } catch (err) {
+      setError('Failed to load retake settings: ' + err.message);
+    } finally {
+      setRetakingId(null);
+    }
   };
 
   const formatTime = (seconds) => {
@@ -253,6 +268,16 @@ const QuizHistory = ({ onBack }) => {
                   <Eye size={16} />
                   View Details
                 </button>
+                {onRetakeQuiz && (
+                  <button
+                    className="action-btn retake"
+                    onClick={() => handleRetakeQuiz(attempt.attempt_id)}
+                    disabled={retakingId === attempt.attempt_id}
+                  >
+                    <RotateCcw size={16} />
+                    {retakingId === attempt.attempt_id ? 'Loading…' : 'Retake Quiz'}
+                  </button>
+                )}
                 <button 
                   className="action-btn delete"
                   onClick={() => handleDeleteAttempt(attempt.attempt_id)}

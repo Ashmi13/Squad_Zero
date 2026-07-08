@@ -194,6 +194,46 @@ async def get_file(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.patch("/{file_id}")
+async def rename_file(
+    file_id: int,
+    payload: dict,
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id)
+):
+    """
+    Rename a file.
+    """
+    try:
+        new_name = payload.get('name') if isinstance(payload, dict) else None
+        if not new_name or not str(new_name).strip():
+            raise HTTPException(status_code=400, detail='New name is required')
+
+        file = db.query(FileModel).filter(
+            FileModel.id == file_id,
+            FileModel.user_id == user_id
+        ).first()
+
+        if not file:
+            raise HTTPException(status_code=404, detail='File not found or not yours')
+
+        file.name = str(new_name).strip()
+        db.add(file)
+        db.commit()
+
+        return {"message": "File renamed successfully", "file_id": file_id, "name": file.name}
+
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        try:
+            db.rollback()
+        except:
+            pass
+        print(f"DEBUG: Error renaming file: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.delete("/{file_id}")
 async def delete_file(
     file_id: int,

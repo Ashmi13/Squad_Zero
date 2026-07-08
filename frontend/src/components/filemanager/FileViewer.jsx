@@ -289,7 +289,19 @@ const FileViewer = ({ selectedFile, onClose, onFilesUpdate, currentFolder, curre
         // preview.preview_url: signed/public URL for PDFs and stored files
         // preview.content: inline text content for text files
         if (preview.preview_url) {
-          setPreviewUrl(preview.preview_url);
+          const shouldFetchText = preview.mime_type?.startsWith('text/') || isTextFile;
+          if (shouldFetchText) {
+            fetch(preview.preview_url)
+              .then(res => res.text())
+              .then(text => {
+                setPreviewContent(text);
+              })
+              .catch(err => {
+                setPreviewUrl(preview.preview_url);
+              });
+          } else {
+            setPreviewUrl(preview.preview_url);
+          }
         } else if (preview.content) {
           // Text content returned — display as text
           const content = preview.content;

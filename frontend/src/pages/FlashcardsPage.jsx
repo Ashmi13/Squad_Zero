@@ -17,13 +17,14 @@ const FlashcardsPage = () => {
 
 
   const processFile = useCallback(async (file) => {
-    // Accept both .pdf extension and application/pdf content type
-    const isPdfFile =
+    // Accept both .pdf and .txt extensions, plus their mime types
+    const isPdfOrText =
       file.name.toLowerCase().endsWith('.pdf') ||
-      (file.type && file.type === 'application/pdf');
+      file.name.toLowerCase().endsWith('.txt') ||
+      (file.type && (file.type === 'application/pdf' || file.type.startsWith('text/')));
 
-    if (!file || !isPdfFile) {
-      setError('Please upload a PDF file.');
+    if (!file || !isPdfOrText) {
+      setError('Please upload a PDF or Text file.');
       return;
     }
 
@@ -206,11 +207,11 @@ const FlashcardsPage = () => {
       <div style={styles.header}>
         <div>
           <h2 style={styles.title}>Flashcards</h2>
-          <p style={styles.subtitle}>Drop a PDF to generate AI-powered flashcards</p>
+          <p style={styles.subtitle}>Drop a PDF or Text file to generate AI-powered flashcards</p>
         </div>
         {flashcards.length > 0 && (
           <button onClick={resetAll} style={styles.resetBtn}>
-            ↩ New PDF
+            ↩ New File
           </button>
         )}
       </div>
@@ -229,12 +230,12 @@ const FlashcardsPage = () => {
           onClick={() => !loading && fileInputRef.current?.click()}
         >
           <div style={styles.dropIcon}>📄</div>
-          <p style={styles.dropText}>Drag & drop a PDF here</p>
+          <p style={styles.dropText}>Drag & drop a PDF or Text file here</p>
           <p style={styles.dropSub}>or click to browse</p>
           <input
             ref={fileInputRef}
             type="file"
-            accept=".pdf"
+            accept=".pdf,.txt"
             style={{ display: 'none' }}
             onChange={handleFileInput}
           />

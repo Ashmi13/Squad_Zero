@@ -138,7 +138,7 @@ except Exception as e:
 # Structured Notes routes (M3)
 try:
     from m3_structurednotes.router import router as notes_router
-    app.include_router(notes_router, prefix="/api/notes", tags=["notes"])
+    app.include_router(notes_router, prefix="/api/m3", tags=["notes"])
     print("[OK] Structured notes routes loaded")
 except ImportError as e:
     missing = str(e).replace("No module named ", "").strip("'")

@@ -20,6 +20,10 @@ FIX #2: Recent Files Navigation
   4. Displays the PDF preview exactly like manual folder view access
 - This ensures proper context and folder hierarchy is maintained
 - User sees the file highlighted in the correct folder when accessing from Recent Files
+
+MERGE NOTE (dev_sandavi_M3 + develop):
+- Kept TopBar rendering from dev_sandavi_M3
+- Added "Create Notes" button from develop, placed alongside folder title
 */
 import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -46,8 +50,6 @@ const sanitizeFilesForStorage = (items) => {
 
     return {
       ...item,
-      // Keep plain text for extracted/summary files so previews survive navigation.
-      // Continue dropping binary/base64 payloads to keep storage light.
       content: isLikelyGeneratedText && asString && !isDataUrl ? asString : undefined,
       fileUrl: item?.fileUrl && String(item.fileUrl).startsWith('data:') ? undefined : item?.fileUrl,
       children: walk(item.children),
@@ -73,7 +75,6 @@ const FileManagerPage = ({ activeView, setActiveView }) => {
   const [selectedFolder, setSelectedFolder] = useState(null);
   const [selectedFile, setSelectedFile] = useState(null);
 
-  // Initialize from navigation state if coming from Recent Files
   useEffect(() => {
     if (location.state?.navigatedFromRecent) {
       if (location.state.targetFolder) {
@@ -95,9 +96,7 @@ const FileManagerPage = ({ activeView, setActiveView }) => {
     return saved ? JSON.parse(saved) : [];
   });
 
-  // CHANGED: Enhanced setFiles handler to also persist to localStorage
   const handleFilesUpdate = (updatedFiles) => {
-    // If it's a function (state setter), call it
     if (typeof updatedFiles === 'function') {
       setFiles(prevFiles => {
         const newFiles = updatedFiles(prevFiles);
@@ -105,7 +104,6 @@ const FileManagerPage = ({ activeView, setActiveView }) => {
         return newFiles;
       });
     } else {
-      // If it's an object, directly update
       setFiles(updatedFiles);
       localStorage.setItem('neuranote_files', JSON.stringify(sanitizeFilesForStorage(updatedFiles)));
     }
@@ -153,7 +151,6 @@ const FileManagerPage = ({ activeView, setActiveView }) => {
       backgroundColor: theme.colors.bg.primary,
       transition: 'background-color 0.3s',
     }}>
-      {/* Folder Panel — hide on home view */}
       {activeView !== 'home' && (
         <FolderPanel
           selectedFolder={selectedFolder}
@@ -172,7 +169,6 @@ const FileManagerPage = ({ activeView, setActiveView }) => {
         />
       )}
 
-      {/* Right side */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {activeView === 'home' ? (
           <TopBar folderName="NeuraNote" />
@@ -195,19 +191,38 @@ const FileManagerPage = ({ activeView, setActiveView }) => {
                   Browse and organize your uploaded files
                 </p>
               </div>
+
+              <button
+                type="button"
+                onClick={() => navigate('/files/create-note')}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  border: 'none',
+                  borderRadius: '12px',
+                  padding: '12px 16px',
+                  background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
+                  color: '#fff',
+                  fontWeight: 700,
+                  fontSize: '14px',
+                  cursor: 'pointer',
+                  boxShadow: '0 10px 22px rgba(79, 70, 229, 0.24)',
+                }}
+                title="Create Notes"
+              >
+                <FilePlus size={16} />
+                Create Notes
+              </button>
             </div>
 
-            {/* Top Bar */}
             <TopBar
               folderName={activeView === 'home' ? 'Home' : (selectedFolder?.name || 'My Files')}
             />
 
-            {/* Content */}
             <div style={{ display: 'flex', flex: 1, overflow: activeView === 'home' ? 'auto' : 'hidden' }}>
-              {/* Home view */}
               {activeView === 'home' && <HomeView />}
 
-              {/* Files view */}
               {activeView === 'files' && !selectedFile && (
                 <div style={{ padding: '24px 32px', overflowY: 'auto', flex: 1 }}>
                   <FileList
@@ -221,10 +236,8 @@ const FileManagerPage = ({ activeView, setActiveView }) => {
                 </div>
               )}
 
-              {/* File Viewer */}
               {activeView === 'files' && selectedFile && (
                 <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-                  {/* Show FileList on the left if we want to see it alongside the FileViewer, but for now we just show FileViewer */}
                   <FileViewer
                     selectedFile={selectedFile}
                     onClose={() => setSelectedFile(null)}
@@ -232,7 +245,6 @@ const FileManagerPage = ({ activeView, setActiveView }) => {
                     currentFolder={selectedFolder?.name}
                     currentFolderId={selectedFolder?.id}
                     onSelectGeneratedFile={setSelectedFile}
-                    // FIX #1: Callback when a file is deleted from the preview
                     onFileDeleted={() => {
                       setSelectedFile(null);
                     }}

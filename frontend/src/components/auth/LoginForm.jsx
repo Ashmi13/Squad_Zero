@@ -24,6 +24,11 @@ export function LoginForm() {
   } = useForm({
     resolver: zodResolver(loginSchema),
     mode: 'onBlur',
+    // Pre-filling test credentials as per sprint planning
+    defaultValues: {
+      email: '',
+      password: ''
+    }
   });
 
   const [isLoading, setIsLoading] = useState(false);
@@ -45,6 +50,7 @@ export function LoginForm() {
     setIsSuccess(false);
 
     try {
+      // Standard API Call
       const response = await axiosInstance.post(config.endpoints.login, {
         email: data.email,
         password: data.password,
@@ -70,6 +76,13 @@ export function LoginForm() {
   return (
     <div>
       <h2 className="font-display text-3xl text-slate-900 mb-2">Welcome Back</h2>
+      <p className="text-slate-500 mb-4">Sign in to your account</p>
+      
+      {/* Admin / Test Credentials Notice */}
+      <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg flex items-center gap-3">
+        <AlertCircle className="text-blue-600" size={20} />
+        <p className="text-blue-800 text-sm"></p>
+      </div>
       <p className="text-slate-500 mb-8">Sign in to your account</p>
 
       {isSuccess && (

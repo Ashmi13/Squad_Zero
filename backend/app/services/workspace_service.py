@@ -52,8 +52,25 @@ class WorkspaceService:
             "parent_file_id", "file_content", "raw_text", "summary",
             "content", "text", "last_accessed", "updated_at",
         ]
-        for col in columns:
-            _COLUMNS_CACHE[col] = self._column_exists("files", col)
+
+        try:
+            res = self.supabase.table("files").select("*").limit(1).execute()
+            if res.data:
+                row_keys = set(res.data[0].keys())
+                for col in columns:
+                    _COLUMNS_CACHE[col] = col in row_keys
+                _COLUMNS_DETECTED = True
+                return
+        except Exception:
+            pass
+
+        import concurrent.futures
+        def check_col(col: str) -> Tuple[str, bool]:
+            return col, self._column_exists("files", col)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            for col, exists in executor.map(check_col, columns):
+                _COLUMNS_CACHE[col] = exists
 
         _COLUMNS_DETECTED = True
 
@@ -289,6 +306,21 @@ class WorkspaceService:
         global _PARENT_COLUMN_CACHE
         if _PARENT_COLUMN_CACHE is not None:
             return _PARENT_COLUMN_CACHE if _PARENT_COLUMN_CACHE != "__none__" else None
+
+        try:
+            res = self.supabase.table("folders").select("*").limit(1).execute()
+            if res.data:
+                keys = set(res.data[0].keys())
+                if "parent_folder_id" in keys:
+                    _PARENT_COLUMN_CACHE = "parent_folder_id"
+                    return _PARENT_COLUMN_CACHE
+                if "parent_id" in keys:
+                    _PARENT_COLUMN_CACHE = "parent_id"
+                    return _PARENT_COLUMN_CACHE
+                _PARENT_COLUMN_CACHE = "__none__"
+                return None
+        except Exception:
+            pass
 
         try:
             self.supabase.table("folders").select("id,parent_folder_id").limit(1).execute()
@@ -531,13 +563,18 @@ class WorkspaceService:
                     metadata["file_content"] = data_url
                 elif self._files_has_storage_url and not metadata.get("storage_url"):
                     metadata["storage_url"] = data_url
-                elif self._files_has_storage_path and not self._files_has_storage_url and not self._files_has_file_content:
+                elif self._files_has_file_url and not metadata.get("file_url"):
+                    metadata["file_url"] = data_url
+                elif self._files_has_storage_path and not self._files_has_storage_url and not self._files_has_file_content and not self._files_has_file_url:
                     # Some schemas only expose storage_path. Persist a data URL there in no-AWS mode
                     # so preview remains available until cloud storage is configured.
                     metadata["storage_path"] = data_url
                 elif self._files_has_storage_path and not metadata.get("storage_path"):
                     # Final fallback for schemas without file_content/storage_url columns.
                     metadata["storage_path"] = data_url
+                elif self._files_has_summary and not metadata.get("summary"):
+                    # Extreme fallback if only summary column exists
+                    metadata["summary"] = data_url
 
             if not metadata:
                 metadata["name"] = os.path.splitext(file.filename)[0]
@@ -570,9 +607,20 @@ class WorkspaceService:
             elif self._files_has_updated_at:
                 sort_column = "updated_at"
 
+            columns_to_select = []
+            skip_columns = {"file_content", "raw_text", "summary", "content", "text"}
+            for col, exists in _COLUMNS_CACHE.items():
+                if exists and col not in skip_columns:
+                    columns_to_select.append(col)
+            
+            if "id" not in columns_to_select: columns_to_select.append("id")
+            if "created_at" not in columns_to_select: columns_to_select.append("created_at")
+
+            select_str = ",".join(set(columns_to_select))
+
             query = (
                 self.supabase.table("files")
-                .select("*")
+                .select(select_str)
                 .order(sort_column, desc=True)
             )
             if self._files_has_user_id:
@@ -666,7 +714,32 @@ class WorkspaceService:
         try:
             self._detect_files_columns()
 
-            files_query = self.supabase.table("files").select("*")
+            columns_to_select = []
+            skip_columns = {"file_content", "raw_text", "summary", "content", "text"}
+            for col, exists in _COLUMNS_CACHE.items():
+                if exists and col not in skip_columns:
+                    columns_to_select.append(col)
+            
+            if "id" not in columns_to_select: columns_to_select.append("id")
+            if "created_at" not in columns_to_select: columns_to_select.append("created_at")
+
+            select_str = ",".join(set(columns_to_select))
+
+            sort_column = "created_at"
+            if self._files_has_last_accessed:
+                sort_column = "last_accessed"
+            elif self._files_has_updated_at:
+                sort_column = "updated_at"
+
+            safe_limit = max(1, min(int(limit or 5), 50))
+            
+            files_query = (
+                self.supabase.table("files")
+                .select(select_str)
+                .order(sort_column, desc=True)
+                .limit(safe_limit)
+            )
+            
             if self._files_has_user_id:
                 files_query = files_query.eq("user_id", user_id)
             files = files_query.execute().data or []
@@ -676,7 +749,8 @@ class WorkspaceService:
             folder_lookup = {str(folder["id"]): folder for folder in folders if folder.get("id")}
             bucket = self._workspace_bucket_name()
 
-            limited = sorted(files, key=self._row_recent_timestamp, reverse=True)[: max(1, min(int(limit or 5), 50))]
+            # Since we sorted in DB, we can just use the results directly, but we sort locally again just in case the DB sort column didn't exactly match _row_recent_timestamp
+            limited = sorted(files, key=self._row_recent_timestamp, reverse=True)
             recent_files = []
             for row in limited:
                 folder_id = row.get("folder_id")
@@ -684,10 +758,11 @@ class WorkspaceService:
                 parent_id = folder.get("parent_folder_id") if folder else None
                 _, storage_key = self._extract_storage_location(row)
                 preview_available = bool(
-                    row.get("file_content")
-                    or row.get("storage_url")
+                    row.get("storage_url")
+                    or row.get("file_url")
                     or (isinstance(row.get("storage_path"), str) and str(row.get("storage_path")).startswith("data:"))
                     or storage_key
+                    or self._files_has_file_content
                 )
                 recent_files.append({
                     **row,
@@ -981,14 +1056,18 @@ class WorkspaceService:
 
         # Last-resort fallback: no content column AND no storage → encode as data URL
         content_saved = any(
-            k in metadata for k in ("file_content", "raw_text", "text", "content", "summary", "storage_url", "storage_path")
+            k in metadata for k in ("file_content", "raw_text", "text", "content", "summary", "storage_url", "storage_path", "file_url")
         )
         if not content_saved:
             data_url = f"data:text/plain;base64,{base64.b64encode(content_bytes).decode('ascii')}"
             if self._files_has_storage_url:
                 metadata["storage_url"] = data_url
+            elif self._files_has_file_url:
+                metadata["file_url"] = data_url
             elif self._files_has_storage_path:
                 metadata["storage_path"] = data_url
+            elif self._files_has_summary:
+                metadata["summary"] = data_url
 
         if not metadata:
             raise HTTPException(status_code=500, detail="No writable file metadata columns found")

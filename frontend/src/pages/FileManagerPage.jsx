@@ -1,27 +1,26 @@
-/**
- * FileManagerPage Component - Main file management interface
- * 
- * CHANGES MADE:
- * - Added onFilesUpdate callback to propagate file changes (for Extract Text/Generate Summary)
- * - Pass currentFolder to FileViewer for nested file creation
- * - Enhanced state management to support nested file structures
- * - Added handler for child file creation under parent PDFs
- * 
- * FIX #1: Delete File Functionality
- * - Added onFileDeleted callback to FileViewer to close preview when file is deleted
- * - When a file is deleted from the preview, the FileViewer automatically closes
- * - The deleted file is immediately removed from both UI state and localStorage
- * 
- * FIX #2: Recent Files Navigation
- * - When user clicks a file from Recent Files section:
- *   1. System finds the folder that contains the file (using file.folderName)
- *   2. Automatically selects/opens that folder in the Folder Panel
- *   3. Selects and opens the specific file for preview
- *   4. Displays the PDF preview exactly like manual folder view access
- * - This ensures proper context and folder hierarchy is maintained
- * - User sees the file highlighted in the correct folder when accessing from Recent Files
- */
+/*
+FileManagerPage Component - Main file management interface
 
+CHANGES MADE:
+- Added onFilesUpdate callback to propagate file changes (for Extract Text/Generate Summary)
+- Pass currentFolder to FileViewer for nested file creation
+- Enhanced state management to support nested file structures
+- Added handler for child file creation under parent PDFs
+
+FIX #1: Delete File Functionality
+- Added onFileDeleted callback to FileViewer to close preview when file is deleted
+- When a file is deleted from the preview, the FileViewer automatically closes
+- The deleted file is immediately removed from both UI state and localStorage
+
+FIX #2: Recent Files Navigation
+- When user clicks a file from Recent Files section:
+  1. System finds the folder that contains the file (using file.folderName)
+  2. Automatically selects/opens that folder in the Folder Panel
+  3. Selects and opens the specific file for preview
+  4. Displays the PDF preview exactly like manual folder view access
+- This ensures proper context and folder hierarchy is maintained
+- User sees the file highlighted in the correct folder when accessing from Recent Files
+*/
 import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { FilePlus } from 'lucide-react';
@@ -37,13 +36,13 @@ const sanitizeFilesForStorage = (items) => {
     const contentValue = item?.content ?? item?.file_content;
     const asString = typeof contentValue === 'string' ? contentValue : '';
     const isDataUrl = asString.startsWith('data:');
-    const type = String(item?.type || item?.file_type || '').toUpperCase();
-    const mime = String(item?.mimeType || item?.mime_type || '').toLowerCase();
-    const name = String(item?.name || item?.originalFilename || item?.original_filename || '').toLowerCase();
+    const type = String(item?.type ?? item?.file_type ?? '').toUpperCase();
+    const mime = String(item?.mimeType ?? item?.mime_type ?? '').toLowerCase();
+    const name = String(item?.name ?? item?.originalFilename ?? item?.original_filename ?? '').toLowerCase();
     const isLikelyGeneratedText =
       type === 'TXT' ||
       mime.startsWith('text/') ||
-      /extract(ed)? text|summary/.test(name);
+      (name.includes('extract text') || name.includes('extracted text') || name.includes('summary'));
 
     return {
       ...item,
@@ -58,13 +57,11 @@ const sanitizeFilesForStorage = (items) => {
   if (Array.isArray(items)) {
     return walk(items);
   }
-
   if (items && typeof items === 'object') {
     return Object.fromEntries(
       Object.entries(items).map(([folderName, folderItems]) => [folderName, walk(folderItems)])
     );
   }
-
   return {};
 };
 
@@ -87,10 +84,12 @@ const FileManagerPage = ({ activeView, setActiveView }) => {
       }
     }
   }, [location.state]);
+
   const [files, setFiles] = useState(() => {
     const saved = localStorage.getItem('neuranote_files');
     return saved ? JSON.parse(saved) : {};
   });
+
   const [folders, setFolders] = useState(() => {
     const saved = localStorage.getItem('neuranote_folders');
     return saved ? JSON.parse(saved) : [];
@@ -154,7 +153,6 @@ const FileManagerPage = ({ activeView, setActiveView }) => {
       backgroundColor: theme.colors.bg.primary,
       transition: 'background-color 0.3s',
     }}>
-
       {/* Folder Panel — hide on home view */}
       {activeView !== 'home' && (
         <FolderPanel
@@ -179,69 +177,71 @@ const FileManagerPage = ({ activeView, setActiveView }) => {
         {activeView === 'home' ? (
           <TopBar folderName="NeuraNote" />
         ) : (
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '18px 32px',
-            backgroundColor: theme.colors.bg.primary,
-            borderBottom: `1px solid ${theme.colors.ui.border}`,
-            transition: 'background-color 0.3s, border-color 0.3s',
-          }}>
-            <div>
-              <h2 style={{ margin: 0, fontSize: '24px', fontWeight: '700', color: theme.colors.text.primary, letterSpacing: '-0.5px' }}>
-                {selectedFolder?.name || 'Files'}
-              </h2>
-              <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: theme.colors.text.tertiary, fontWeight: '500' }}>
-                Browse and organize your uploaded files
-              </p>
+          <>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '18px 32px',
+              backgroundColor: theme.colors.bg.primary,
+              borderBottom: `1px solid ${theme.colors.ui.border}`,
+              transition: 'background-color 0.3s, border-color 0.3s',
+            }}>
+              <div>
+                <h2 style={{ margin: 0, fontSize: '24px', fontWeight: '700', color: theme.colors.text.primary, letterSpacing: '-0.5px' }}>
+                  {selectedFolder?.name || 'Files'}
+                </h2>
+                <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: theme.colors.text.tertiary, fontWeight: '500' }}>
+                  Browse and organize your uploaded files
+                </p>
+              </div>
             </div>
 
-        {/* Top Bar */}
-        <TopBar 
-            folderName={activeView === 'home' ? 'Home' : (selectedFolder?.name || 'My Files')} 
-        />
+            {/* Top Bar */}
+            <TopBar
+              folderName={activeView === 'home' ? 'Home' : (selectedFolder?.name || 'My Files')}
+            />
 
-        {/* Content */}
-        <div style={{ display: 'flex', flex: 1, overflow: activeView === 'home' ? 'auto' : 'hidden' }}>
+            {/* Content */}
+            <div style={{ display: 'flex', flex: 1, overflow: activeView === 'home' ? 'auto' : 'hidden' }}>
+              {/* Home view */}
+              {activeView === 'home' && <HomeView />}
 
-          {/* Home view */}
-          {activeView === 'home' && <HomeView />}
+              {/* Files view */}
+              {activeView === 'files' && !selectedFile && (
+                <div style={{ padding: '24px 32px', overflowY: 'auto', flex: 1 }}>
+                  <FileList
+                    selectedFolder={selectedFolder}
+                    onSelectFile={setSelectedFile}
+                    files={files}
+                    onFilesUpdate={handleFilesUpdate}
+                    onFolderDelete={handleFolderDelete}
+                    onFolderRename={handleFolderRename}
+                  />
+                </div>
+              )}
 
-          {/* Files view */}
-          {activeView === 'files' && !selectedFile && (
-            <div style={{ padding: '24px 32px', overflowY: 'auto', flex: 1 }}>
-              <FileList
-                selectedFolder={selectedFolder}
-                onSelectFile={setSelectedFile}
-                files={files}
-                onFilesUpdate={handleFilesUpdate}
-                onFolderDelete={handleFolderDelete}
-                onFolderRename={handleFolderRename}
-              />
+              {/* File Viewer */}
+              {activeView === 'files' && selectedFile && (
+                <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+                  {/* Show FileList on the left if we want to see it alongside the FileViewer, but for now we just show FileViewer */}
+                  <FileViewer
+                    selectedFile={selectedFile}
+                    onClose={() => setSelectedFile(null)}
+                    onFilesUpdate={handleFilesUpdate}
+                    currentFolder={selectedFolder?.name}
+                    currentFolderId={selectedFolder?.id}
+                    onSelectGeneratedFile={setSelectedFile}
+                    // FIX #1: Callback when a file is deleted from the preview
+                    onFileDeleted={() => {
+                      setSelectedFile(null);
+                    }}
+                  />
+                </div>
+              )}
             </div>
-          )}
-
-          {/* File Viewer */}
-          {activeView === 'files' && selectedFile && (
-            <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-              {/* Show FileList on the left if we want to see it alongside the FileViewer, but for now we just show FileViewer */}
-              <FileViewer
-                selectedFile={selectedFile}
-                onClose={() => setSelectedFile(null)}
-                onFilesUpdate={handleFilesUpdate}
-                currentFolder={selectedFolder?.name}
-                currentFolderId={selectedFolder?.id}
-                onSelectGeneratedFile={setSelectedFile}
-                // FIX #1: Callback when a file is deleted from the preview
-                onFileDeleted={() => {
-                  setSelectedFile(null);
-                }}
-              />
-            </div>
-          )}
-
-        </div>
+          </>
+        )}
       </div>
     </div>
   );

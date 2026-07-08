@@ -1,7 +1,8 @@
 import React from 'react';
 import { Search, Moon, Sun } from 'lucide-react';
+import { Settings, User, LogOut } from 'lucide-react';
 import NotificationBell from '../NotificationBell';
-
+import { useTheme } from '@/context/ThemeContext';
 const TopBar = ({ folderName }) => {
   const { isDark, toggleTheme, theme } = useTheme();
   const [user, setUser] = React.useState(null);

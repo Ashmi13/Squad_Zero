@@ -24,9 +24,9 @@ const loginSchema = z.object({
  * Login Card Component
  * Production-ready authentication component with:
  * - Email/Password form validation using React Hook Form + Zod
- * - OAuth2 integration (Google/GitHub)
+ * - OAuth2 integration (Google)
  * - Loading, error, and success state management
- * - Responsive design with Tailwind CSS
+ 
  * - Security best practices
  */
 export const LoginCard = () => {

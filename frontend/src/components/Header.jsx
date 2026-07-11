@@ -84,7 +84,6 @@ const Header = ({ title = "Dashboard", subtitle = "Manage your study materials a
                 }
             )
             .subscribe();
-
         return () => {
             supabase.removeChannel(channel);
         };

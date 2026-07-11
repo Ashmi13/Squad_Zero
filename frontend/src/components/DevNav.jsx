@@ -13,7 +13,7 @@ const MEMBERS = [
       { label: 'Sign In',        path: '/login' },
       { label: 'Sign Up',        path: '/signup' },
       { label: 'Google Signin', path: '/api/v1/auth/google-login' },
-      { label: 'Dashboard',      path: '/dashboard' } ,
+
       { label: 'Admin dashboard',      path: '/admin' } ,
       { label: 'Mail related pages',      path: '' } ,
 

@@ -122,5 +122,10 @@ __pycache__/
 *.pyc
 *.pyo
 
+
 # History files
 .history/
+
+ backend/model_cache/
+ backend/__pycache__/
+ *.pyc

@@ -95,10 +95,13 @@ try:
         validation_exception_handler,
         database_exception_handler,
         general_exception_handler,
+        suspended_account_exception_handler,
+        SuspendedAccountError,
     )
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
     app.add_exception_handler(SQLAlchemyError, database_exception_handler)
     app.add_exception_handler(Exception, general_exception_handler)
+    app.add_exception_handler(SuspendedAccountError, suspended_account_exception_handler)
 except Exception as e:
     print(f"[WARN] Custom error handlers skipped: {e}")
 

@@ -53,7 +53,7 @@ const MEMBERS = [
     id: 5,
     name: 'Anoj (M5)',
     color: '#ec4899',
-   routes: [
+    routes: [
       { label: 'Task Dashboard',    path: '/tasks' },
       { label: 'Second Brain',      path: '/second-brain' },
     ],

@@ -1,24 +1,21 @@
 import React, { useState } from 'react';
 import {
+  Box,
   AppBar,
   Toolbar,
-  Button,
-  Grid,
-  Paper,
-  Dialog,
-  Menu,
-  Box,
-  IconButton,
   Typography,
-  MenuItem,
+  Button,
+  IconButton,
+  Grid,
+  Dialog,
   TextField,
   DialogTitle,
   DialogContent,
   DialogActions,
-  Divider,
   Stack,
+  useTheme,
+  Tooltip
 } from '@mui/material';
-import { useTheme } from '@mui/material/styles';
 import {
   ArrowLeft,
   Download,
@@ -27,6 +24,8 @@ import {
   Trash2,
   Undo2,
   Redo2,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import MindMapCanvas from './MindMapCanvas';
 import NotesPanel from './NotesPanel';
@@ -46,220 +45,302 @@ const MindMapEditor = ({
   canRedo,
 }) => {
   const theme = useTheme();
+  
+  // State
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editContent, setEditContent] = useState('');
+  const [editNotes, setEditNotes] = useState('');
 
-  // State for Edit Node Dialog
-  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
-  const [editNodeData, setEditNodeData] = useState({ content: '', notes: '', color: '' });
-
-  // State for Add Child Dialog
-  const [isAddChildDialogOpen, setIsAddChildDialogOpen] = useState(false);
-  const [newChildContent, setNewChildContent] = useState('');
-
-  // State for Export Menu
-  const [exportAnchorEl, setExportAnchorEl] = useState(null);
-
-  // Helper to find a node recursively
-  const findNodeInTree = (nodes, targetId) => {
-    for (const node of nodes) {
-      if (node.id === targetId) return node;
-      if (node.children && node.children.length > 0) {
-        const found = findNodeInTree(node.children, targetId);
-        if (found) return found;
-      }
-    }
-    return null;
-  };
-
-  const selectedNode = mindmap && selectedNodeId ? findNodeInTree(mindmap.nodes || [], selectedNodeId) : null;
+  // Get selected node
+  const selectedNode = mindmap?.nodes?.find(n => n.id === selectedNodeId);
 
   // Handlers
   const handleEditNode = () => {
     if (!selectedNode) return;
-    setEditNodeData({
-      content: selectedNode.content,
-      notes: selectedNode.notes || '',
-      color: selectedNode.color || '#6366f1',
-    });
-    setIsEditDialogOpen(true);
+    setEditContent(selectedNode.content || '');
+    setEditNotes(selectedNode.notes || '');
+    setEditDialogOpen(true);
   };
 
-  const handleSaveNode = async () => {
-    if (!editNodeData.content.trim()) return;
-    try {
-      await updateNode(selectedNodeId, {
-        content: editNodeData.content,
-        notes: editNodeData.notes,
-        color: editNodeData.color,
+  const handleSaveEdit = () => {
+    if (selectedNodeId) {
+      updateNode(selectedNodeId, {
+        content: editContent,
+        notes: editNotes
       });
-      setIsEditDialogOpen(false);
-    } catch (err) {
-      console.error(err);
+      setEditDialogOpen(false);
     }
   };
 
-  const handleDeleteNode = async () => {
-    if (!selectedNodeId) return;
-    if (window.confirm('Are you sure you want to delete this concept and all its sub-concepts?')) {
-      try {
-        await deleteNode(selectedNodeId);
+  const handleDeleteNode = () => {
+    if (selectedNodeId) {
+      if (window.confirm('Are you sure? This will delete the node and all children.')) {
+        deleteNode(selectedNodeId);
         setSelectedNodeId(null);
-      } catch (err) {
-        console.error(err);
       }
     }
   };
 
-  const handleAddChild = async () => {
-    if (!newChildContent.trim()) return;
-    try {
-      await createNode(selectedNodeId, newChildContent);
-      setNewChildContent('');
-      setIsAddChildDialogOpen(false);
-    } catch (err) {
-      console.error(err);
+  const handleAddChild = () => {
+    const childContent = prompt('Enter child concept:');
+    if (childContent) {
+      createNode(selectedNodeId, childContent);
     }
   };
 
-  const handleExportClick = (event) => {
-    setExportAnchorEl(event.currentTarget);
+  const handleNodeDragEnd = (nodeId, position) => {
+    updateNode(nodeId, {
+      position_x: position.x,
+      position_y: position.y
+    });
   };
 
-  const handleExportClose = () => {
-    setExportAnchorEl(null);
+  const handleNodeDragToConnect = (fromNodeId, toNodeId) => {
+    alert(`Connected: ${fromNodeId} → ${toNodeId}`);
+    // TODO: Implement relationship creation in backend
   };
 
-  const handleExportAction = (format) => {
-    handleExportClose();
-    if (format === 'json') {
-      const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(mindmap, null, 2));
-      const downloadAnchor = document.createElement('a');
-      downloadAnchor.setAttribute('href', dataStr);
-      downloadAnchor.setAttribute('download', `${mindmap.title.toLowerCase().replace(/\s+/g, '_')}_mindmap.json`);
-      document.body.appendChild(downloadAnchor);
-      downloadAnchor.click();
-      downloadAnchor.remove();
-    } else {
-      alert(`Exporting mind map as ${format.toUpperCase()}...`);
-    }
-  };
-
-  // Color categories
-  const colorsList = [
-    { value: '#6366f1', label: 'Core Concept' },
-    { value: '#10b981', label: 'Learning' },
-    { value: '#f59e0b', label: 'Example' },
-    { value: '#ec4899', label: 'Important' },
-  ];
-
+  // Render
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '80vh' }}>
-      {/* 1. AppBar (sticky) */}
+    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+      
+      {/* TOP APPBAR */}
       <AppBar
         position="sticky"
         sx={{
-          background: `linear-gradient(90deg, ${theme.palette.primary.main} 0%, ${theme.palette.secondary.main} 100%)`,
-          borderRadius: 1,
-          mb: 3,
+          background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.secondary.main} 100%)`,
+          boxShadow: 3
         }}
       >
         <Toolbar>
-          <IconButton edge="start" color="inherit" onClick={onReset} sx={{ mr: 2 }}>
-            <ArrowLeft />
-          </IconButton>
-          <Typography variant="h6" component="div" sx={{ flexGrow: 1, fontWeight: '700' }}>
-            {mindmap?.title || 'Mind Map Editor'}
+          <Tooltip title="Go back">
+            <IconButton
+              color="inherit"
+              onClick={onReset}
+              sx={{ mr: 2 }}
+            >
+              <ArrowLeft size={24} />
+            </IconButton>
+          </Tooltip>
+
+          <Typography
+            variant="h6"
+            sx={{
+              flexGrow: 1,
+              fontWeight: 'bold',
+              fontSize: '18px'
+            }}
+          >
+            📚 {mindmap?.title || 'Mind Map'}
           </Typography>
-          <Box sx={{ display: 'flex', gap: 1 }}>
-            <IconButton color="inherit" onClick={undo} disabled={!canUndo || isLoading}>
-              <Undo2 />
+
+          {/* Undo/Redo Buttons */}
+          <Tooltip title="Undo (Ctrl+Z)">
+            <span>
+              <IconButton
+                color="inherit"
+                disabled={!canUndo}
+                onClick={undo}
+                size="small"
+              >
+                <Undo2 size={20} />
+              </IconButton>
+            </span>
+          </Tooltip>
+
+          <Tooltip title="Redo (Ctrl+Y)">
+            <span>
+              <IconButton
+                color="inherit"
+                disabled={!canRedo}
+                onClick={redo}
+                size="small"
+              >
+                <Redo2 size={20} />
+              </IconButton>
+            </span>
+          </Tooltip>
+
+          {/* Export Button */}
+          <Tooltip title="Export options">
+            <IconButton
+              color="inherit"
+            >
+              <Download size={20} />
             </IconButton>
-            <IconButton color="inherit" onClick={redo} disabled={!canRedo || isLoading}>
-              <Redo2 />
+          </Tooltip>
+
+          {/* Sidebar Toggle */}
+          <Tooltip title={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}>
+            <IconButton
+              color="inherit"
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              sx={{ ml: 1 }}
+            >
+              {sidebarOpen ? <ChevronRight size={20} /> : <ChevronLeft size={20} />}
             </IconButton>
-            <IconButton color="inherit" onClick={handleExportClick}>
-              <Download />
-            </IconButton>
-            <Menu anchorEl={exportAnchorEl} open={Boolean(exportAnchorEl)} onClose={handleExportClose}>
-              <MenuItem onClick={() => handleExportAction('json')}>Export as JSON</MenuItem>
-              <MenuItem onClick={() => handleExportAction('pdf')}>Export as PDF</MenuItem>
-              <MenuItem onClick={() => handleExportAction('png')}>Export as PNG</MenuItem>
-            </Menu>
-          </Box>
+          </Tooltip>
         </Toolbar>
       </AppBar>
 
-      {/* 2. Grid Layout (2 columns) */}
-      <Grid container spacing={3} sx={{ flexGrow: 1 }}>
-        {/* Column 1 (md=9): MindMapCanvas */}
-        <Grid item xs={12} md={9}>
-          <Paper
-            elevation={3}
+      {/* MAIN CONTENT */}
+      <Box sx={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative' }}>
+        
+        {/* CANVAS (Main) */}
+        <Box
+          sx={{
+            flex: 1,
+            overflow: 'auto',
+            backgroundColor: theme.palette.background.default,
+            position: 'relative'
+          }}
+        >
+          <MindMapCanvas
+            mindmap={mindmap}
+            selectedNodeId={selectedNodeId}
+            onNodeSelect={setSelectedNodeId}
+            onNodeDragEnd={handleNodeDragEnd}
+            onNodeDragToConnect={handleNodeDragToConnect}
+          />
+        </Box>
+
+        {/* SIDEBAR (Collapsible Notes Panel) */}
+        <Box
+          sx={{
+            width: sidebarOpen ? 360 : 0,
+            minWidth: sidebarOpen ? 360 : 0,
+            maxWidth: sidebarOpen ? 360 : 0,
+            transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+            borderLeft: sidebarOpen ? `1px solid ${theme.palette.divider}` : 'none',
+            backgroundColor: theme.palette.background.paper,
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            boxShadow: sidebarOpen ? `-4px 0 12px rgba(0,0,0,0.1)` : 'none',
+            zIndex: 10
+          }}
+        >
+          {/* Sidebar Header */}
+          <Box
             sx={{
-              p: 2,
-              minHeight: '65vh',
-              borderRadius: 2,
               display: 'flex',
-              flexDirection: 'column',
-              backgroundColor: theme.palette.mode === 'dark' ? '#111827' : '#fafafa',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              p: 2,
+              borderBottom: `1px solid ${theme.palette.divider}`,
+              backgroundColor: theme.palette.action.hover
             }}
           >
-            <MindMapCanvas
-              mindmap={mindmap}
-              selectedNodeId={selectedNodeId}
-              setSelectedNodeId={setSelectedNodeId}
-            />
-          </Paper>
-        </Grid>
+            <Typography
+              variant="subtitle2"
+              sx={{
+                fontWeight: 'bold',
+                fontSize: '14px'
+              }}
+            >
+              📖 Concept Notes
+            </Typography>
+            <IconButton
+              size="small"
+              onClick={() => setSidebarOpen(false)}
+              sx={{
+                '&:hover': {
+                  backgroundColor: theme.palette.action.selected
+                }
+              }}
+            >
+              <ChevronRight size={18} />
+            </IconButton>
+          </Box>
 
-        {/* Column 2 (md=3): Side panel */}
-        <Grid item xs={12} md={3}>
-          <Paper
-            elevation={3}
+          {/* Sidebar Content */}
+          <Box
             sx={{
-              p: 3,
-              minHeight: '65vh',
-              borderRadius: 2,
-              height: '100%',
+              flex: 1,
+              overflow: 'auto',
+              p: 2,
               display: 'flex',
-              flexDirection: 'column',
+              flexDirection: 'column'
             }}
           >
             {selectedNode ? (
-              <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 3 }}>
-                <Box sx={{ flexGrow: 1 }}>
-                  <NotesPanel nodeId={selectedNodeId} mindmap={mindmap} />
+              <>
+                {/* Selected Node Info */}
+                <Box sx={{ mb: 2 }}>
+                  <Typography
+                    variant="subtitle1"
+                    sx={{
+                      fontWeight: 'bold',
+                      color: theme.palette.primary.main,
+                      mb: 1
+                    }}
+                  >
+                    {selectedNode.content}
+                  </Typography>
+                  
+                  {/* Color Indicator */}
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                    <Box
+                      sx={{
+                        width: 16,
+                        height: 16,
+                        borderRadius: '50%',
+                        backgroundColor: selectedNode.color || '#6366f1'
+                      }}
+                    />
+                    <Typography variant="caption" color="textSecondary">
+                      {['Main Topic', 'Sub Topic', 'Details', 'Key Points'][selectedNode.depth || 0]}
+                    </Typography>
+                  </Box>
                 </Box>
 
+                {/* Notes Panel */}
+                <NotesPanel
+                  nodeId={selectedNodeId}
+                  mindmap={mindmap}
+                  sx={{ mb: 2, flex: 1 }}
+                />
+
+                {/* Action Buttons */}
                 <Stack spacing={1.5} sx={{ mt: 'auto' }}>
                   <Button
-                    variant="contained"
-                    color="primary"
-                    startIcon={<Edit2 size={16} />}
-                    onClick={handleEditNode}
                     fullWidth
+                    variant="contained"
+                    size="medium"
+                    startIcon={<Edit2 size={18} />}
+                    onClick={handleEditNode}
+                    sx={{
+                      background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.primary.dark} 100%)`,
+                      fontWeight: 'bold'
+                    }}
                   >
                     Edit Concept
                   </Button>
+
                   <Button
-                    variant="outlined"
-                    color="secondary"
-                    startIcon={<Plus size={16} />}
-                    onClick={() => setIsAddChildDialogOpen(true)}
                     fullWidth
+                    variant="outlined"
+                    size="medium"
+                    color="success"
+                    startIcon={<Plus size={18} />}
+                    onClick={handleAddChild}
                   >
-                    Add Child Concept
+                    Add Sub-Topic
                   </Button>
+
                   <Button
-                    variant="outlined"
-                    color="error"
-                    startIcon={<Trash2 size={16} />}
-                    onClick={handleDeleteNode}
                     fullWidth
+                    variant="outlined"
+                    size="medium"
+                    color="error"
+                    startIcon={<Trash2 size={18} />}
+                    onClick={handleDeleteNode}
                   >
-                    Delete Concept
+                    Delete
                   </Button>
                 </Stack>
-              </Box>
+              </>
             ) : (
               <Box
                 sx={{
@@ -267,103 +348,77 @@ const MindMapEditor = ({
                   alignItems: 'center',
                   justifyContent: 'center',
                   height: '100%',
-                  minHeight: 250,
-                  textAlign: 'center',
+                  textAlign: 'center'
                 }}
               >
-                <Box>
-                  <Typography variant="subtitle1" fontWeight="600" color="text.secondary" gutterBottom>
-                    No concept selected
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Select a node in the mind map canvas to view details, add children, or edit concepts.
-                  </Typography>
-                </Box>
+                <Typography color="textSecondary" variant="body2">
+                  👆 Select a concept to view and edit its notes
+                </Typography>
               </Box>
             )}
-          </Paper>
-        </Grid>
-      </Grid>
+          </Box>
+        </Box>
 
-      {/* 3. Edit Node Dialog */}
-      <Dialog open={isEditDialogOpen} onClose={() => setIsEditDialogOpen(false)} fullWidth maxWidth="xs">
-        <DialogTitle>Edit Concept Node</DialogTitle>
-        <DialogContent>
-          <Stack spacing={2.5} sx={{ mt: 1 }}>
-            <TextField
-              label="Concept Title"
-              value={editNodeData.content}
-              onChange={(e) => setEditNodeData({ ...editNodeData, content: e.target.value })}
-              fullWidth
-              size="small"
-              required
-            />
-            <TextField
-              label="Notes"
-              value={editNodeData.notes}
-              onChange={(e) => setEditNodeData({ ...editNodeData, notes: e.target.value })}
-              multiline
-              rows={4}
-              fullWidth
-              size="small"
-            />
-            <Box>
-              <Typography variant="body2" color="text.secondary" gutterBottom>
-                Color Theme
-              </Typography>
-              <Box display="flex" gap={1}>
-                {colorsList.map((colorOpt) => (
-                  <Box
-                    key={colorOpt.value}
-                    onClick={() => setEditNodeData({ ...editNodeData, color: colorOpt.value })}
-                    sx={{
-                      width: 28,
-                      height: 28,
-                      borderRadius: '50%',
-                      backgroundColor: colorOpt.value,
-                      cursor: 'pointer',
-                      border: '3px solid',
-                      borderColor: editNodeData.color === colorOpt.value ? 'primary.main' : 'transparent',
-                      transition: 'all 0.1s',
-                      '&:hover': { transform: 'scale(1.1)' },
-                    }}
-                  />
-                ))}
-              </Box>
-            </Box>
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setIsEditDialogOpen(false)} color="inherit">
-            Cancel
-          </Button>
-          <Button onClick={handleSaveNode} variant="contained" disabled={!editNodeData.content.trim()}>
-            Save
-          </Button>
-        </DialogActions>
-      </Dialog>
+        {/* Sidebar Toggle Button (When Closed) */}
+        {!sidebarOpen && (
+          <Box
+            onClick={() => setSidebarOpen(true)}
+            sx={{
+              width: 40,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderLeft: `1px solid ${theme.palette.divider}`,
+              backgroundColor: theme.palette.background.paper,
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+              '&:hover': {
+                backgroundColor: theme.palette.action.hover
+              }
+            }}
+          >
+            <ChevronLeft size={18} />
+          </Box>
+        )}
+      </Box>
 
-      {/* Add Child Node Dialog */}
-      <Dialog open={isAddChildDialogOpen} onClose={() => setIsAddChildDialogOpen(false)} fullWidth maxWidth="xs">
-        <DialogTitle>Add Sub-Concept Node</DialogTitle>
-        <DialogContent>
+      {/* EDIT DIALOG */}
+      <Dialog open={editDialogOpen} onClose={() => setEditDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontWeight: 'bold' }}>Edit Concept</DialogTitle>
+        <DialogContent sx={{ pt: 3, display: 'flex', flexDirection: 'column', gap: 2 }}>
           <TextField
-            label="Sub-concept Name"
-            placeholder="e.g. key fact, secondary category..."
-            value={newChildContent}
-            onChange={(e) => setNewChildContent(e.target.value)}
+            autoFocus
+            label="Concept Name"
             fullWidth
-            size="small"
-            required
-            sx={{ mt: 1 }}
+            value={editContent}
+            onChange={(e) => setEditContent(e.target.value)}
+            variant="outlined"
+            multiline
+            rows={2}
+          />
+
+          <TextField
+            label="Concept Notes / Details"
+            fullWidth
+            value={editNotes}
+            onChange={(e) => setEditNotes(e.target.value)}
+            variant="outlined"
+            multiline
+            rows={5}
+            placeholder="Add important points, examples, or key takeaways..."
+            helperText="Include all key information for this concept"
           />
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setIsAddChildDialogOpen(false)} color="inherit">
-            Cancel
-          </Button>
-          <Button onClick={handleAddChild} variant="contained" disabled={!newChildContent.trim()}>
-            Add
+        <DialogActions sx={{ p: 2, gap: 1 }}>
+          <Button onClick={() => setEditDialogOpen(false)}>Cancel</Button>
+          <Button
+            onClick={handleSaveEdit}
+            variant="contained"
+            sx={{
+              background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.primary.dark} 100%)`
+            }}
+          >
+            Save Changes
           </Button>
         </DialogActions>
       </Dialog>

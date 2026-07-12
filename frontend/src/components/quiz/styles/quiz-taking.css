@@ -1,6 +1,6 @@
-/* quiz-taking.css — Active quiz session*/
+/* quiz-taking.css — Active quiz session */
 
-/* Two-column layout*/
+/* Two-column layout */
 .quiz-layout {
   max-width: 1300px;
   margin: 0 auto;
@@ -334,7 +334,7 @@
   font-size: 0.95rem;
 }
 
-/*Question navigator sidebar */
+/* Question navigator sidebar */
 .quiz-sidebar {
   background: white;
   border: 1px solid var(--color-border);

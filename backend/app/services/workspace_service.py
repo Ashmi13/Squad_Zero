@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import uuid
 import base64
+import concurrent.futures
 from datetime import datetime, timezone
 from urllib.parse import unquote, urlparse
 from typing import Any, Dict, List, Optional, Tuple
@@ -64,7 +65,10 @@ class WorkspaceService:
         except Exception:
             pass
 
+<<<<<<< Updated upstream
         import concurrent.futures
+=======
+>>>>>>> Stashed changes
         def check_col(col: str) -> Tuple[str, bool]:
             return col, self._column_exists("files", col)
 
@@ -739,7 +743,10 @@ class WorkspaceService:
                 .order(sort_column, desc=True)
                 .limit(safe_limit)
             )
+<<<<<<< Updated upstream
             
+=======
+>>>>>>> Stashed changes
             if self._files_has_user_id:
                 files_query = files_query.eq("user_id", user_id)
             files = files_query.execute().data or []

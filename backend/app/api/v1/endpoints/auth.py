@@ -36,6 +36,7 @@ from app.api.deps import (
     get_current_user,
     get_current_user_id,
 )
+from middleware.error_handler import SuspendedAccountError
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
@@ -135,6 +136,9 @@ async def signin(
         )
 
         user_data = auth_result["user"]
+        if bool(user_data.get("is_suspended", False)):
+            clear_session_cookie(response)
+            raise SuspendedAccountError()
 
         access_token = create_access_token(
             data={
@@ -163,9 +167,12 @@ async def signin(
                 email=user_data["email"],
                 full_name=user_data.get("full_name"),
                 role=user_data.get("role", "user"),
+                is_suspended=bool(user_data.get("is_suspended", False)),
             ),
         )
 
+    except SuspendedAccountError:
+        raise
     except Exception as e:
         raise HTTPException(status_code=401, detail=f"Signin failed: {str(e)}")
 
@@ -186,7 +193,7 @@ async def get_current_profile(
     try:
         user_response = (
             supabase_client.table("users")
-            .select("id,email,full_name,avatar_url,role")
+            .select("id,email,full_name,avatar_url,role,is_suspended")
             .eq("id", user_id)
             .single()
             .execute()
@@ -201,6 +208,7 @@ async def get_current_profile(
             full_name=user_data.get("full_name"),
             avatar_url=user_data.get("avatar_url"),
             role=user_data.get("role", "user"),
+            is_suspended=bool(user_data.get("is_suspended", False)),
         )
     except HTTPException:
         raise
@@ -232,6 +240,7 @@ async def update_current_profile(
             full_name=row.get("full_name"),
             avatar_url=row.get("avatar_url"),
             role=row.get("role", "user"),
+            is_suspended=bool(row.get("is_suspended", False)),
         )
     except HTTPException:
         raise

@@ -14,15 +14,16 @@ import ConfirmDialog from './ConfirmDialog';
 import './styles/QuizPage.css';
 
 const MAX_FILES    = 20;
-const MAX_FILE_SIZE = 25 * 1024 * 1024;
+const MAX_FILE_SIZE = 100 * 1024 * 1024;
 
-const QuizPage = ({ noteId }) => {
+const QuizPage = ({ noteId, onStepChange }) => {
   const { user, isLoading } = useAuth();
   const navigate = useNavigate();
 
   // Guests allowed — no login redirect
 
   const [step, setStep]               = useState('upload');
+  useEffect(() => { onStepChange?.(step); }, [step]); // eslint-disable-line
   const [showHistory, setShowHistory] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState([]);
   const [quiz,          setQuiz]          = useState(null);
@@ -100,6 +101,10 @@ const QuizPage = ({ noteId }) => {
     if (uploadedFiles.length + files.length > MAX_FILES) {
       showToast(`Cannot upload more than ${MAX_FILES} files.`, 'error'); return;
     }
+    // Files already sitting in the upload section, keyed by name + size so two
+    // different files that happen to share a name aren't treated as duplicates.
+    const existingKeys = new Set(uploadedFiles.map(f => `${f.name.toLowerCase()}::${f.file?.size ?? ''}`));
+    const seenInThisBatch = new Set();
     const validFiles = files.filter(file => {
       // Use lastIndexOf so filenames like "Copy of 1. Introduction" (dots in name,
       // no real extension) don't get " introduction" treated as an extension.
@@ -109,7 +114,14 @@ const QuizPage = ({ noteId }) => {
       const ok  = ['.pdf','.doc','.docx','.txt','.xlsx','.xls','.ppt','.pptx','.jpg','.jpeg','.png','.gif','.webp','.epub','.bmp','.tiff','.rtf'];
       const isValidExt = rawExt.length > 0 && rawExt.length <= 5 && !rawExt.includes(' ') && ok.includes(ext);
       if (!isValidExt) { showToast(`"${file.name}" has an unsupported file type.`, 'error'); return false; }
-      if (file.size > MAX_FILE_SIZE) { showToast(`"${file.name}" exceeds 25MB`, 'error'); return false; }
+      if (file.size > MAX_FILE_SIZE) { showToast(`"${file.name}" exceeds 100MB`, 'error'); return false; }
+
+      const key = `${file.name.toLowerCase()}::${file.size}`;
+      if (existingKeys.has(key) || seenInThisBatch.has(key)) {
+        showToast('File already exists', 'error');
+        return false;
+      }
+      seenInThisBatch.add(key);
       return true;
     });
     setUploadedFiles(prev => [...prev, ...validFiles.map(f => ({
@@ -282,7 +294,7 @@ const QuizPage = ({ noteId }) => {
   const handleGenerateQuiz = async (levelSourceContent = null, forceDifficulty = null) => {
     if (isGeneratingRef.current || generationPromiseRef.current) return generationPromiseRef.current;
     if (!levelSourceContent && uploadedFiles.length === 0) { showToast('Please upload at least one file', 'error'); return; }
-    if (config.numQuestions > 25) { showToast('Max 25 questions', 'error'); return; }
+    if (config.numQuestions > 100) { showToast('Max 100 questions', 'error'); return; }
     if (config.timeLimit < 1 || config.timeLimit > 180) { showToast('Time limit 1–180 minutes', 'error'); return; }
 
     isGeneratingRef.current = true;

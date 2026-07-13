@@ -24,6 +24,22 @@
   --color-bg-muted:       #f9fafb;
   --color-bg-subtle:      #f3f4f6;
 
+  /* Dark theme overrides */
+  [data-theme="dark"] {
+    --color-text:           #f3f4f6;
+    --color-text-muted:     #9ca3af;
+    --color-text-subtle:    #6b7280;
+    --color-border:         #374151;
+    --color-bg:             #111827;
+    --color-bg-muted:       #1f2937;
+    --color-bg-subtle:      #1c1f24;
+
+  /* Semantic colors */
+  --color-correct-bg:     #064e3b;
+  --color-incorrect-bg:   #7f1d1d;
+}
+
+
   /* Shadows */
   --shadow-sm:  0 1px 3px rgba(0,0,0,0.08);
   --shadow-md:  0 4px 12px rgba(0,0,0,0.1);

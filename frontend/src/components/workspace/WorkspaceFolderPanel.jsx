@@ -1,8 +1,12 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight, Folder, FolderPlus, Plus, Trash2, Pencil } from 'lucide-react';
 import { workspaceApi } from '@/services/workspaceApi';
+import { getScopedStorageKey, useSupabaseUser } from '@/hooks/useSupabaseUser';
+import { createLocalFolderAndBind, getFolderHandleBinding, pickDirectoryHandle, ensureReadWritePermission } from '@/utils/localFsSync';
 
 const PANEL_WIDTH = 280;
+const FOLDERS_STORAGE_KEY = 'neuranote_folders';
+const EXPANDED_STORAGE_KEY = 'neuranote_expanded_folders';
 
 function flattenFolders(nodes, output = []) {
   nodes.forEach((node) => {
@@ -15,27 +19,34 @@ function flattenFolders(nodes, output = []) {
 }
 
 const WorkspaceFolderPanel = ({ onSelectFolder, selectedFolderId }) => {
-  const [folders, setFolders] = useState(() => {
-    try {
-      const saved = localStorage.getItem('neuranote_folders');
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
-  const [expanded, setExpanded] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem('neuranote_expanded_folders') || '{}');
-    } catch {
-      return {};
-    }
-  });
+  const { userScope, loading: userLoading } = useSupabaseUser();
+  const foldersStorageKey = getScopedStorageKey(FOLDERS_STORAGE_KEY, userScope);
+  const expandedStorageKey = getScopedStorageKey(EXPANDED_STORAGE_KEY, userScope);
+  const [folders, setFolders] = useState([]);
+  const [expanded, setExpanded] = useState({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const folderHandleCacheRef = useRef({});
 
   const allFlatFolders = useMemo(() => flattenFolders([...folders]), [folders]);
 
+  useEffect(() => {
+    if (userLoading) return;
+
+    try {
+      const savedFolders = localStorage.getItem(foldersStorageKey);
+      const savedExpanded = localStorage.getItem(expandedStorageKey);
+      setFolders(savedFolders ? JSON.parse(savedFolders) : []);
+      setExpanded(savedExpanded ? JSON.parse(savedExpanded) : {});
+    } catch {
+      setFolders([]);
+      setExpanded({});
+    }
+  }, [expandedStorageKey, foldersStorageKey, userLoading]);
+
   const loadFolders = async () => {
+    if (userLoading) return;
+
     if (!folders || folders.length === 0) {
       setLoading(true);
     }
@@ -44,7 +55,7 @@ const WorkspaceFolderPanel = ({ onSelectFolder, selectedFolderId }) => {
       const data = await workspaceApi.getFolders();
       const nextFolders = data.folders || [];
       setFolders(nextFolders);
-      localStorage.setItem('neuranote_folders', JSON.stringify(nextFolders));
+      localStorage.setItem(foldersStorageKey, JSON.stringify(nextFolders));
     } catch (err) {
       setError(err.message || 'Failed to load folders');
     } finally {
@@ -54,28 +65,48 @@ const WorkspaceFolderPanel = ({ onSelectFolder, selectedFolderId }) => {
 
   useEffect(() => {
     loadFolders();
-  }, []);
+  }, [foldersStorageKey, userLoading, userScope]);
+
+  useEffect(() => {
+    if (userLoading) return;
+
+    let active = true;
+
+    const preloadFolderHandles = async () => {
+      const cache = {};
+
+      // Flattened folders already includes nested children, so every known folder id can be hydrated here.
+      for (const folder of allFlatFolders) {
+        if (!folder?.id) continue;
+        try {
+          const record = await getFolderHandleBinding(folder.id);
+          if (!active) return;
+          if (record?.handle) {
+            cache[String(folder.id)] = record.handle;
+          }
+        } catch {
+          // Best-effort cache warmup only.
+        }
+      }
+
+      if (active) {
+        folderHandleCacheRef.current = cache;
+      }
+    };
+
+    preloadFolderHandles();
+
+    return () => {
+      active = false;
+    };
+  }, [allFlatFolders, userLoading, userScope]);
 
   const toggleExpand = (id) => {
     setExpanded((prev) => {
       const newState = { ...prev, [id]: !prev[id] };
-      localStorage.setItem('neuranote_expanded_folders', JSON.stringify(newState));
+      localStorage.setItem(expandedStorageKey, JSON.stringify(newState));
       return newState;
     });
-  };
-
-  const createLocalFolder = async (name) => {
-    if (typeof window.showDirectoryPicker !== 'function') {
-      throw new Error('Local folder creation is only supported in Chromium-based browsers (Edge/Chrome).');
-    }
-
-    const parentHandle = await window.showDirectoryPicker({
-      mode: 'readwrite',
-      startIn: 'documents',
-    });
-
-    const childHandle = await parentHandle.getDirectoryHandle(name, { create: true });
-    return { parentHandle, childHandle };
   };
 
   const rollbackLocalFolder = async (parentHandle, name) => {
@@ -86,27 +117,78 @@ const WorkspaceFolderPanel = ({ onSelectFolder, selectedFolderId }) => {
     }
   };
 
-  const createFolder = async (parentFolderId = null) => {
+  const createFolder = async (parentFolder = null) => {
+    const parentFolderId = parentFolder?.id || null;
+    let preselectedParentHandle = null;
+
+    if (!parentFolderId) {
+      preselectedParentHandle = await pickDirectoryHandle();
+      const granted = await ensureReadWritePermission(preselectedParentHandle);
+      if (!granted) {
+        throw new Error('Permission denied for selected local directory.');
+      }
+    }
+
     const name = window.prompt(parentFolderId ? 'Enter subfolder name' : 'Enter folder name');
     if (!name || !name.trim()) return;
 
     const cleanName = name.trim();
 
     let localCreation = null;
+    let createdFolderId = null;
     try {
-      localCreation = await createLocalFolder(cleanName);
+      if (parentFolderId) {
+        const parentHandle = folderHandleCacheRef.current[String(parentFolderId)];
+        if (!parentHandle) {
+          throw new Error('Local folder handle is not ready yet. Please open the parent folder once and try again.');
+        }
 
-      await workspaceApi.createFolder(cleanName, parentFolderId);
+        const created = await workspaceApi.createFolder(cleanName, parentFolderId);
+        const createdFolder = created?.folder;
+        if (!createdFolder?.id) {
+          throw new Error('Folder was not created in backend.');
+        }
+        createdFolderId = createdFolder.id;
+
+        localCreation = await createLocalFolderAndBind({
+          folderId: createdFolder.id,
+          folderName: cleanName,
+          parentFolder: { id: parentFolderId, name: parentFolder?.name || 'Folder' },
+          parentHandle,
+        });
+      } else {
+        const created = await workspaceApi.createFolder(cleanName, null);
+        const createdFolder = created?.folder;
+        if (!createdFolder?.id) {
+          throw new Error('Folder was not created in backend.');
+        }
+        createdFolderId = createdFolder.id;
+
+        localCreation = await createLocalFolderAndBind({
+          folderId: createdFolder.id,
+          folderName: cleanName,
+          parentHandle: preselectedParentHandle,
+        });
+      }
+
       await loadFolders();
 
       if (parentFolderId) {
         setExpanded((prev) => {
           const newState = { ...prev, [parentFolderId]: true };
-          localStorage.setItem('neuranote_expanded_folders', JSON.stringify(newState));
+          localStorage.setItem(expandedStorageKey, JSON.stringify(newState));
           return newState;
         });
       }
     } catch (err) {
+      if (createdFolderId) {
+        try {
+          await workspaceApi.deleteFolder(createdFolderId);
+        } catch {
+          // Best-effort rollback for backend folder creation.
+        }
+      }
+
       if (localCreation?.parentHandle) {
         await rollbackLocalFolder(localCreation.parentHandle, cleanName);
       }
@@ -174,7 +256,7 @@ const WorkspaceFolderPanel = ({ onSelectFolder, selectedFolderId }) => {
           </button>
           <Folder size={16} color="#6C5DD3" />
           <span style={{ fontSize: 13, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{folder.name}</span>
-          <button onClick={(e) => { e.stopPropagation(); createFolder(folder.id); }} style={{ border: 'none', background: 'transparent', cursor: 'pointer' }} title="Add subfolder">
+          <button onClick={(e) => { e.stopPropagation(); createFolder(folder); }} style={{ border: 'none', background: 'transparent', cursor: 'pointer' }} title="Add subfolder">
             <FolderPlus size={14} />
           </button>
           <button onClick={(e) => { e.stopPropagation(); renameFolder(folder); }} style={{ border: 'none', background: 'transparent', cursor: 'pointer' }} title="Rename folder">

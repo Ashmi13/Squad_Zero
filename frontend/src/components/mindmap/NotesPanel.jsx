@@ -12,7 +12,7 @@ import {
   IconButton,
   Tooltip
 } from '@mui/material';
-import { Copy, Check } from 'lucide-react';
+import { Copy, Check, Edit2 } from 'lucide-react';
 import Markdown from 'react-markdown';
 
 // Helper function to search for the node recursively
@@ -28,7 +28,7 @@ const findNodeInTree = (nodes, targetId) => {
   return null;
 };
 
-const NotesPanel = ({ nodeId, mindmap, sx = {} }) => {
+const NotesPanel = ({ nodeId, mindmap, onEditClick, sx = {} }) => {
   const theme = useTheme();
   const [copiedText, setCopiedText] = useState(false);
 
@@ -207,22 +207,30 @@ const NotesPanel = ({ nodeId, mindmap, sx = {} }) => {
       {/* Notes Section */}
       {node.notes ? (
         <Box>
-          <Typography
-            variant="subtitle2"
-            sx={{
-              fontWeight: 700,
-              fontSize: '12px',
-              textTransform: 'uppercase',
-              color: theme.palette.text.secondary,
-              mb: 1,
-              letterSpacing: 0.5,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 0.5
-            }}
-          >
-            📝 Key Points
-          </Typography>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+            <Typography
+              variant="subtitle2"
+              sx={{
+                fontWeight: 700,
+                fontSize: '12px',
+                textTransform: 'uppercase',
+                color: theme.palette.text.secondary,
+                letterSpacing: 0.5,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 0.5
+              }}
+            >
+              📝 Notes & Descriptions
+            </Typography>
+            {onEditClick && (
+              <Tooltip title="Edit Notes">
+                <IconButton size="small" onClick={onEditClick} color="primary" sx={{ p: 0.5 }}>
+                  <Edit2 size={16} />
+                </IconButton>
+              </Tooltip>
+            )}
+          </Box>
 
           {/* Notes Content */}
           <Paper
@@ -296,11 +304,22 @@ const NotesPanel = ({ nodeId, mindmap, sx = {} }) => {
             sx={{
               fontSize: '13px',
               color: theme.palette.text.secondary,
-              fontStyle: 'italic'
+              fontStyle: 'italic',
+              mb: onEditClick ? 1.5 : 0
             }}
           >
             📌 No notes available for this concept yet
           </Typography>
+          {onEditClick && (
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<Edit2 size={14} />}
+              onClick={onEditClick}
+            >
+              Add Note Description
+            </Button>
+          )}
         </Paper>
       )}
 

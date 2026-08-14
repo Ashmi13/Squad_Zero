@@ -91,7 +91,7 @@ export const useMindMap = () => {
     }
   }, []);
 
-  const createNode = useCallback(async (parentId, content) => {
+  const createNode = useCallback(async (parentId, content, notes = '', color = '') => {
     if (!mindmap) return;
     setIsLoading(true);
     setError(null);
@@ -99,6 +99,8 @@ export const useMindMap = () => {
       const response = await mindmapService.createNode(mindmap.id, {
         parent_id: parentId,
         content,
+        notes,
+        color,
       });
       const newNode = response.data;
 

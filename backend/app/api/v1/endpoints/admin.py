@@ -33,6 +33,11 @@ class UserCreateRequest(BaseModel):
 class UserUpdateRequest(BaseModel):
     full_name: Optional[str] = None
 
+
+class SuspensionToggleResponse(BaseModel):
+    status: str
+    user: Dict[str, Any]
+
 async def check_admin_role(current_user: Dict[str, Any] = Depends(get_current_user), supabase_client: Client = Depends(get_supabase_service_client)):
     """Check if the current user has the admin role"""
     user_id = current_user.get("sub")
@@ -40,7 +45,8 @@ async def check_admin_role(current_user: Dict[str, Any] = Depends(get_current_us
         raise HTTPException(status_code=401, detail="Invalid token")
     
     response = supabase_client.table("users").select("role").eq("id", user_id).single().execute()
-    if not response.data or response.data.get("role") != "admin":
+    role = str((response.data or {}).get("role", "")).strip().lower()
+    if not response.data or role != "admin":
         raise HTTPException(status_code=403, detail="Not authorized. Admin access required.")
     return user_id
 
@@ -52,6 +58,44 @@ async def list_users(
     """List all users in the system"""
     response = supabase_client.table("users").select("*").order("created_at", desc=True).execute()
     return response.data
+
+
+@router.patch("/users/{user_id}/suspension/toggle", response_model=SuspensionToggleResponse)
+async def toggle_user_suspension(
+    user_id: str,
+    admin_id: str = Depends(check_admin_role),
+    supabase_client: Client = Depends(get_supabase_service_client),
+):
+    """Toggle a user's suspension state."""
+    if user_id == SUPER_ADMIN_ID:
+        raise HTTPException(status_code=403, detail="Cannot suspend Super Admin")
+
+    current_response = (
+        supabase_client.table("users")
+        .select("id,is_suspended")
+        .eq("id", user_id)
+        .single()
+        .execute()
+    )
+    current_user = current_response.data or {}
+    if not current_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    next_state = not bool(current_user.get("is_suspended", False))
+
+    updated_response = (
+        supabase_client.table("users")
+        .update({"is_suspended": next_state})
+        .eq("id", user_id)
+        .execute()
+    )
+    if not updated_response.data:
+        raise HTTPException(status_code=400, detail="Failed to update suspension state")
+
+    return {
+        "status": "success",
+        "user": updated_response.data[0],
+    }
 
 @router.post("/users", status_code=201)
 async def create_user(

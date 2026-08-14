@@ -66,3 +66,13 @@ try:
     print("[OK] Announcements routes loaded")
 except Exception as e:
     print(f"[ERROR] Announcements route failed: {e}")
+<<<<<<< Updated upstream
+=======
+
+try:
+    from app.api.v1.endpoints import admin
+    router.include_router(admin.router)
+    print("[OK] Admin routes loaded")
+except Exception as e:
+    print(f"⚠️ Admin routes skipped: {e}")
+>>>>>>> Stashed changes

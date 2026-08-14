@@ -1,4 +1,4 @@
-/* results.css — Quiz results & answer review*/
+/* results.css — Quiz results & answer review */
 
 /* Container */
 .results-container {
@@ -20,7 +20,7 @@
   letter-spacing: -0.02em;
 }
 
-/* Score donut*/
+/* Score donut */
 .score-card-new {
   background: white;
   border: 1px solid var(--color-border);

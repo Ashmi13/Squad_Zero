@@ -117,12 +117,12 @@ const QuizHomePage = ({
           <label className="sidebar-label">Questions</label>
           <div className="sidebar-input-group">
             <input
-              type="number" min="1" max="25"
+              type="number" min="1" max="100"
               value={config.numQuestions}
-              onChange={(e) => onConfigChange({ numQuestions: Math.min(25, Math.max(1, parseInt(e.target.value) || 1)) })}
+              onChange={(e) => onConfigChange({ numQuestions: Math.min(100, Math.max(1, parseInt(e.target.value) || 1)) })}
               className="sidebar-input"
             />
-            <span className="sidebar-input-hint">max 25</span>
+            <span className="sidebar-input-hint">max 100</span>
           </div>
         </div>
 
@@ -258,7 +258,7 @@ const QuizHomePage = ({
             : <><h3>Drag &amp; Drop files here</h3><p>or click to browse · or drag files from My Folders</p></>
           }
           <div className="dropzone-formats">PDF · DOC · PPT · XLS · TXT · EPUB · Images</div>
-          <div className="dropzone-limit">Max 25MB per file · Up to {MAX_FILES} files</div>
+          <div className="dropzone-limit">Max 100MB per file · Up to {MAX_FILES} files</div>
         </div>
 
         {uploadedFiles.length > 0 && (

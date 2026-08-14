@@ -46,7 +46,7 @@
   background: var(--color-primary-light);
 }
 
-/* Tabs*/
+/* Tabs */
 .tabs {
   display: flex;
   padding: 0 2rem;
@@ -57,8 +57,9 @@
 .tab {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 0.5rem;
-  padding: 0.875rem 1.25rem;
+  padding: 0.875rem 1.5rem;
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
@@ -66,13 +67,15 @@
   font-size: 0.875rem;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: color 0.15s, border-color 0.15s;
   margin-bottom: -1px;
+  white-space: nowrap;
 }
 .tab:hover { color: var(--color-primary); }
 .tab.active {
   color: var(--color-primary);
   border-bottom-color: var(--color-primary);
+  background: none;
 }
 
 /* Tab content */

@@ -1,11 +1,10 @@
-import React, { useState, useEffect, useRef, Suspense } from 'react';
+import React, { useState, useEffect, useRef, Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
-
+import { ThemeProvider } from '@/context/ThemeContext';
 import { useAuth } from '@/hooks/useAuth.jsx';
 
-// Always loaded — lightweight, needed on every page
-import Rail   from '@/components/filemanager/Rail';
-import { ThemeProvider } from '@/context/ThemeContext';
+// Always loaded — needed on every page
+import Rail from '@/components/filemanager/Rail';
 
 // MEMBER 1 (Nihaaj) - Auth
 import LandingPage from '@/pages/LandingPage';
@@ -26,20 +25,20 @@ import FolderPanel from '@/components/filemanager/FolderPanel';
 // SHARED DASHBOARD
 import Dashboard from '@/pages/Dashboard';
 
-// MEMBER 3 (Sandavi) - Structured Notes
-import M3Dashboard from './m3_structurednotes/pages/Dashboard';
-import NoteEditor from './m3_structurednotes/pages/NoteEditor';
-import ManualNoteEditor from './m3_structurednotes/pages/ManualNoteEditor';
+// MEMBER 3 (Sandavi) - Structured Notes - LAZY LOADED
+const M3Dashboard = lazy(() => import('./m3_structurednotes/pages/Dashboard'));
+const NoteEditor = lazy(() => import('./m3_structurednotes/pages/NoteEditor'));
+const ManualNoteEditor = lazy(() => import('./m3_structurednotes/pages/ManualNoteEditor'));
 
-// MEMBER 4 - Quiz
-import QuizPage from '@/components/quiz/QuizPage';
-import QuizHistory from '@/components/quiz/QuizHistory';
+// MEMBER 4 - Quiz - LAZY LOADED
+const QuizPage = lazy(() => import('@/components/quiz/QuizPage'));
+const QuizHistory = lazy(() => import('@/components/quiz/QuizHistory'));
 
-// MEMBER 5 - Tasks
-import TaskDashboard from '@/components/tasks/TaskDashboard';
-import PomodoroPage from '@/pages/PomodoroPage';
-import SecondBrainPage from '@/pages/SecondBrainPage';
-import FlashcardsPage from '@/pages/FlashcardsPage';
+// MEMBER 5 - Tasks - LAZY LOADED
+const TaskDashboard = lazy(() => import('@/components/tasks/TaskDashboard'));
+const PomodoroPage = lazy(() => import('@/pages/PomodoroPage'));
+const SecondBrainPage = lazy(() => import('@/pages/SecondBrainPage'));
+const FlashcardsPage = lazy(() => import('@/pages/FlashcardsPage'));
 
 // DEV NAVIGATION
 import DevNav from '@/components/DevNav';
@@ -48,8 +47,7 @@ import { workspaceApi } from '@/services/workspaceApi';
 import './index.css';
 
 const MindMapPage = React.lazy(() => import('@/pages/MindMapPage'));
-
-
+const ACTIVE_WORKSPACE_FOLDER_KEY = 'neuranote_active_workspace_folder';
 
 // Spinner shown while a lazy chunk is loading
 const PageLoader = () => (
@@ -68,17 +66,16 @@ const PageLoader = () => (
   </div>
 );
 
-const ACTIVE_WORKSPACE_FOLDER_KEY = 'neuranote_active_workspace_folder';
-
 // Pages that should NOT show the Rail
 const noRailPages = ['/', '/login', '/signup', '/oauth/callback'];
 
 const AppLayout = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  // FIX: destructure isLoading (and user) from useAuth
-  const { isLoading, user } = useAuth();
+  const { user, isLoading } = useAuth();
+  
   const [activeView, setActiveView] = useState('home');
+  const [quizStep, setQuizStep] = useState('upload'); // 'upload' | 'taking' | 'results'
   const [selectedWorkspaceFolder, setSelectedWorkspaceFolder] = useState(() => {
     try {
       const savedFolder = localStorage.getItem(ACTIVE_WORKSPACE_FOLDER_KEY);
@@ -88,12 +85,15 @@ const AppLayout = () => {
     }
   });
   const lastSavedCompletionVersionRef = useRef(0);
+
   const showRail = !noRailPages.includes(location.pathname);
   const showWorkspacePanel = showRail &&
     location.pathname !== '/dashboard' &&
     location.pathname !== '/files' &&
-    location.pathname !== '/files/create-note';
+    location.pathname !== '/files/create-note' &&
+    !(location.pathname.startsWith('/quiz') && quizStep !== 'upload');
 
+  // Persist selected workspace folder
   useEffect(() => {
     if (selectedWorkspaceFolder) {
       localStorage.setItem(ACTIVE_WORKSPACE_FOLDER_KEY, JSON.stringify(selectedWorkspaceFolder));
@@ -105,19 +105,19 @@ const AppLayout = () => {
   // Sync activeView with current URL
   useEffect(() => {
     const p = location.pathname;
-    if (p === '/dashboard')               setActiveView('home');
-    else if (p.startsWith('/notes'))      setActiveView('notes');
-    else if (p === '/tasks')              setActiveView('tasks');
-    else if (p.startsWith('/quiz'))       setActiveView('quiz');
-    else if (p === '/pomodoro')           setActiveView('pomodoro');
-    else if (p === '/flashcards')         setActiveView('flashcards');
-    else if (p === '/second-brain')       setActiveView('second-brain');
-    else if (p.startsWith('/files'))      setActiveView('files');
-    else if (p.startsWith('/mindmap'))    setActiveView('mindmap');
-    else if (p === '/admin')              setActiveView('admin');
+    if (p === '/dashboard') setActiveView('home');
+    else if (p.startsWith('/notes')) setActiveView('notes');
+    else if (p === '/tasks') setActiveView('tasks');
+    else if (p.startsWith('/quiz')) setActiveView('quiz');
+    else if (p === '/pomodoro') setActiveView('pomodoro');
+    else if (p === '/flashcards') setActiveView('flashcards');
+    else if (p === '/second-brain') setActiveView('second-brain');
+    else if (p.startsWith('/files')) setActiveView('files');
+    else if (p.startsWith('/mindmap')) setActiveView('mindmap');
+    else if (p === '/admin') setActiveView('admin');
   }, [location.pathname]);
 
-  // FIX: arrow function was missing `>` — was `() = {`, now `() => {`
+  // Save completed pomodoro sessions to backend
   useEffect(() => {
     const unsubscribe = pomodoroTimer.subscribe(async (snapshot) => {
       if (snapshot.completionVersion <= lastSavedCompletionVersionRef.current) return;
@@ -143,7 +143,7 @@ const AppLayout = () => {
     return unsubscribe;
   }, []);
 
-  // Show a spinner while auth initialises
+  // Show spinner while auth initialises
   if (isLoading) return (
     <div style={{
       display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -168,6 +168,7 @@ const AppLayout = () => {
         <Rail activeView={activeView} setActiveView={setActiveView} />
       )}
 
+      {/* Workspace folder panel */}
       {showWorkspacePanel && (
         <FolderPanel
           selectedFolder={selectedWorkspaceFolder}
@@ -196,39 +197,37 @@ const AppLayout = () => {
         <Suspense fallback={<PageLoader />}>
           <Routes>
             {/* Member 1 - Auth */}
-            <Route path="/"                  element={<LandingPage />} />
-            <Route path="/login"             element={<SignInPage />} />
-            <Route path="/signup"            element={<SignUpPage />} />
-            <Route path="/verify-email"      element={<VerificationPage />} />
-            <Route path="/forgot-password"   element={<ForgotPassword />} />
-            <Route path="/reset-password"    element={<ResetPassword />} />
-            <Route path="/change-password"   element={<ChangePassword />} />
-            <Route path="/account-verified"  element={<AccountVerification />} />
-            <Route path="/oauth/callback"    element={<OAuthCallback />} />
-            <Route path="/admin"             element={<AdminDashboard />} />
-
-            {/* Shared Dashboard */}
-            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/" element={<LandingPage />} />
+            <Route path="/login" element={<SignInPage />} />
+            <Route path="/signup" element={<SignUpPage />} />
+            <Route path="/verify-email" element={<VerificationPage />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
+            <Route path="/change-password" element={<ChangePassword />} />
+            <Route path="/account-verified" element={<AccountVerification />} />
+            <Route path="/oauth/callback" element={<OAuthCallback />} />
+            <Route path="/admin" element={<AdminDashboard />} />
 
             {/* Member 2 - File Manager */}
+            <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/files" element={
               <FileManagerPage activeView={activeView} setActiveView={setActiveView} />
             } />
 
             {/* Member 3 - Structured Notes */}
-            <Route path="/notes"                element={<M3Dashboard />} />
-            <Route path="/files/create-note"    element={<ManualNoteEditor />} />
-            <Route path="/notes/create"         element={<Navigate to="/files/create-note" replace />} />
+            <Route path="/notes" element={<M3Dashboard />} />
+            <Route path="/files/create-note" element={<ManualNoteEditor />} />
+            <Route path="/notes/create" element={<Navigate to="/files/create-note" replace />} />
             <Route path="/notes/editor/:noteId" element={<NoteEditor />} />
 
             {/* Member 4 - Quiz */}
-            <Route path="/quiz"         element={<QuizPage userId={user?.id ?? null} noteId={null} />} />
+            <Route path="/quiz" element={<QuizPage userId={user?.id ?? null} noteId={null} onStepChange={setQuizStep} />} />
             <Route path="/quiz/history" element={<QuizHistory onBack={() => navigate(-1)} />} />
 
             {/* Member 5 - Tasks + shared modules */}
-            <Route path="/tasks"        element={<TaskDashboard />} />
-            <Route path="/pomodoro"     element={<PomodoroPage />} />
-            <Route path="/flashcards"   element={<FlashcardsPage />} />
+            <Route path="/tasks" element={<TaskDashboard />} />
+            <Route path="/pomodoro" element={<PomodoroPage />} />
+            <Route path="/flashcards" element={<FlashcardsPage />} />
             <Route path="/second-brain" element={<SecondBrainPage />} />
             <Route path="/mindmap"      element={<MindMapPage />} />
 
@@ -244,14 +243,12 @@ const AppLayout = () => {
   );
 };
 
-function App() {
-  return (
-    <ThemeProvider>
-      <Router>
-        <AppLayout />
-      </Router>
-    </ThemeProvider>
-  );
-}
+const App = () => (
+  <ThemeProvider>
+    <Router>
+      <AppLayout />
+    </Router>
+  </ThemeProvider>
+);
 
 export default App;

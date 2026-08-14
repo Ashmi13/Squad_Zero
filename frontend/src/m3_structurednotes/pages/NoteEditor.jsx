@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import { marked } from 'marked'
+import katex from 'katex'
+import 'katex/dist/katex.min.css'
 import RefineModal from '../components/RefineModal'
 
 const API_BASE = 'http://127.0.0.1:8000/api/m3'
@@ -164,6 +166,7 @@ export default function NoteEditor() {
           headerIds: false,
           mangle: false
         })
+        html = renderLatex(html)  // KaTeX math rendering
         console.log('[Load] Content converted from markdown')
       } catch (err) {
         console.error('[Load] marked() failed:', err)
@@ -453,6 +456,7 @@ export default function NoteEditor() {
     let html = ''
     try {
       html = marked(content, { breaks: true })
+      html = renderLatex(html)
     } catch {
       html = content.replace(/\n/g, '<br>')
     }
@@ -514,6 +518,7 @@ export default function NoteEditor() {
     let html = ''
     try {
       html = marked(content, { breaks: true })
+      html = renderLatex(html)
     } catch {
       html = content.replace(/\n/g, '<br>')
     }
@@ -830,6 +835,59 @@ export default function NoteEditor() {
     showToast(`↗ Jumped to page ${pageNum}`)
   }
 
+  // ── LaTeX rendering ──────────────────────────────────────────────
+  const renderLatex = (html) => {
+    if (!html || !html.includes('$')) return html
+
+    // 1. Protect code blocks so $ inside them isn't touched
+    const codeBlocks = []
+    let protectedHtml = html.replace(
+      /<(pre|code)[^>]*>[\s\S]*?<\/\1>/gi,
+      (match) => {
+        codeBlocks.push(match)
+        return `%%CODEBLOCK_${codeBlocks.length - 1}%%`
+      }
+    )
+
+    // 2. Render display math $$...$$
+    protectedHtml = protectedHtml.replace(
+      /\$\$([\s\S]*?)\$\$/g,
+      (_, formula) => {
+        try {
+          return katex.renderToString(formula.trim(), {
+            displayMode: true,
+            throwOnError: false,
+          })
+        } catch {
+          return `$$${formula}$$`
+        }
+      }
+    )
+
+    // 3. Render inline math $...$ (won't match $$ because those are gone)
+    protectedHtml = protectedHtml.replace(
+      /\$([^$]+?)\$/g,
+      (_, formula) => {
+        try {
+          return katex.renderToString(formula.trim(), {
+            displayMode: false,
+            throwOnError: false,
+          })
+        } catch {
+          return `$${formula}$`
+        }
+      }
+    )
+
+    // 4. Restore code blocks
+    protectedHtml = protectedHtml.replace(
+      /%%CODEBLOCK_(\d+)%%/g,
+      (_, i) => codeBlocks[parseInt(i)]
+    )
+
+    return protectedHtml
+  }
+
   const downloadMd = () => {
     const editor = editorRef.current
 
@@ -891,7 +949,9 @@ export default function NoteEditor() {
       )
     })
 
-    const bodyHtml = clone.innerHTML
+    // Render any raw LaTeX before printing — this ensures formulas
+    // like $m_k = \frac{1}{n}$ become KaTeX-rendered HTML
+    const bodyHtml = renderLatex(clone.innerHTML)
 
     if (!bodyHtml || bodyHtml.trim().length < 20) {
       showToast('Generate a note first')
@@ -903,6 +963,7 @@ export default function NoteEditor() {
 <head>
 <meta charset="UTF-8">
 <title>${noteTitle || 'Study Notes'}</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" crossorigin="anonymous">
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {

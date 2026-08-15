@@ -12,6 +12,7 @@ export const useAuth = () => {
         const token = getAccessToken();
         if (token) {
           const decoded = decodeToken(token);
+
           if (decoded) {
             const currentTime = Date.now() / 1000;
             if (decoded.exp && decoded.exp > currentTime) {
@@ -19,7 +20,6 @@ export const useAuth = () => {
                 id: decoded.sub,
                 email: decoded.email,
                 fullName: decoded.full_name,
-                role: decoded.role || 'user',
               });
               setIsAuthenticated(true);
             } else {

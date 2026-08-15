@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useForm } from 'react-hook-form';
+import { useNavigate } from 'react-router-dom';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Mail, Lock, AlertCircle, CheckCircle } from 'lucide-react';
 import { z } from 'zod';
@@ -30,6 +31,7 @@ const loginSchema = z.object({
  * - Security best practices
  */
 export const LoginCard = () => {
+  const navigate = useNavigate();
   // Form state management with React Hook Form + Zod validation
   const {
     register,
@@ -64,7 +66,9 @@ export const LoginCard = () => {
 
       // Store JWT tokens securely
       setTokens(response.data.access_token, response.data.refresh_token);
+      // Persist user record and notify UI listeners so profile appears immediately
       localStorage.setItem('user', JSON.stringify(response.data.user));
+      window.dispatchEvent(new Event('user-profile-updated'));
 
       // Success state
       setIsSuccess(true);
@@ -75,10 +79,24 @@ export const LoginCard = () => {
       }, 1000);
     } catch (error) {
       // Error handling
-      setIsError(true);
+      const backendMessage =
+        error.response?.data?.message ||
+        error.response?.data?.detail ||
+        error.response?.data?.error;
 
-      if (error.response?.data?.detail) {
-        setErrorMessage(error.response.data.detail);
+      if (error.response?.status === 403) {
+        navigate('/suspended', {
+          state: {
+            fromSuspension: true,
+            message: backendMessage || 'Your account has been suspended by the admin.',
+          },
+        });
+        return;
+      }
+
+      setIsError(true);
+      if (backendMessage) {
+        setErrorMessage(backendMessage);
       } else {
         setErrorMessage('Invalid email or password. Please try again.');
       }
@@ -93,7 +111,7 @@ export const LoginCard = () => {
    * Handle forgot password
    */
   const handleForgotPassword = () => {
-    window.location.href = '/forgot-password';
+    navigate('/forgot-password');
   };
 
   /**

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useForm } from 'react-hook-form';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Mail, Lock, AlertCircle, CheckCircle } from 'lucide-react';
 import { z } from 'zod';
@@ -17,6 +17,7 @@ const loginSchema = z.object({
 });
 
 export function LoginForm() {
+  const navigate = useNavigate();
   const {
     register,
     handleSubmit,
@@ -24,6 +25,11 @@ export function LoginForm() {
   } = useForm({
     resolver: zodResolver(loginSchema),
     mode: 'onBlur',
+    // Pre-filling test credentials as per sprint planning
+    defaultValues: {
+      email: '',
+      password: ''
+    }
   });
 
   const [isLoading, setIsLoading] = useState(false);
@@ -45,6 +51,7 @@ export function LoginForm() {
     setIsSuccess(false);
 
     try {
+      // Standard API Call
       const response = await axiosInstance.post(config.endpoints.login, {
         email: data.email,
         password: data.password,
@@ -58,9 +65,19 @@ export function LoginForm() {
         window.location.href = '/dashboard';
       }, 1000);
     } catch (error) {
+      if (error.response?.status === 403) {
+        const backendMessage =
+          error.response?.data?.message ||
+          error.response?.data?.detail ||
+          'Your account has been suspended by the admin.';
+        navigate('/suspended', { state: { fromSuspension: true, message: backendMessage } });
+        return;
+      }
       setIsError(true);
       setErrorMessage(
-        error.response?.data?.detail || 'Invalid email or password. Please try again.'
+        error.response?.data?.detail ||
+          error.response?.data?.message ||
+          'Invalid email or password. Please try again.'
       );
     } finally {
       setIsLoading(false);
@@ -70,6 +87,13 @@ export function LoginForm() {
   return (
     <div>
       <h2 className="font-display text-3xl text-slate-900 mb-2">Welcome Back</h2>
+      <p className="text-slate-500 mb-4">Sign in to your account</p>
+      
+      {/* Admin / Test Credentials Notice */}
+      <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg flex items-center gap-3">
+        <AlertCircle className="text-blue-600" size={20} />
+        <p className="text-blue-800 text-sm"></p>
+      </div>
       <p className="text-slate-500 mb-8">Sign in to your account</p>
 
       {isSuccess && (
@@ -111,9 +135,14 @@ export function LoginForm() {
             <input type="checkbox" className="h-4 w-4 rounded border-slate-300" />
             Remember me
           </label>
-          <Link to="/forgot-password" title="Forgot Password" className="text-indigo-600 hover:text-indigo-700">
+          <button
+            type="button"
+            onClick={() => navigate('/forgot-password')}
+            title="Forgot Password"
+            className="text-indigo-600 hover:text-indigo-700"
+          >
             Forgot Password
-          </Link>
+          </button>
         </div>
 
         <Button

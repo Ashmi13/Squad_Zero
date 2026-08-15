@@ -1,8 +1,12 @@
 import React, { useState, useEffect, useRef, Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { ThemeProvider } from '@/context/ThemeContext';
+import { useAuth } from '@/hooks/useAuth.jsx';
 
-// ===== MEMBER 1 (Nihaaj) - Auth =====
+// Always loaded — needed on every page
+import Rail from '@/components/filemanager/Rail';
+
+// MEMBER 1 (Nihaaj) - Auth
 import LandingPage from '@/pages/LandingPage';
 import SignInPage from '@/pages/SignInPage';
 import SignUpPage from '@/pages/SignUpPage';
@@ -14,36 +18,53 @@ import AccountVerification from '@/pages/AccountVerification';
 import OAuthCallback from '@/pages/OAuthCallback';
 import AdminDashboard from '@/pages/AdminDashboard';
 
-// ===== MEMBER 2 (Ashmitha) - File Manager =====
+// MEMBER 2 (Ashmitha) - File Manager
 import FileManagerPage from '@/pages/FileManagerPage';
-import Rail from '@/components/filemanager/Rail';
 import FolderPanel from '@/components/filemanager/FolderPanel';
 
-// ===== SHARED DASHBOARD =====
+// SHARED DASHBOARD
 import Dashboard from '@/pages/Dashboard';
 
-// ===== MEMBER 3 (Sandavi) - Structured Notes =====
-import M3Dashboard from './m3_structurednotes/pages/Dashboard';
-import NoteEditor from './m3_structurednotes/pages/NoteEditor';
-import ManualNoteEditor from './m3_structurednotes/pages/ManualNoteEditor';
+// MEMBER 3 (Sandavi) - Structured Notes - LAZY LOADED
+const M3Dashboard = lazy(() => import('./m3_structurednotes/pages/Dashboard'));
+const NoteEditor = lazy(() => import('./m3_structurednotes/pages/NoteEditor'));
+const ManualNoteEditor = lazy(() => import('./m3_structurednotes/pages/ManualNoteEditor'));
 
-// ===== MEMBER 4 - Quiz =====
-import QuizPage from '@/components/quiz/QuizPage';
-import QuizHistory from '@/components/quiz/QuizHistory';
+// MEMBER 4 - Quiz - LAZY LOADED
+const QuizPage = lazy(() => import('@/components/quiz/QuizPage'));
+const QuizHistory = lazy(() => import('@/components/quiz/QuizHistory'));
 
-// ===== MEMBER 5 - Tasks =====
-import TaskDashboard from '@/components/tasks/TaskDashboard';
-import PomodoroPage from '@/pages/PomodoroPage';
-import SecondBrainPage from '@/pages/SecondBrainPage';
-import FlashcardsPage from '@/pages/FlashcardsPage';
+// MEMBER 5 - Tasks - LAZY LOADED
+const TaskDashboard = lazy(() => import('@/components/tasks/TaskDashboard'));
+const PomodoroPage = lazy(() => import('@/pages/PomodoroPage'));
+const SecondBrainPage = lazy(() => import('@/pages/SecondBrainPage'));
+const FlashcardsPage = lazy(() => import('@/pages/FlashcardsPage'));
 
-// ===== DEV NAVIGATION (auto-hidden in production) =====
+// DEV NAVIGATION
 import DevNav from '@/components/DevNav';
 import { pomodoroTimer } from '@/utils/pomodoroTimer';
 import { workspaceApi } from '@/services/workspaceApi';
+import { getScopedStorageKey, useSupabaseUser } from '@/hooks/useSupabaseUser';
 import './index.css';
 
 const ACTIVE_WORKSPACE_FOLDER_KEY = 'neuranote_active_workspace_folder';
+
+// Spinner shown while a lazy chunk is loading
+const PageLoader = () => (
+  <div style={{
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    height: '100%', background: '#fafafa',
+  }}>
+    <div style={{
+      width: 32, height: 32,
+      border: '3px solid #e5e7eb',
+      borderTop: '3px solid #9333ea',
+      borderRadius: '50%',
+      animation: 'spin 0.7s linear infinite',
+    }} />
+    <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+  </div>
+);
 
 // Pages that should NOT show the Rail
 const noRailPages = ['/', '/login', '/signup', '/oauth/callback'];
@@ -51,44 +72,55 @@ const noRailPages = ['/', '/login', '/signup', '/oauth/callback'];
 const AppLayout = () => {
   const location = useLocation();
   const navigate = useNavigate();
+  const { userScope, loading: userLoading } = useSupabaseUser();
   const [activeView, setActiveView] = useState('home');
-  const [selectedWorkspaceFolder, setSelectedWorkspaceFolder] = useState(() => {
-    try {
-      const savedFolder = localStorage.getItem(ACTIVE_WORKSPACE_FOLDER_KEY);
-      return savedFolder ? JSON.parse(savedFolder) : null;
-    } catch {
-      return null;
-    }
-  });
+  const [selectedWorkspaceFolder, setSelectedWorkspaceFolder] = useState(null);
   const lastSavedCompletionVersionRef = useRef(0);
+
   const showRail = !noRailPages.includes(location.pathname);
   const showWorkspacePanel = showRail &&
     location.pathname !== '/dashboard' &&
     location.pathname !== '/files' &&
-    location.pathname !== '/files/create-note';
+    location.pathname !== '/files/create-note' &&
+    !(location.pathname.startsWith('/quiz') && quizStep !== 'upload');
+
+  // Persist selected workspace folder
+  useEffect(() => {
+    if (userLoading) return;
+
+    try {
+      const savedFolder = localStorage.getItem(getScopedStorageKey(ACTIVE_WORKSPACE_FOLDER_KEY, userScope));
+      setSelectedWorkspaceFolder(savedFolder ? JSON.parse(savedFolder) : null);
+    } catch {
+      setSelectedWorkspaceFolder(null);
+    }
+  }, [userLoading, userScope]);
 
   useEffect(() => {
+    if (userLoading) return;
+
     if (selectedWorkspaceFolder) {
-      localStorage.setItem(ACTIVE_WORKSPACE_FOLDER_KEY, JSON.stringify(selectedWorkspaceFolder));
+      localStorage.setItem(getScopedStorageKey(ACTIVE_WORKSPACE_FOLDER_KEY, userScope), JSON.stringify(selectedWorkspaceFolder));
       return;
     }
-    localStorage.removeItem(ACTIVE_WORKSPACE_FOLDER_KEY);
-  }, [selectedWorkspaceFolder]);
+    localStorage.removeItem(getScopedStorageKey(ACTIVE_WORKSPACE_FOLDER_KEY, userScope));
+  }, [selectedWorkspaceFolder, userLoading, userScope]);
 
   // Sync activeView with current URL
   useEffect(() => {
     const p = location.pathname;
-    if (p === '/dashboard')               setActiveView('home');
-    else if (p.startsWith('/notes'))      setActiveView('notes');
-    else if (p === '/tasks')              setActiveView('tasks');
-    else if (p.startsWith('/quiz'))       setActiveView('quiz');
-    else if (p === '/pomodoro')           setActiveView('pomodoro');
-    else if (p === '/flashcards')         setActiveView('flashcards');
-    else if (p === '/second-brain')       setActiveView('second-brain');
-    else if (p.startsWith('/files'))      setActiveView('files');
-    else if (p === '/admin')              setActiveView('admin');
+    if (p === '/dashboard') setActiveView('home');
+    else if (p.startsWith('/notes')) setActiveView('notes');
+    else if (p === '/tasks') setActiveView('tasks');
+    else if (p.startsWith('/quiz')) setActiveView('quiz');
+    else if (p === '/pomodoro') setActiveView('pomodoro');
+    else if (p === '/flashcards') setActiveView('flashcards');
+    else if (p === '/second-brain') setActiveView('second-brain');
+    else if (p.startsWith('/files')) setActiveView('files');
+    else if (p === '/admin') setActiveView('admin');
   }, [location.pathname]);
 
+  // Save completed pomodoro sessions to backend
   useEffect(() => {
     const unsubscribe = pomodoroTimer.subscribe(async (snapshot) => {
       if (snapshot.completionVersion <= lastSavedCompletionVersionRef.current) return;
@@ -114,6 +146,23 @@ const AppLayout = () => {
     return unsubscribe;
   }, []);
 
+  // Show spinner while auth initialises
+  if (isLoading) return (
+    <div style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      height: '100vh', background: '#fafafa',
+    }}>
+      <div style={{
+        width: 36, height: 36,
+        border: '3px solid #e5e7eb',
+        borderTop: '3px solid #9333ea',
+        borderRadius: '50%',
+        animation: 'spin 0.7s linear infinite',
+      }} />
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
+
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
 
@@ -122,6 +171,7 @@ const AppLayout = () => {
         <Rail activeView={activeView} setActiveView={setActiveView} />
       )}
 
+      {/* Workspace folder panel */}
       {showWorkspacePanel && (
         <FolderPanel
           selectedFolder={selectedWorkspaceFolder}
@@ -145,44 +195,48 @@ const AppLayout = () => {
         />
       )}
 
-      {/* Page content */}
-      <div style={{ flex: 1, overflow: 'hidden' }}>
-        <Routes>
-          {/* Member 1 - Auth */}
-          <Route path="/"                 element={<LandingPage />} />
-          <Route path="/login"            element={<SignInPage />} />
-          <Route path="/signup"           element={<SignUpPage />} />
-          <Route path="/verify-email"     element={<VerificationPage />} />
-          <Route path="/forgot-password"  element={<ForgotPassword />} />
-          <Route path="/reset-password"   element={<ResetPassword />} />
-          <Route path="/change-password"  element={<ChangePassword />} />
-          <Route path="/account-verified" element={<AccountVerification />} />
-          <Route path="/oauth/callback"   element={<OAuthCallback />} />
-          <Route path="/admin"            element={<AdminDashboard />} />
+      {/* Page content — scrollable */}
+      <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
+        <Suspense fallback={<PageLoader />}>
+          <Routes>
+            {/* Member 1 - Auth */}
+            <Route path="/" element={<LandingPage />} />
+            <Route path="/login" element={<SignInPage />} />
+            <Route path="/signup" element={<SignUpPage />} />
+            <Route path="/verify-email" element={<VerificationPage />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
+            <Route path="/change-password" element={<ChangePassword />} />
+            <Route path="/account-verified" element={<AccountVerification />} />
+            <Route path="/oauth/callback" element={<OAuthCallback />} />
+            <Route path="/admin" element={<AdminDashboard />} />
 
-          {/* Member 2 - File Manager */}
-          <Route path="/dashboard" element={<FileManagerPage activeView="home" setActiveView={setActiveView} />} />
-          <Route path="/files"     element={<FileManagerPage activeView="files" setActiveView={setActiveView} />} />
+            {/* Member 2 - File Manager */}
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/files" element={
+              <FileManagerPage activeView={activeView} setActiveView={setActiveView} />
+            } />
 
-          {/* Member 3 - Structured Notes */}
-          <Route path="/notes"                element={<M3Dashboard />} />
-          <Route path="/files/create-note"    element={<ManualNoteEditor />} />
-          <Route path="/notes/create"         element={<Navigate to="/files/create-note" replace />} />
-          <Route path="/notes/editor/:noteId" element={<NoteEditor />} />
+            {/* Member 3 - Structured Notes */}
+            <Route path="/notes" element={<M3Dashboard />} />
+            <Route path="/files/create-note" element={<ManualNoteEditor />} />
+            <Route path="/notes/create" element={<Navigate to="/files/create-note" replace />} />
+            <Route path="/notes/editor/:noteId" element={<NoteEditor />} />
 
-          {/* Member 4 - Quiz */}
-          <Route path="/quiz"         element={<QuizPage />} />
-          <Route path="/quiz/history" element={<QuizHistory />} />
+            {/* Member 4 - Quiz */}
+            <Route path="/quiz" element={<QuizPage userId={user?.id ?? null} noteId={null} onStepChange={setQuizStep} />} />
+            <Route path="/quiz/history" element={<QuizHistory onBack={() => navigate(-1)} />} />
 
-          {/* Member 5 - Tasks + shared modules */}
-          <Route path="/tasks"        element={<TaskDashboard />} />
-          <Route path="/pomodoro"     element={<PomodoroPage />} />
-          <Route path="/flashcards"   element={<FlashcardsPage />} />
-          <Route path="/second-brain" element={<SecondBrainPage />} />
+            {/* Member 5 - Tasks + shared modules */}
+            <Route path="/tasks" element={<TaskDashboard />} />
+            <Route path="/pomodoro" element={<PomodoroPage />} />
+            <Route path="/flashcards" element={<FlashcardsPage />} />
+            <Route path="/second-brain" element={<SecondBrainPage />} />
 
-          {/* Fallback */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+            {/* Fallback */}
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
       </div>
 
       {/* Dev panel — floats on every page */}
@@ -191,14 +245,12 @@ const AppLayout = () => {
   );
 };
 
-function App() {
-  return (
-    <ThemeProvider>
-      <Router>
-        <AppLayout />
-      </Router>
-    </ThemeProvider>
-  );
-}
+const App = () => (
+  <ThemeProvider>
+    <Router>
+      <AppLayout />
+    </Router>
+  </ThemeProvider>
+);
 
 export default App;

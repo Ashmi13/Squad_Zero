@@ -23,7 +23,7 @@ except ImportError:
 router = APIRouter(prefix="/api/quizzes", tags=["quizzes"])
 
 _VALID_DIFFICULTIES   = {"easy", "medium", "hard"}
-_VALID_QUESTION_TYPES = {"mcq", "short_answer", "mixed"}
+_VALID_QUESTION_TYPES = {"mcq", "short_answer", "long_answer", "mixed"}
 _VALID_CONTENT_FOCUS  = {"theoretical", "practical", "both"}
 
 
@@ -74,7 +74,7 @@ async def generate_quiz(
     db: Session = Depends(get_db),
     user_id: int = Depends(get_current_user),  # from verified JWT — not form data
 ):
-    """Generate a new quiz from uploaded files or source content (max 10/min per IP)"""
+    """Generate a new quiz from uploaded files or source content"""
     # Rate limit if slowapi is available
     if _RATE_LIMITING:
         try:
@@ -132,7 +132,7 @@ async def download_results_pdf(
     db: Session = Depends(get_db),
     user_id: int = Depends(get_current_user),
 ):
-    """Generate and download quiz results as PDF (caller must own the attempt)"""
+    """Generate and download quiz results as PDF"""
     attempt = db.query(QuizAttempt).filter(
         QuizAttempt.attempt_id == attempt_id,
         QuizAttempt.user_id == user_id,  # ownership check

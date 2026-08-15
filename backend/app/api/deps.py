@@ -1,14 +1,18 @@
 """Dependency injection for authentication and authorization"""
 from typing import Optional, Dict, Any
-from fastapi import Cookie, Depends, HTTPException, Request
+from fastapi import Depends, HTTPException, Request, Response
 from app.core.config import settings
 from app.db.supabase import get_supabase
 from supabase import Client
 import jwt
+from app.core.security import clear_session_cookie
+from middleware.error_handler import SuspendedAccountError
 
 
 async def get_current_user(
     request: Request,
+    response: Response,
+    supabase_manager = Depends(get_supabase),
 ) -> Dict[str, Any]:
     """Dependency to get current user from session cookie or Authorization header
 
@@ -38,6 +42,19 @@ async def get_current_user(
     # First try our own secret key (tokens we created)
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
+        user_id = payload.get("sub")
+        if user_id:
+            profile_response = (
+                supabase_manager.service_client.table("users")
+                .select("id,is_suspended")
+                .eq("id", user_id)
+                .single()
+                .execute()
+            )
+            profile = profile_response.data or {}
+            if bool(profile.get("is_suspended", False)):
+                clear_session_cookie(response)
+                raise SuspendedAccountError()
         return payload
     except jwt.InvalidTokenError:
         pass
@@ -52,6 +69,17 @@ async def get_current_user(
         )
         if not payload.get("sub"):
             raise HTTPException(status_code=401, detail="Invalid token: missing sub")
+        profile_response = (
+            supabase_manager.service_client.table("users")
+            .select("id,is_suspended")
+            .eq("id", payload["sub"])
+            .single()
+            .execute()
+        )
+        profile = profile_response.data or {}
+        if bool(profile.get("is_suspended", False)):
+            clear_session_cookie(response)
+            raise SuspendedAccountError()
         return payload
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid or expired token")

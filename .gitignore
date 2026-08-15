@@ -18,6 +18,8 @@ backend/seed_*.py
 backend/dump.sql
 
 __pycache__/
+*.pyc
+__pycache__/
 *.py[cod]
 *.pyc
 *.pyo
@@ -124,4 +126,3 @@ __pycache__/
 
 # History files
 .history/
-backend/model_cache/

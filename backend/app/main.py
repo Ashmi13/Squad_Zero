@@ -68,6 +68,7 @@ app.add_middleware(
         "Accept",
         "Origin",
         "User-Agent",
+        "X-Guest-Session-ID",
     ],
     expose_headers=["Content-Disposition"],  # needed for PDF downloads
     max_age=600,                             # cache preflight for 10 minutes
@@ -94,10 +95,13 @@ try:
         validation_exception_handler,
         database_exception_handler,
         general_exception_handler,
+        suspended_account_exception_handler,
+        SuspendedAccountError,
     )
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
     app.add_exception_handler(SQLAlchemyError, database_exception_handler)
     app.add_exception_handler(Exception, general_exception_handler)
+    app.add_exception_handler(SuspendedAccountError, suspended_account_exception_handler)
 except Exception as e:
     print(f"[WARN] Custom error handlers skipped: {e}")
 
@@ -175,7 +179,7 @@ async def startup_event():
     # Warm up the column-detection cache so the first real request doesn't pay
     # the cost of 18 individual Supabase probes.
     try:
-        from app.db.supabase import get_supabase_client as _get_supabase
+        from app.db.supabase import get_supabase as _get_supabase
         from app.services.workspace_service import WorkspaceService
         _sb = _get_supabase()
         _svc = WorkspaceService(_sb)

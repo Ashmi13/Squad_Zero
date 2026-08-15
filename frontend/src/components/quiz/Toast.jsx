@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { X, AlertCircle, CheckCircle, Info } from 'lucide-react';
-import './Toast.css';
+import './styles/Toast.css';
 
 const Toast = ({ message, type = 'error', onClose, duration = 5000 }) => {
   const [closing, setClosing] = useState(false);

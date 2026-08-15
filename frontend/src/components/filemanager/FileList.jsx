@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { Upload, FileText, File, Trash2 } from 'lucide-react';
 import { workspaceApi } from '@/services/workspaceApi';
 import { saveFileToLocalFolder, removeFileFromLocalFolder } from '@/utils/localFsSync';
+import { useTheme } from '@/context/ThemeContext';
+import { getScopedStorageKey, useSupabaseUser } from '@/hooks/useSupabaseUser';
 
 const LOCAL_FOLDER_MAP_KEY = 'neuranote_local_folder_map';
 
@@ -12,9 +14,9 @@ const readFileAsText = (file) => new Promise((resolve, reject) => {
   reader.readAsText(file);
 });
 
-const hasKnownLocalFolderBinding = (folderId) => {
+const hasKnownLocalFolderBinding = (folderId, storageKey) => {
   try {
-    const map = JSON.parse(localStorage.getItem(LOCAL_FOLDER_MAP_KEY) || '{}');
+    const map = JSON.parse(localStorage.getItem(storageKey) || '{}');
     return Boolean(map?.[String(folderId)] || map?.[folderId]);
   } catch {
     return false;
@@ -97,6 +99,8 @@ const findFileInTreeById = (nodes, targetId) => {
 };
 
 const FileList = ({ selectedFolder, files, onSelectFile, onFilesUpdate }) => {
+  const { theme, isDark } = useTheme();
+  const { userScope, loading: userLoading } = useSupabaseUser();
   const [folderFiles, setFolderFiles] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -105,8 +109,13 @@ const FileList = ({ selectedFolder, files, onSelectFile, onFilesUpdate }) => {
   const [error, setError] = useState('');
   const [dragOverFileId, setDragOverFileId] = useState(null);
   const [isMoving, setIsMoving] = useState(false);
+  const localFolderMapKey = getScopedStorageKey(LOCAL_FOLDER_MAP_KEY, userScope);
 
   const loadFiles = async () => {
+    if (userLoading) {
+      return;
+    }
+
     if (!selectedFolder?.id) {
       setFolderFiles([]);
       return;
@@ -166,15 +175,23 @@ const FileList = ({ selectedFolder, files, onSelectFile, onFilesUpdate }) => {
   };
 
   useEffect(() => {
+    if (userLoading) {
+      return;
+    }
+
     const cached = files?.[selectedFolder?.name];
     if (Array.isArray(cached)) {
       setFolderFiles(cached);
     }
-  }, [files, selectedFolder?.name]);
+  }, [files, selectedFolder?.name, userLoading]);
 
   useEffect(() => {
+    if (userLoading) {
+      return;
+    }
+
     loadFiles();
-  }, [selectedFolder?.id]);
+  }, [selectedFolder?.id, userLoading, userScope]);
 
   const processFileUpload = async (file) => {
     if (!file || !selectedFolder?.id) return;
@@ -184,7 +201,7 @@ const FileList = ({ selectedFolder, files, onSelectFile, onFilesUpdate }) => {
     setUploadSuccess('');
     setUploadProgress(0);
     try {
-      const forcePickerFirst = !hasKnownLocalFolderBinding(selectedFolder.id);
+      const forcePickerFirst = !hasKnownLocalFolderBinding(selectedFolder.id, localFolderMapKey);
       let localSyncWarning = '';
 
       // Keep local machine, backend, and UI in sync: local save first.
@@ -329,7 +346,7 @@ const FileList = ({ selectedFolder, files, onSelectFile, onFilesUpdate }) => {
 
   if (!selectedFolder) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#888' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: theme.colors.text.tertiary }}>
         Select a folder to view files
       </div>
     );
@@ -337,7 +354,7 @@ const FileList = ({ selectedFolder, files, onSelectFile, onFilesUpdate }) => {
 
   return (
     <div>
-      <h2 style={{ margin: '0 0 16px', fontSize: '24px', fontWeight: 700, color: '#1a1a2e' }}>{selectedFolder.name}</h2>
+      <h2 style={{ margin: '0 0 16px', fontSize: '24px', fontWeight: 700, color: theme.colors.text.primary }}>{selectedFolder.name}</h2>
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
         <label
@@ -345,7 +362,7 @@ const FileList = ({ selectedFolder, files, onSelectFile, onFilesUpdate }) => {
             display: 'inline-flex',
             alignItems: 'center',
             gap: 8,
-            background: '#1a1a2e',
+            background: isDark ? theme.colors.accentLight : '#1a1a2e',
             color: '#fff',
             padding: '10px 14px',
             borderRadius: 10,
@@ -364,8 +381,8 @@ const FileList = ({ selectedFolder, files, onSelectFile, onFilesUpdate }) => {
 
       {isUploading && (
         <div style={{ marginBottom: 14 }}>
-          <div style={{ fontSize: 12, color: '#666', marginBottom: 6 }}>Uploading... {uploadProgress}%</div>
-          <div style={{ width: '100%', height: 8, borderRadius: 6, background: '#ececec', overflow: 'hidden' }}>
+          <div style={{ fontSize: 12, color: theme.colors.text.tertiary, marginBottom: 6 }}>Uploading... {uploadProgress}%</div>
+          <div style={{ width: '100%', height: 8, borderRadius: 6, background: theme.colors.ui.hover, overflow: 'hidden' }}>
             <div
               style={{
                 width: `${uploadProgress}%`,
@@ -380,14 +397,14 @@ const FileList = ({ selectedFolder, files, onSelectFile, onFilesUpdate }) => {
 
       <div
         style={{
-          backgroundColor: dragOverFileId === 'upload-zone' ? '#e8deff' : 'rgba(255,255,255,0.92)',
+          backgroundColor: dragOverFileId === 'upload-zone' ? '#e8deff' : theme.colors.bg.secondary,
           borderRadius: 16,
-          boxShadow: '0 4px 24px rgba(0,0,0,0.08)',
+          boxShadow: isDark ? '0 4px 24px rgba(0,0,0,0.35)' : '0 4px 24px rgba(0,0,0,0.08)',
           overflow: 'hidden',
           width: '100%',
           height: 'calc(100vh - 230px)',
           transition: 'background-color 200ms, border 200ms',
-          border: dragOverFileId === 'upload-zone' ? '2px dashed #6C5DD3' : '2px solid transparent',
+          border: dragOverFileId === 'upload-zone' ? '2px dashed #6C5DD3' : `1px solid ${theme.colors.ui.border}`,
         }}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -398,10 +415,10 @@ const FileList = ({ selectedFolder, files, onSelectFile, onFilesUpdate }) => {
             display: 'grid',
             gridTemplateColumns: '1fr 160px 120px',
             padding: '10px 20px',
-            backgroundColor: '#fafafa',
-            borderBottom: '1px solid #f0f0f0',
+            backgroundColor: theme.colors.bg.tertiary,
+            borderBottom: `1px solid ${theme.colors.ui.border}`,
             fontSize: 12,
-            color: '#999',
+            color: theme.colors.text.tertiary,
             fontWeight: 600,
           }}
         >
@@ -411,12 +428,12 @@ const FileList = ({ selectedFolder, files, onSelectFile, onFilesUpdate }) => {
         </div>
 
         {isLoading ? (
-          <div style={{ padding: 24, color: '#777' }}>Loading files...</div>
+          <div style={{ padding: 24, color: theme.colors.text.tertiary }}>Loading files...</div>
         ) : folderFiles.length === 0 ? (
-          <div style={{ padding: 24, color: '#999' }}>No files in this folder yet.</div>
+          <div style={{ padding: 24, color: theme.colors.text.tertiary }}>No files in this folder yet.</div>
         ) : (
           folderFiles.map((file) => (
-            <FileRow key={file.id} file={file} depth={0} onSelectFile={onSelectFile} onDelete={handleDelete} />
+            <FileRow key={file.id} file={file} depth={0} onSelectFile={onSelectFile} onDelete={handleDelete} theme={theme} isDark={isDark} />
           ))
         )}
       </div>
@@ -424,35 +441,11 @@ const FileList = ({ selectedFolder, files, onSelectFile, onFilesUpdate }) => {
   );
 };
 
-const FileRow = ({ file, depth, onSelectFile, onDelete }) => {
+const FileRow = ({ file, depth, onSelectFile, onDelete, theme, isDark }) => {
   const isPdf = (file.type || '').toUpperCase() === 'PDF';
   const [isDragging, setIsDragging] = useState(false);
-  const mouseDownPos = React.useRef(null);
-
-  const handleMouseDown = (e) => {
-    mouseDownPos.current = { x: e.clientX, y: e.clientY };
-    e.currentTarget.draggable = false;
-  };
-
-  const handleMouseMove = (e) => {
-    if (!mouseDownPos.current) return;
-    const dx = Math.abs(e.clientX - mouseDownPos.current.x);
-    const dy = Math.abs(e.clientY - mouseDownPos.current.y);
-    if (dx > 5 || dy > 5) {
-      e.currentTarget.draggable = true;
-    }
-  };
-
-  const handleMouseUp = (e) => {
-    mouseDownPos.current = null;
-    e.currentTarget.draggable = false;
-  };
 
   const handleDragStart = (e) => {
-    if (!e.currentTarget.draggable) {
-      e.preventDefault();
-      return;
-    }
     setIsDragging(true);
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('application/json', JSON.stringify({
@@ -461,22 +454,19 @@ const FileRow = ({ file, depth, onSelectFile, onDelete }) => {
       fileType: file.file_type || file.mime_type || file.type,
       sourceFolderId: file.folderId,
     }));
-    e.currentTarget.style.opacity = '0.5';
+    // Use setTimeout so the dragged ghost image doesn't appear 50% transparent initially on some browsers
+    setTimeout(() => { e.target.style.opacity = '0.5'; }, 0);
   };
 
   const handleDragEnd = (e) => {
     setIsDragging(false);
-    mouseDownPos.current = null;
-    e.currentTarget.style.opacity = '1';
-    e.currentTarget.draggable = false;
+    e.target.style.opacity = '1';
   };
 
   return (
     <div>
       <div
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
+        draggable={true}
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
         onClick={() => onSelectFile(file)}
@@ -485,22 +475,22 @@ const FileRow = ({ file, depth, onSelectFile, onDelete }) => {
           gridTemplateColumns: '1fr 160px 120px',
           alignItems: 'center',
           padding: '12px 20px',
-          borderBottom: '1px solid #f2f2f2',
+          borderBottom: `1px solid ${theme.colors.ui.border}`,
           cursor: 'pointer',
           paddingLeft: `${20 + depth * 18}px`,
           opacity: isDragging ? 0.5 : 1,
-          backgroundColor: isDragging ? '#f9f9f9' : 'transparent',
+          backgroundColor: isDragging ? theme.colors.ui.hover : 'transparent',
           transition: 'opacity 200ms, background-color 200ms',
           userSelect: 'none',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          {(file.type || '').toUpperCase() === 'PDF' ? <FileText size={16} color="#555" /> : <File size={16} color="#555" />}
-          <span style={{ fontSize: 14, color: '#1a1a2e' }}>{file.name}</span>
+          {(file.type || '').toUpperCase() === 'PDF' ? <FileText size={16} color={theme.colors.text.secondary} /> : <File size={16} color={theme.colors.text.secondary} />}
+          <span style={{ fontSize: 14, color: theme.colors.text.primary }}>{file.name}</span>
         </div>
-        <span style={{ fontSize: 13, color: '#999' }}>{file.date}</span>
+        <span style={{ fontSize: 13, color: theme.colors.text.tertiary }}>{file.date}</span>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-          <span style={{ fontSize: 12, color: '#666' }}>{file.type}</span>
+          <span style={{ fontSize: 12, color: theme.colors.text.secondary }}>{file.type}</span>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             {isPdf && depth === 0 && <span style={{ fontSize: 11, color: '#6C5DD3', fontWeight: 700 }}>PDF</span>}
             <Trash2
@@ -515,7 +505,7 @@ const FileRow = ({ file, depth, onSelectFile, onDelete }) => {
         </div>
       </div>
       {file.children?.length > 0 && file.children.map((child) => (
-        <FileRow key={child.id} file={child} depth={depth + 1} onSelectFile={onSelectFile} onDelete={onDelete} />
+        <FileRow key={child.id} file={child} depth={depth + 1} onSelectFile={onSelectFile} onDelete={onDelete} theme={theme} isDark={isDark} />
       ))}
     </div>
   );

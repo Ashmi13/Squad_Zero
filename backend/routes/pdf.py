@@ -1,31 +1,3 @@
-"""
-PDF Processing Routes - Backend Integration Points
-
-INTEGRATION ARCHITECTURE:
-This file handles PDF processing requests from the frontend:
-1. Frontend sends PDF file → Backend receives at /extract-text
-2. Backend extracts text using PyMuPDF (fitz)
-3. Frontend sends extracted text → Backend receives at /generate-summary
-4. Backend calls OpenAI API to generate summary
-
-REQUEST/RESPONSE FLOW:
-- Frontend: http://localhost:5174 (React app)
-- Backend: http://localhost:8000 (FastAPI server)
-- External: OpenAI API (for summary generation)
-
-ENDPOINTS DEFINED HERE:
-- POST /api/v1/pdf/extract-text - Extracts text from PDF file
-- POST /api/v1/pdf/generate-summary - Generates AI summary from text
-
-CHANGES MADE:
-- Added /extract-text endpoint to extract text from uploaded PDF files
-- Added /generate-summary endpoint to create AI-powered summaries from text content
-- Integrated with pdf_reader.py for PDF text extraction using PyMuPDF
-- Integrated with openai_service.py for OpenAI API calls
-- Added proper error handling and validation for both endpoints
-- Added logging to track API calls and errors
-"""
-
 from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Depends
 from pydantic import BaseModel
 from typing import Optional
@@ -66,9 +38,7 @@ def _fallback_summary(text: str) -> str:
         "### Key Points",
         key_points,
         "",
-        "### Quick Revision Notes",
-        "- Review the above key points as the core takeaways.",
-        "- Focus on definitions, processes, and examples mentioned.",
+       
     ])
     return summary
 
@@ -124,41 +94,7 @@ async def extract_text(
     user_id: str = Depends(get_current_user_id),
     supabase: Client = Depends(get_supabase_service_client),
 ):
-    """
-    Extract text from a PDF file - FRONTEND INTEGRATION POINT #1
-    
-    REQUEST SOURCE: 
-    - Frontend (FileViewer.jsx) sends PDF via POST /api/v1/pdf/extract-text
-    - Frontend code: handleExtractText() function
-    - PDF sent as: multipart/form-data with file blob
-    
-    PROCESSING STEPS:
-    1. Receives PDF file from frontend (as UploadFile object)
-    2. Validates file type (must be .pdf)
-    3. Calls pdf_reader.validate_pdf() - checks PDF is valid
-    4. Calls pdf_reader.extract_text_from_pdf() - uses PyMuPDF (fitz) to extract text
-    5. PyMuPDF opens PDF bytes, reads each page, extracts text
-    6. Returns extracted text to frontend
-    
-    RESPONSE:
-    - JSON: { status: "success", text: "extracted text...", filename: "..." }
-    - Frontend receives this and creates a new "Extracted Text" file in the file list
-    
-    ERROR HANDLING:
-    - Returns 400 if file is not PDF
-    - Returns 400 if PDF is invalid or corrupted
-    - Returns 500 if extraction fails
-    
-    SERVICES USED:
-    - app.services.pdf_reader.extract_text_from_pdf() - reads PDF bytes using PyMuPDF
-    - app.services.pdf_reader.validate_pdf() - validates PDF format
-    
-    CHANGES MADE:
-    - Accepts PDF file upload
-    - Validates PDF format and integrity
-    - Extracts text using pdf_reader service
-    - Returns extracted text in JSON response
-    """
+
     try:
         if not source_file_id:
             raise HTTPException(status_code=400, detail="source_file_id is required")
@@ -193,8 +129,7 @@ async def extract_text(
         
         print(f"DEBUG: PDF validation passed, extracting text...")
         # Step 4: Extract text using PyMuPDF
-        # This calls app/services/pdf_reader.py extract_text_from_pdf()
-        # which reads each page of the PDF and extracts all text
+
         extracted_text = extract_text_from_pdf(file_bytes)
         
         print(f"DEBUG: Text extraction successful, length: {len(extracted_text)}")
@@ -238,43 +173,7 @@ async def generate_summary(
     user_id: str = Depends(get_current_user_id),
     supabase: Client = Depends(get_supabase_service_client),
 ):
-    """
-    Generate an AI-powered summary from extracted PDF text - FRONTEND INTEGRATION POINT #2
     
-    REQUEST SOURCE:
-    - Frontend (FileViewer.jsx) sends extracted text via POST /api/v1/pdf/generate-summary
-    - Frontend code: handleGenerateSummary() function
-    - Text sent as: JSON { "text": "extracted text..." }
-    
-    PROCESSING STEPS:
-    1. Receives extracted text from frontend (as TextSummaryRequest)
-    2. Validates text is not empty
-    3. Calls openai_service.generate_summary() - sends text to OpenAI API
-    4. OpenAI API (gpt-3.5-turbo model) analyzes text and generates summary
-    5. Returns AI-generated summary to frontend
-    
-    RESPONSE:
-    - JSON: { status: "success", summary: "AI-generated summary..." }
-    - Frontend receives this and creates a new "Summary" file in the file list
-    
-    ERROR HANDLING:
-    - Returns 400 if text is empty
-    - Returns 500 if OpenAI API call fails (e.g., invalid API key, rate limit)
-    
-    EXTERNAL SERVICE:
-    - OpenAI API (gpt-3.5-turbo model)
-    - Requires: OPENAI_API_KEY environment variable in .env file
-    - Cost: Charged per API token used
-    
-    SERVICES USED:
-    - app.services.openai_service.generate_summary() - calls OpenAI API
-    
-    CHANGES MADE:
-    - Accepts extracted text as input
-    - Calls OpenAI API to generate summary
-    - Returns generated summary in JSON response
-    - Includes error handling for API failures
-    """
     try:
         if not request.source_file_id:
             raise HTTPException(status_code=400, detail="source_file_id is required")

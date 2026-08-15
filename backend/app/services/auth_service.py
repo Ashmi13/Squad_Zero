@@ -109,11 +109,8 @@ class AuthService:
                     "email": auth_response.user.email,
                     "full_name": user.get("full_name"),
                     "avatar_url": user.get("avatar_url"),
-<<<<<<< Updated upstream
-=======
                     "role": user.get("role", "user"),
                     "is_suspended": bool(user.get("is_suspended", False)),
->>>>>>> Stashed changes
                 },
                 "access_token": auth_response.session.access_token,
                 "refresh_token": auth_response.session.refresh_token,

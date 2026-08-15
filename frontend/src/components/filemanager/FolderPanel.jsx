@@ -64,6 +64,8 @@ const FolderPanel = ({ selectedFolder, onSelectFolder, onSelectFile, onFolderDel
   const [expanded, setExpanded] = useState({});
   const [filesByFolder, setFilesByFolder] = useState({});
   const [filesLoadingByFolder, setFilesLoadingByFolder] = useState({});
+  const filesByFolderRef = React.useRef({});
+  const filesLoadingRef = React.useRef({});
   const [showInput, setShowInput] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [creatingFolder, setCreatingFolder] = useState(false);
@@ -115,9 +117,11 @@ const FolderPanel = ({ selectedFolder, onSelectFolder, onSelectFile, onFolderDel
   };
 
   const loadFolderFiles = async (folderId, { force = false } = {}) => {
-    if (!folderId || filesLoadingByFolder[folderId]) return;
-    if (!force && Array.isArray(filesByFolder[folderId])) return;
+    if (!folderId) return;
+    if (filesLoadingRef.current[folderId]) return;
+    if (!force && Array.isArray(filesByFolderRef.current[folderId])) return;
 
+    filesLoadingRef.current = { ...filesLoadingRef.current, [folderId]: true };
     setFilesLoadingByFolder((prev) => ({ ...prev, [folderId]: true }));
     try {
       const data = await workspaceApi.getFiles(folderId);
@@ -140,10 +144,19 @@ const FolderPanel = ({ selectedFolder, onSelectFolder, onSelectFile, onFolderDel
           isParentPDF: (f.file_type || '').toUpperCase() === 'PDF',
         };
       });
-      setFilesByFolder((prev) => ({ ...prev, [folderId]: buildFileTree(normalized) }));
+      setFilesByFolder((prev) => {
+        const next = { ...prev, [folderId]: buildFileTree(normalized) };
+        filesByFolderRef.current = next;
+        return next;
+      });
     } catch {
-      setFilesByFolder((prev) => ({ ...prev, [folderId]: [] }));
+      setFilesByFolder((prev) => {
+        const next = { ...prev, [folderId]: [] };
+        filesByFolderRef.current = next;
+        return next;
+      });
     } finally {
+      filesLoadingRef.current = { ...filesLoadingRef.current, [folderId]: false };
       setFilesLoadingByFolder((prev) => ({ ...prev, [folderId]: false }));
     }
   };
@@ -177,8 +190,9 @@ const FolderPanel = ({ selectedFolder, onSelectFolder, onSelectFile, onFolderDel
   useEffect(() => {
     if (selectedFolder) {
       setExpanded((prev) => ({ ...prev, [selectedFolder.id]: true }));
+      loadFolderFiles(selectedFolder.id);
     }
-  }, [selectedFolder]);
+  }, [selectedFolder?.id]); // eslint-disable-line
 
   const toggleExpand = (id) => {
     setExpanded((prev) => {
@@ -476,6 +490,8 @@ const FolderPanel = ({ selectedFolder, onSelectFolder, onSelectFile, onFolderDel
   };
 
   const handleFolderDragOver = (e, folderId) => {
+    // Only highlight folder as drop target for folder-move drags, not quiz-file drags
+    if (e.dataTransfer.types.includes('neuranote-quiz-file')) return;
     e.preventDefault();
     e.stopPropagation();
     e.dataTransfer.dropEffect = 'move';
@@ -489,6 +505,8 @@ const FolderPanel = ({ selectedFolder, onSelectFolder, onSelectFile, onFolderDel
   };
 
   const handleFolderDrop = async (e, targetFolderId) => {
+    // Don't intercept quiz-file drags — let them bubble to the quiz dropzone
+    if (e.dataTransfer.types.includes('neuranote-quiz-file')) return;
     e.preventDefault();
     e.stopPropagation();
     setDragOverFolderId(null);
@@ -539,39 +557,15 @@ const FolderPanel = ({ selectedFolder, onSelectFolder, onSelectFile, onFolderDel
 
     const renderFileNode = (fileNode, fileDepth = 0) => {
       const isPdf = String(fileNode.file_type || '').toUpperCase() === 'PDF';
+      // Track whether a drag started so click doesn't also fire on drag-end
       let isDraggingNode = false;
-      let mouseDownPosNode = null;
-
-      const onNodeMouseDown = (e) => {
-        mouseDownPosNode = { x: e.clientX, y: e.clientY };
-        e.currentTarget.draggable = false;
-      };
-
-      const onNodeMouseMove = (e) => {
-        if (!mouseDownPosNode) return;
-        const dx = Math.abs(e.clientX - mouseDownPosNode.x);
-        const dy = Math.abs(e.clientY - mouseDownPosNode.y);
-        if (dx > 5 || dy > 5) {
-          e.currentTarget.draggable = true;
-        }
-      };
-
-      const onNodeMouseUp = (e) => {
-        mouseDownPosNode = null;
-        e.currentTarget.draggable = false;
-      };
 
       return (
         <div key={fileNode.id}>
           <div
-            onMouseDown={onNodeMouseDown}
-            onMouseMove={onNodeMouseMove}
-            onMouseUp={onNodeMouseUp}
+            draggable={true}
             onDragStart={(e) => {
-              if (!e.currentTarget.draggable) {
-                e.preventDefault();
-                return;
-              }
+              isDraggingNode = true;
               e.dataTransfer.effectAllowed = 'move';
               e.dataTransfer.setData('application/json', JSON.stringify({
                 fileId: fileNode.id,
@@ -579,12 +573,20 @@ const FolderPanel = ({ selectedFolder, onSelectFolder, onSelectFile, onFolderDel
                 fileType: fileNode.file_type,
                 sourceFolderId: folder.id,
               }));
+              // Also expose as quiz-droppable payload so QuizHomePage dropzone can accept it
+              e.dataTransfer.setData('neuranote-quiz-file', JSON.stringify({
+                fileId: fileNode.id,
+                fileName: fileNode.name,
+                fileType: fileNode.file_type,
+                fileUrl: fileNode.fileUrl || null,
+                content: fileNode.content || null,
+                folderId: folder.id,
+              }));
               e.currentTarget.style.opacity = '0.5';
             }}
             onDragEnd={(e) => {
               e.currentTarget.style.opacity = '1';
-              e.currentTarget.draggable = false;
-              mouseDownPosNode = null;
+              isDraggingNode = false;
             }}
             onContextMenu={(e) => {
               e.preventDefault();
@@ -592,6 +594,8 @@ const FolderPanel = ({ selectedFolder, onSelectFolder, onSelectFile, onFolderDel
               setContextMenu({ visible: true, x: e.clientX, y: e.clientY, file: fileNode, folder });
             }}
             onClick={() => {
+              // Don't fire click if this was a drag gesture
+              if (isDraggingNode) { isDraggingNode = false; return; }
               if (onSelectFile) {
                 onSelectFile({
                   ...fileNode,
@@ -607,7 +611,7 @@ const FolderPanel = ({ selectedFolder, onSelectFolder, onSelectFile, onFolderDel
               paddingLeft: `${40 + (depth + fileDepth) * 14}px`,
               color: theme.colors.text.primary,
               fontSize: '13px',
-              cursor: onSelectFile ? 'pointer' : 'default',
+              cursor: 'grab',
               userSelect: 'none',
             }}
           >

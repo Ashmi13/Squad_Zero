@@ -42,3 +42,5 @@ Thumbs.db
 # Package manager lock files
 package-lock.json
 yarn.lock
+__pycache__/
+*.pyc

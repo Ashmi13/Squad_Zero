@@ -2,6 +2,10 @@ import sys
 import os
 import importlib
 
+# Ensure stdout uses UTF-8 to prevent UnicodeEncodeError with emojis on Windows
+if sys.stdout.encoding.lower() != 'utf-8':
+    sys.stdout.reconfigure(encoding='utf-8')
+
 # Adding backend/ to sys.path so all imports are resolved
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -23,12 +27,13 @@ except Exception:
     except Exception as e:
         print(f"[WARN] Config load failed: {e}")
         app_name     = "NeuraNote"
-        cors_origins = ["http://localhost:3000", "http://localhost:5173"]
+        cors_origins = ["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173", "http://127.0.0.1:3000"]
         debug        = True
 
 # Database table creation
 try:
     from database import engine, Base
+    print("⏳ Connecting to database... (this may take a minute if Supabase is waking up)")
     Base.metadata.create_all(bind=engine)
     print("[OK] Database tables ready")
 except Exception as e:
@@ -56,10 +61,17 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-    allow_headers=["*"],
-    expose_headers=["Content-Disposition"],
-    max_age=600,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],  # explicit, not "*"
+    allow_headers=[
+        "Content-Type",
+        "Authorization",
+        "Accept",
+        "Origin",
+        "User-Agent",
+        "X-Guest-Session-ID",
+    ],
+    expose_headers=["Content-Disposition"],  # needed for PDF downloads
+    max_age=600,                             # cache preflight for 10 minutes
 )
 
 # Rate limiting
@@ -83,10 +95,13 @@ try:
         validation_exception_handler,
         database_exception_handler,
         general_exception_handler,
+        suspended_account_exception_handler,
+        SuspendedAccountError,
     )
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
     app.add_exception_handler(SQLAlchemyError, database_exception_handler)
     app.add_exception_handler(Exception, general_exception_handler)
+    app.add_exception_handler(SuspendedAccountError, suspended_account_exception_handler)
 except Exception as e:
     print(f"[WARN] Custom error handlers skipped: {e}")
 
@@ -127,7 +142,7 @@ except Exception as e:
 # Structured Notes routes (M3)
 try:
     from m3_structurednotes.router import router as notes_router
-    app.include_router(notes_router, prefix="/api/notes", tags=["notes"])
+    app.include_router(notes_router, prefix="/api/m3", tags=["notes"])
     print("[OK] Structured notes routes loaded")
 except ImportError as e:
     missing = str(e).replace("No module named ", "").strip("'")
@@ -164,7 +179,7 @@ async def startup_event():
     # Warm up the column-detection cache so the first real request doesn't pay
     # the cost of 18 individual Supabase probes.
     try:
-        from app.db.supabase import get_supabase_client as _get_supabase
+        from app.db.supabase import get_supabase as _get_supabase
         from app.services.workspace_service import WorkspaceService
         _sb = _get_supabase()
         _svc = WorkspaceService(_sb)

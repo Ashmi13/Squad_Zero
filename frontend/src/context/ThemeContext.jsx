@@ -17,13 +17,11 @@ export const ThemeProvider = ({ children }) => {
   // Save theme preference to localStorage
   useEffect(() => {
     localStorage.setItem('theme-mode', JSON.stringify(isDark));
-    // Apply theme to document
+    // Apply theme via class so CSS variables cascade properly
     if (isDark) {
-      document.documentElement.style.backgroundColor = '#1a1a2e';
-      document.documentElement.style.color = '#e0e0e0';
+      document.documentElement.classList.add('dark');
     } else {
-      document.documentElement.style.backgroundColor = '#ffffff';
-      document.documentElement.style.color = '#1a1a2e';
+      document.documentElement.classList.remove('dark');
     }
   }, [isDark]);
 
@@ -36,6 +34,7 @@ export const ThemeProvider = ({ children }) => {
     };
     const nextSize = map[fontSize] || map.Medium;
     document.documentElement.style.setProperty('--app-font-size', nextSize);
+    document.documentElement.style.fontSize = nextSize;
   }, [fontSize]);
 
   const toggleTheme = () => {

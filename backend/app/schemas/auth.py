@@ -46,6 +46,11 @@ class UserResponse(BaseModel):
     email: str = Field(..., description="User email")
     full_name: Optional[str] = Field(None, description="User full name")
     avatar_url: Optional[str] = Field(None, description="User avatar URL")
+<<<<<<< Updated upstream
+=======
+    role: Optional[str] = Field("user", description="User role")
+    is_suspended: bool = Field(default=False, description="Whether the account is suspended")
+>>>>>>> Stashed changes
 
 
 # Update forward references

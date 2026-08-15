@@ -12,7 +12,6 @@
  *  - Accessible: keyboard nav, aria-labels, focus rings
  *  - CSS Module classes preserved; new classes added at bottom
  */
-
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   CloudUpload, FolderOpen, Loader2, FileText, X,
@@ -35,28 +34,25 @@ const API_BASE = (import.meta.env && import.meta.env.VITE_API_BASE_URL)
  * Matches the status values written by services.py _update_job().
  */
 const STATUS_LABELS = {
-  queued:        'Preparing your materials…',
-  retrieving:    'Reading all lecture content…',
-  deduplicating: 'Removing repeated content…',
-  analyzing:     'Extracting key concepts…',
-  generating:    'Writing your study notes…',
-  finalising:    'Assembling final note…',
-  done:          'Done! Opening your notes…',
-  failed:        'Something went wrong.',
+  queued:      'Preparing your materials…',
+  retrieving:  'Reading lecture content…',
+  analyzing:   'Extracting topic structure…',
+  expanding:   'Writing detailed explanations…',
+  assembling:  'Building your note…',
+  generating:  'Creating structured note…',
+  done:        'Done! Opening your notes…',
+  failed:      'Something went wrong.',
 };
 
-/**
- * Progress percentage per status step (for the progress bar).
- */
 const STATUS_PROGRESS = {
-  queued: 5,
+  queued:     5,
   retrieving: 15,
-  deduplicating: 30,
-  analyzing: 45,
-  generating: 70,
-  finalising: 90,
-  done: 100,
-  failed: 100,
+  analyzing:  30,
+  expanding:  55,
+  assembling: 75,
+  generating: 88,
+  done:       100,
+  failed:     100,
 };
 
 const ALLOWED_EXTENSIONS = ['.pdf', '.pptx', '.md', '.txt'];
@@ -137,6 +133,7 @@ const UploadSection = ({ userId: userIdProp }) => {
 
   const fileInputRef  = useRef(null);
   const pollTimerRef  = useRef(null);
+  const successfulUploadsRef = useRef([]);
 
   // ── Resolve userId ─────────────────────────────────────────
   const userId = userIdProp
@@ -168,17 +165,29 @@ const UploadSection = ({ userId: userIdProp }) => {
         setJobStatus(data.status);
 
         if (data.status === 'done') {
-          setIsProcessing(false);
-          // Store minimal info + file metadata for editor
-          localStorage.setItem('currentNote', JSON.stringify({
-            noteId: data.note_id,
-            filename: allFiles[0]?.filename,
-            pdfUrl: allFiles[0]?.pdf_url,
-            pdfId: allFiles[0]?.pdf_id,
-            allFiles: allFiles
-          }));
-          setTimeout(() => navigate(`/notes/editor/${data.note_id}`), 600);
-
+          const noteId = data.note_id
+          console.log('[Poll] Done! noteId:', noteId)
+          
+          if (!noteId || noteId === '...') {
+            console.error('[Poll] Missing note_id!')
+            setErrorMsg('Note generated but ID missing.')
+            setIsProcessing(false)
+            setJobStatus(null)
+            return
+          }
+          
+          // Store files before navigating
+          if (successfulUploadsRef && 
+              successfulUploadsRef.current) {
+            localStorage.setItem(
+              'currentNoteFiles',
+              JSON.stringify(successfulUploadsRef.current)
+            )
+          }
+          
+          // Navigate with real noteId
+          navigate('/notes/editor/' + noteId)
+          return
         } else if (data.status === 'failed') {
           setIsProcessing(false);
           setErrorMsg(data.error || 'Generation failed. Please try again.');
@@ -312,15 +321,26 @@ const UploadSection = ({ userId: userIdProp }) => {
         throw new Error(`Upload Failed:\n${errorDetails || 'All files failed to upload.'}`);
       }
 
+      if (successfulUploads.length > 0) {
+        localStorage.setItem(
+          'currentPdfId',
+          successfulUploads[0].pdf_id
+        )
+      }
+
       const allPdfIds = successfulUploads.map(f => f.pdf_id);
 
-      // Step 3 — Start background generation job
-      const { data: jobData } = await axios.post(`${API_BASE}/generate-note`, {
-        pdf_ids: allPdfIds,
+      // Step 3 — Start structured note background job
+      const inputItems = successfulUploads.map(f => ({
+        type: "pdf_id",
+        value: f.pdf_id
+      }));
+
+      const { data: jobData } = await axios.post(`${API_BASE}/generate-structured-note`, {
+        input_items: inputItems,
         user_id: userId,
-        instruction: instruction.trim(),
         language: selectedLanguage,
-        ordering,
+        module_name: "Study Notes" // title or default
       });
 
       const newJobId = jobData.job_id;
@@ -328,6 +348,7 @@ const UploadSection = ({ userId: userIdProp }) => {
       setJobStatus(jobData.status || 'queued');
 
       // Step 4 — Poll until done or failed
+      successfulUploadsRef.current = successfulUploads;
       startPolling(newJobId, successfulUploads);
 
     } catch (err) {
@@ -373,73 +394,7 @@ const UploadSection = ({ userId: userIdProp }) => {
         {/* ── Main Grid ── */}
         <div className={styles.mainGrid}>
 
-          {/* LEFT: Notebook Explorer */}
-          <div className={styles.explorerSection}>
-            <div className={styles.sectionHeader}>
-              <FolderOpen size={16} />
-              <span>My Notebooks</span>
-            </div>
-
-            <div className={styles.treeContainer}>
-              {folders.length === 0 ? (
-                <div className={styles.emptyTree}>
-                  <BookOpen size={18} style={{ opacity: 0.4 }} />
-                  <span>No notebooks found</span>
-                </div>
-              ) : (
-                folders.map(folder => (
-                  <div key={folder.id} className={styles.folderNode}>
-                    <button
-                      className={styles.folderRow}
-                      onClick={() => toggleFolder(folder.name)}
-                      aria-expanded={!!expandedFolders[folder.name]}
-                    >
-                      {expandedFolders[folder.name]
-                        ? <ChevronDown size={13} />
-                        : <ChevronRight size={13} />}
-                      <Folder size={13} className={styles.folderIcon} />
-                      <span>{folder.name}</span>
-                    </button>
-
-                    {expandedFolders[folder.name] && (
-                      <div className={styles.fileNodes}>
-                        {(filesByFolder[folder.name] || []).length === 0 && (
-                          <span className={styles.emptyFolder}>Empty folder</span>
-                        )}
-                        {(filesByFolder[folder.name] || []).map(file => {
-                          const isAdded = notebookNotes.some(n => n.id === file.id);
-                          return (
-                            <div
-                              key={file.id}
-                              className={`${styles.fileRow} ${isAdded ? styles.fileRowAdded : ''}`}
-                              draggable={!isAdded}
-                              onDragStart={(e) => handleDragStart(e, file)}
-                              onClick={() => !isAdded && addNotebookNote(file)}
-                              role="button"
-                              tabIndex={0}
-                              aria-label={`Add ${file.name} to selection`}
-                              onKeyDown={(e) => e.key === 'Enter' && !isAdded && addNotebookNote(file)}
-                            >
-                              <FileText size={12} className={styles.fileIconSmall} />
-                              <span className={styles.fileRowName}>{file.name}</span>
-                              {isAdded && (
-                                <CheckCircle2 size={12} className={styles.addedCheck} />
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-
-            <p className={styles.hintText}>
-              💡 Drag notes to the drop zone, or click to add
-            </p>
-          </div>
-
+         
           {/* RIGHT: Drop Zone + File List */}
           <div className={styles.actionSection}>
 

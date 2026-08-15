@@ -1,5 +1,6 @@
-import React, { useRef } from 'react';
-import { Upload, X, Sparkles, BarChart3, Settings } from 'lucide-react';
+import React, { useRef, useState } from 'react';
+import { isAuthenticated } from '@/utils/tokenStorage';
+import { Upload, X, Sparkles, BarChart3, Settings, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 
 const MAX_FILES = 20;
 
@@ -12,12 +13,57 @@ const QuizHomePage = ({
   onRemoveFile,
   onDrag,
   onDrop,
+  onFolderFileDrop,
   onGenerateQuiz,
   onShowHistory,
   onConfigChange,
   showToast,
 }) => {
   const fileInputRef = useRef(null);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [folderDragActive, setFolderDragActive] = useState(false);
+
+  const handleDropzoneDragOver = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer.types.includes('neuranote-quiz-file')) {
+      setFolderDragActive(true);
+    } else {
+      onDrag(e);
+    }
+  };
+
+  const handleDropzoneDragEnter = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer.types.includes('neuranote-quiz-file')) {
+      setFolderDragActive(true);
+    } else {
+      onDrag(e);
+    }
+  };
+
+  const handleDropzoneDragLeave = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setFolderDragActive(false);
+    onDrag(e);
+  };
+
+  const handleDropzoneDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setFolderDragActive(false);
+    const quizPayload = e.dataTransfer.getData('neuranote-quiz-file');
+    if (quizPayload) {
+      try {
+        const folderFile = JSON.parse(quizPayload);
+        if (onFolderFileDrop) onFolderFileDrop(folderFile);
+      } catch (_) {}
+      return;
+    }
+    onDrop(e);
+  };
 
   const getDifficultyIcon = (d) => ({ easy: '⭐', medium: '⭐⭐', hard: '⭐⭐⭐' }[d] || '⭐');
 
@@ -37,8 +83,8 @@ const QuizHomePage = ({
   };
 
   return (
-    <div className="quiz-workspace" style={{ position: 'relative' }}>
-      {/* ── Blur overlay while generating ── */}
+    <div className={`quiz-workspace${sidebarOpen ? '' : ' sidebar-collapsed'}`} style={{ position: 'relative' }}>
+      {/* Blur overlay while generating */}
       {isGenerating && (
         <div className="generating-overlay">
           <div className="generating-modal">
@@ -52,23 +98,31 @@ const QuizHomePage = ({
         </div>
       )}
 
-      {/* ── Settings Sidebar ── */}
-      <aside className="settings-sidebar" style={isGenerating ? { filter: 'blur(3px)', pointerEvents: 'none', userSelect: 'none' } : {}}>
+      {/*Settings Sidebar*/}
+      <aside className={`settings-sidebar${sidebarOpen ? '' : ' settings-sidebar--collapsed'}`} style={isGenerating ? { filter: 'blur(3px)', pointerEvents: 'none', userSelect: 'none' } : {}}>
         <div className="sidebar-header">
-          <div className="sidebar-header-icon"><Settings size={18} /></div>
-          <h2>Quiz Settings</h2>
+          {sidebarOpen && <div className="sidebar-header-icon"><Settings size={18} /></div>}
+          {sidebarOpen && <h2>Quiz Settings</h2>}
+          <button
+            className="sidebar-collapse-btn"
+            onClick={() => setSidebarOpen(o => !o)}
+            title={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
+          >
+            {sidebarOpen ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}
+          </button>
         </div>
+        {sidebarOpen && (<>
 
         <div className="sidebar-section">
           <label className="sidebar-label">Questions</label>
           <div className="sidebar-input-group">
             <input
-              type="number" min="1" max="25"
+              type="number" min="1" max="100"
               value={config.numQuestions}
-              onChange={(e) => onConfigChange({ numQuestions: Math.min(25, Math.max(1, parseInt(e.target.value) || 1)) })}
+              onChange={(e) => onConfigChange({ numQuestions: Math.min(100, Math.max(1, parseInt(e.target.value) || 1)) })}
               className="sidebar-input"
             />
-            <span className="sidebar-input-hint">max 25</span>
+            <span className="sidebar-input-hint">max 100</span>
           </div>
         </div>
 
@@ -115,6 +169,7 @@ const QuizHomePage = ({
             {[
               { value: 'mcq',          icon: '☑️', label: 'Multiple Choice' },
               { value: 'short_answer', icon: '✏️', label: 'Short Answer'    },
+              { value: 'long_answer',  icon: '📝', label: 'Long Answer'     },
               { value: 'mixed',        icon: '🔀', label: 'Mixed'           },
             ].map(opt => (
               <button
@@ -157,13 +212,21 @@ const QuizHomePage = ({
             ))}
           </div>
         </div>
+        </>)}
       </aside>
 
-      {/* ── Main Content ── */}
+      {/* Main Content */}
       <main
         className="quiz-main-content"
         style={isGenerating ? { filter: 'blur(3px)', pointerEvents: 'none', userSelect: 'none' } : {}}
       >
+        {!isAuthenticated() && (
+          <div className="guest-banner">
+            <span>👋 You're using NeuraNote as a guest.</span>
+            <span>Your quiz history will be cleared when you close this tab.</span>
+            <a href="/login" className="guest-banner-link">Sign in to save your progress →</a>
+          </div>
+        )}
         <div className="upload-header">
           <div className="header-icon"><Sparkles size={28} /></div>
           <div>
@@ -182,18 +245,20 @@ const QuizHomePage = ({
         />
 
         <div
-          className={`upload-dropzone ${dragActive ? 'drag-active' : ''}`}
-          onDragEnter={onDrag}
-          onDragLeave={onDrag}
-          onDragOver={onDrag}
-          onDrop={onDrop}
+          className={`upload-dropzone ${dragActive ? 'drag-active' : ''} ${folderDragActive ? 'folder-drag-active' : ''}`}
+          onDragEnter={handleDropzoneDragEnter}
+          onDragLeave={handleDropzoneDragLeave}
+          onDragOver={handleDropzoneDragOver}
+          onDrop={handleDropzoneDrop}
           onClick={() => fileInputRef.current?.click()}
         >
           <div className="dropzone-icon"><Upload size={32} /></div>
-          <h3>Drag &amp; Drop files here</h3>
-          <p>or click to browse</p>
+          {folderDragActive
+            ? <><h3>Drop to add from Folder</h3><p>Release to add this file to your quiz</p></>
+            : <><h3>Drag &amp; Drop files here</h3><p>or click to browse · or drag files from My Folders</p></>
+          }
           <div className="dropzone-formats">PDF · DOC · PPT · XLS · TXT · EPUB · Images</div>
-          <div className="dropzone-limit">Max 25MB per file · Up to {MAX_FILES} files</div>
+          <div className="dropzone-limit">Max 100MB per file · Up to {MAX_FILES} files</div>
         </div>
 
         {uploadedFiles.length > 0 && (
@@ -208,7 +273,11 @@ const QuizHomePage = ({
                   <span className="file-icon">{getFileIcon(file.name)}</span>
                   <div className="file-info">
                     <span className="file-name">{file.name}</span>
-                    <span className="file-size">{file.size}</span>
+                    <span className="file-size">
+                      {file.fromFolder
+                        ? <span className="file-folder-badge">📁 From Folder</span>
+                        : file.size}
+                    </span>
                   </div>
                   <button className="remove-btn" onClick={(e) => { e.stopPropagation(); onRemoveFile(file.id); }}>
                     <X size={14} />

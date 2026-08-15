@@ -38,7 +38,6 @@ router = APIRouter()
 @router.get("/health")
 async def health_check():
     return {"status": "ok", "version": "1.0"}
-
 router.include_router(auth.router)
 
 if _tasks_loaded:
@@ -60,3 +59,20 @@ if _fm_loaded:
 
 if _pdf_loaded:
     router.include_router(pdf.router, prefix="/pdf", tags=["pdf"])
+
+try:
+    from app.api.v1.endpoints import announcements
+    router.include_router(announcements.router)
+    print("[OK] Announcements routes loaded")
+except Exception as e:
+    print(f"[ERROR] Announcements route failed: {e}")
+<<<<<<< Updated upstream
+=======
+
+try:
+    from app.api.v1.endpoints import admin
+    router.include_router(admin.router)
+    print("[OK] Admin routes loaded")
+except Exception as e:
+    print(f"⚠️ Admin routes skipped: {e}")
+>>>>>>> Stashed changes

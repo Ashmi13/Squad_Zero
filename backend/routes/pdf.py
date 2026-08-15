@@ -1,3 +1,4 @@
+import os
 from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Depends
 from pydantic import BaseModel
 from typing import Optional
@@ -12,35 +13,11 @@ router = APIRouter(tags=["pdf"])
 logger = logging.getLogger(__name__)
 
 
-def _fallback_summary(text: str) -> str:
-    """Produce a deterministic fallback summary when AI provider fails."""
-    cleaned = " ".join((text or "").split())
-    if not cleaned:
-        return "No content available to summarize."
-
-    max_chars = 16000
-    excerpt = cleaned[:max_chars]
-    sentences = [s.strip() for s in excerpt.replace("\n", " ").split(".") if s.strip()]
-    if not sentences:
-        return excerpt[:2000]
-
-    # Build a broader fallback summary by sampling across the document slice.
-    if len(sentences) <= 14:
-        picked = sentences
-    else:
-        interval = max(1, len(sentences) // 12)
-        picked = [sentences[i] for i in range(0, len(sentences), interval)][:12]
-
-    key_points = "\n".join([f"- {item.strip()}" + ("" if item.strip().endswith(".") else ".") for item in picked])
-    summary = "\n".join([
-        "## Overview",
-        "",
-        "### Key Points",
-        key_points,
-        "",
-       
-    ])
-    return summary
+def _base_name(value: Optional[str]) -> str:
+    candidate = (value or "").strip()
+    if not candidate:
+        return "Document"
+    return os.path.splitext(candidate)[0] or candidate
 
 
 def _resolve_source_context(
@@ -108,49 +85,40 @@ async def extract_text(
         if not folder_id or not source_file_name:
             raise HTTPException(status_code=400, detail="folder_id/source_file_name could not be resolved")
 
-        logger.info(f"Extracting text from: {file.filename}")
-        print(f"DEBUG: extract_text called with file: {file.filename}, content_type: {file.content_type}")
-        
-        # Step 1: Validate file type
-        if file.content_type != "application/pdf" and not file.filename.endswith('.pdf'):
-            print(f"DEBUG: File type validation failed - content_type: {file.content_type}")
-            raise HTTPException(status_code=400, detail="Only PDF files allowed")
-        
-        # Step 2: Read file bytes from upload
-        print(f"DEBUG: Reading file bytes...")
-        file_bytes = await file.read()
-        print(f"DEBUG: File size: {len(file_bytes)} bytes")
-        
-        # Step 3: Validate PDF is actually a valid PDF file
-        print(f"DEBUG: Validating PDF...")
+        service = WorkspaceService(supabase)
+        file_bytes = None
+        if file is not None and getattr(file, "filename", None):
+            logger.info(f"Extracting text from uploaded file: {file.filename}")
+            if file.content_type != "application/pdf" and not file.filename.endswith('.pdf'):
+                raise HTTPException(status_code=400, detail="Only PDF files allowed")
+            file_bytes = await file.read()
+        else:
+            file_bytes = service.get_file_object_bytes(user_id=user_id, file_id=source_file_id)
+
+        if not file_bytes:
+            raise HTTPException(status_code=400, detail="PDF content is empty")
+
         if not validate_pdf(file_bytes):
-            print(f"DEBUG: PDF validation failed")
             raise HTTPException(status_code=400, detail="Invalid or corrupted PDF")
-        
-        print(f"DEBUG: PDF validation passed, extracting text...")
-        # Step 4: Extract text using PyMuPDF
 
         extracted_text = extract_text_from_pdf(file_bytes)
-        
-        print(f"DEBUG: Text extraction successful, length: {len(extracted_text)}")
         logger.info(f"Successfully extracted {len(extracted_text)} characters from PDF")
-        
-        # Step 5: Return extracted text to frontend
-        service = WorkspaceService(supabase)
-        generated = service.create_generated_text_file(
+
+        base_name = _base_name(source_file_name)
+        generated = service.create_generated_pdf_file(
             user_id=user_id,
             folder_id=folder_id,
             parent_file_id=source_file_id,
-            name=f"{source_file_name} - Extracted Text",
+            name=f"{base_name} - Extracted",
             content=extracted_text,
-            file_type="TXT",
-            original_filename=f"{source_file_name} - Extracted Text.txt",
+            original_filename=f"{base_name} - Extracted.pdf",
+            title=f"{base_name} - Extracted Text",
         )
 
         return {
             "status": "success",
             "text": extracted_text,
-            "filename": file.filename,
+            "filename": file.filename if file is not None and getattr(file, "filename", None) else base_name + ".pdf",
             "file": generated,
         }
         
@@ -187,32 +155,34 @@ async def generate_summary(
         if not resolved_folder_id or not resolved_source_name:
             raise HTTPException(status_code=400, detail="folder_id/source_file_name could not be resolved")
 
-        if not request.text or not request.text.strip():
-            raise HTTPException(status_code=400, detail="Text content required")
-        
-        logger.info(f"Generating summary from {len(request.text)} characters of text")
-        
-        # Step 1: Call OpenAI API to generate summary
-        # This calls app/services/openai_service.py generate_summary()
-        # which uses OpenAI API (gpt-3.5-turbo model) to create a summary
-        try:
-            summary_text = generate_summary_openai(request.text)
-        except Exception as ai_exc:
-            logger.warning(f"Primary summary generation failed, using fallback: {str(ai_exc)}")
-            summary_text = _fallback_summary(request.text)
-        
-        logger.info(f"Successfully generated summary ({len(summary_text)} characters)")
-        
-        # Step 2: Return generated summary to frontend
         service = WorkspaceService(supabase)
-        generated = service.create_generated_text_file(
+        text_to_summarize = request.text or ""
+        if not text_to_summarize.strip():
+            original_bytes = service.get_file_object_bytes(user_id=user_id, file_id=request.source_file_id)
+            text_to_summarize = extract_text_from_pdf(original_bytes)
+        
+        logger.info(f"Generating summary from {len(text_to_summarize)} characters of text")
+        
+        try:
+            summary_text = generate_summary_openai(text_to_summarize)
+        except Exception as ai_exc:
+            logger.error(f"Summary generation failed: {str(ai_exc)}")
+            raise HTTPException(status_code=500, detail=f"Summary generation failed: {str(ai_exc)}") from ai_exc
+
+        if not summary_text or not str(summary_text).strip():
+            raise HTTPException(status_code=500, detail="Summary generation returned empty content")
+
+        logger.info(f"Successfully generated summary ({len(summary_text)} characters)")
+
+        base_name = _base_name(resolved_source_name)
+        generated = service.create_generated_pdf_file(
             user_id=user_id,
             folder_id=resolved_folder_id,
             parent_file_id=request.source_file_id,
-            name=(resolved_source_name or "File") + " - Summary",
+            name=f"{base_name} - Summary",
             content=summary_text,
-            file_type="TXT",
-            original_filename=(resolved_source_name or "File") + " - Summary.txt",
+            original_filename=f"{base_name} - Summary.pdf",
+            title=f"{base_name} - Summary",
         )
 
         return {

@@ -2,19 +2,12 @@
 from fastapi import APIRouter, Depends, HTTPException
 from typing import List, Dict, Any
 from supabase import Client
-<<<<<<< Updated upstream
-from app.api.deps import get_supabase_service_client
-from app.schemas.announcements import Announcement
-=======
-
 from app.api.deps import get_supabase_service_client, get_current_user_id
 from app.schemas.announcements import (
     Announcement,
     AnnouncementStatusResponse,
     AnnouncementWithStatusResponse,
 )
->>>>>>> Stashed changes
-
 router = APIRouter(prefix="/announcements", tags=["announcements"])
 
 
@@ -29,12 +22,9 @@ async def list_announcements(
         .order("created_at", desc=True)
         .execute()
     )
-<<<<<<< Updated upstream
-    
-    # Log the response to debug transformation
+
     data = []
     for row in (response.data or []):
-        # Flatten or adjust fields if they differ from model
         data.append({
             "id": row.get("id"),
             "title": row.get("title", ""),
@@ -42,25 +32,8 @@ async def list_announcements(
             "type": row.get("type", "info"),
             "created_at": row.get("created_at"),
             "updated_at": row.get("updated_at"),
-            "created_by": str(row.get("created_by", ""))  # Ensure it stringifies
+            "created_by": str(row.get("created_by", ""))
         })
-
-    return data
-=======
-
-    data = []
-    for row in (response.data or []):
-        data.append(
-            {
-                "id": row.get("id"),
-                "title": row.get("title", ""),
-                "content": row.get("content", ""),
-                "type": row.get("type", "info"),
-                "created_at": row.get("created_at"),
-                "updated_at": row.get("updated_at"),
-                "created_by": str(row.get("created_by", "")),
-            }
-        )
 
     return data
 
@@ -195,4 +168,3 @@ async def mark_all_announcements_as_read(
         on_conflict="user_id,announcement_id",
     ).execute()
     return {"status": "success", "count": len(payload)}
->>>>>>> Stashed changes

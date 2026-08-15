@@ -72,6 +72,8 @@ const noRailPages = ['/', '/login', '/signup', '/oauth/callback'];
 const AppLayout = () => {
   const location = useLocation();
   const navigate = useNavigate();
+   const { user, isLoading } = useAuth();
+  const [quizStep, setQuizStep] = useState('upload');
   const { userScope, loading: userLoading } = useSupabaseUser();
   const [activeView, setActiveView] = useState('home');
   const [selectedWorkspaceFolder, setSelectedWorkspaceFolder] = useState(null);

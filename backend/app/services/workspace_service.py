@@ -5,11 +5,15 @@ from __future__ import annotations
 import os
 import uuid
 from datetime import datetime, timezone
+from io import BytesIO
 from urllib.parse import quote, unquote, urlparse
 from typing import Any, Dict, List, Optional, Tuple
 
 import boto3
 from fastapi import HTTPException, UploadFile
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 from botocore.exceptions import ClientError
 from supabase import Client
 
@@ -42,7 +46,13 @@ class WorkspaceService:
             return False
 
     def _detect_files_columns(self) -> None:
-        """Populate the module-level column cache (runs exactly once per process)."""
+        """Populate the module-level column cache (runs exactly once per process).
+
+        A sample row can be older and omit newer optional columns such as
+        parent_file_id even when the live files table supports them. We therefore
+        treat the first row as a hint only and still probe each column directly before
+        finalizing the capability cache.
+        """
         global _COLUMNS_DETECTED, _COLUMNS_CACHE
         if _COLUMNS_DETECTED:
             return
@@ -54,21 +64,20 @@ class WorkspaceService:
             "content", "text", "last_accessed", "updated_at",
         ]
 
+        row_keys: Optional[set[str]] = None
         try:
             res = self.supabase.table("files").select("*").limit(1).execute()
             if res.data:
                 row_keys = set(res.data[0].keys())
-                for col in columns:
-                    _COLUMNS_CACHE[col] = col in row_keys
-                _COLUMNS_DETECTED = True
-                return
         except Exception:
-            pass
+            row_keys = None
 
-        import concurrent.futures
         def check_col(col: str) -> Tuple[str, bool]:
+            if row_keys is not None and col in row_keys:
+                return col, True
             return col, self._column_exists("files", col)
 
+        import concurrent.futures
         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
             for col, exists in executor.map(check_col, columns):
                 _COLUMNS_CACHE[col] = exists
@@ -310,6 +319,40 @@ class WorkspaceService:
             return None
         except Exception:
             return None
+
+    def get_file_object_bytes(self, user_id: str, file_id: str) -> bytes:
+        """Fetch the original file payload from S3 or the database fallback if present."""
+        self._detect_files_columns()
+
+        query = self.supabase.table("files").select("*").eq("id", file_id).limit(1)
+        if self._files_has_user_id:
+            query = query.eq("user_id", user_id)
+        existing = query.execute()
+        if not existing.data:
+            raise HTTPException(status_code=404, detail="File not found")
+
+        row = existing.data[0]
+        for key in ("file_content", "raw_text", "summary", "content", "text"):
+            value = row.get(key)
+            if isinstance(value, str):
+                return value.encode("utf-8")
+            if isinstance(value, bytes):
+                return value
+
+        storage_bucket, storage_key = self._extract_storage_location(row)
+        if storage_key and not str(storage_key).startswith("data:"):
+            for candidate_bucket in self._candidate_buckets(storage_bucket):
+                try:
+                    obj = self._s3_client().get_object(Bucket=candidate_bucket, Key=str(storage_key).lstrip("/"))
+                    body = obj.get("Body")
+                    if body is not None:
+                        return body.read()
+                except ClientError:
+                    continue
+                except Exception:
+                    continue
+
+        raise HTTPException(status_code=404, detail="File bytes could not be resolved from storage or database content")
 
     @staticmethod
     def _build_tree(flat_folders: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -982,6 +1025,97 @@ class WorkspaceService:
             raise
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"Failed to delete file: {exc}") from exc
+
+    @staticmethod
+    def generate_pdf_document(title: str, content: str) -> bytes:
+        """Produce a PDF document from the text payload while preserving real PDF bytes for preview."""
+        buffer = BytesIO()
+        styles = getSampleStyleSheet()
+        title_text = str(title or "Document").strip() or "Document"
+        body = [Paragraph(title_text, styles["Heading1"]), Spacer(1, 12)]
+
+        safe_content = str(content or "").replace("\x00", "")
+        paragraphs = [part.strip() for part in safe_content.splitlines() if part and part.strip()]
+        if not paragraphs:
+            paragraphs = ["No content available."]
+
+        for paragraph in paragraphs[:2000]:
+            body.append(Paragraph(paragraph, styles["BodyText"]))
+            body.append(Spacer(1, 6))
+
+        doc = SimpleDocTemplate(buffer, pagesize=letter, title=title_text)
+        doc.build(body)
+        return buffer.getvalue()
+
+    def create_generated_pdf_file(
+        self,
+        user_id: str,
+        folder_id: str,
+        parent_file_id: str,
+        name: str,
+        content: str,
+        original_filename: Optional[str] = None,
+        title: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Persist a generated PDF (extracted text or summary) as a real S3-backed workspace file."""
+        self._detect_files_columns()
+
+        safe_content = str(content or "").replace("\x00", "")
+        pdf_bytes = self.generate_pdf_document(title or name or "Document", safe_content)
+
+        metadata: Dict[str, Any] = {}
+        if self._files_has_user_id:
+            metadata["user_id"] = user_id
+        if self._files_has_folder_id:
+            metadata["folder_id"] = folder_id
+        if self._files_has_parent_file_id:
+            metadata["parent_file_id"] = parent_file_id
+        if self._files_has_name:
+            metadata["name"] = name
+        if self._files_has_original_filename and original_filename:
+            metadata["original_filename"] = original_filename
+        if self._files_has_file_type:
+            metadata["file_type"] = "PDF"
+        if self._files_has_mime_type:
+            metadata["mime_type"] = "application/pdf"
+        if self._files_has_size_bytes:
+            metadata["size_bytes"] = len(pdf_bytes)
+
+        safe_filename = (original_filename or name or "file").replace(" ", "_").replace("/", "_")
+        if not safe_filename.lower().endswith(".pdf"):
+            safe_filename = f"{safe_filename}.pdf"
+
+        storage_key = f"workspace/{user_id}/{folder_id}/{uuid.uuid4().hex}_{safe_filename}"
+        bucket = self._workspace_bucket_name()
+
+        try:
+            self._upload_to_s3(
+                bucket=bucket,
+                object_key=storage_key,
+                content=pdf_bytes,
+                mime_type="application/pdf",
+            )
+        except HTTPException:
+            raise
+
+        if self._files_has_storage_path:
+            metadata["storage_path"] = storage_key
+
+        if not metadata:
+            raise HTTPException(status_code=500, detail="No writable file metadata columns found")
+
+        try:
+            saved = self.supabase.table("files").insert(metadata).execute()
+            if not saved.data:
+                self._delete_from_s3(bucket, storage_key)
+                raise HTTPException(status_code=500, detail="Generated PDF insert failed")
+            return saved.data[0]
+        except HTTPException:
+            self._delete_from_s3(bucket, storage_key)
+            raise
+        except Exception as exc:
+            self._delete_from_s3(bucket, storage_key)
+            raise HTTPException(status_code=500, detail=f"Failed to save generated PDF: {exc}") from exc
 
     def create_generated_text_file(
         self,

@@ -188,6 +188,22 @@ const FolderPanel = ({ selectedFolder, onSelectFolder, onSelectFile, onFolderDel
   }, [foldersStorageKey, userLoading, userScope]);
 
   useEffect(() => {
+    const refreshTree = async () => {
+      try {
+        await loadFolders();
+        if (selectedFolder?.id) {
+          await loadFolderFiles(selectedFolder.id, { force: true });
+        }
+      } catch {
+        // Ignore refresh errors; the next server poll will recover.
+      }
+    };
+
+    window.addEventListener('neuranote:files-updated', refreshTree);
+    return () => window.removeEventListener('neuranote:files-updated', refreshTree);
+  }, [selectedFolder?.id, userScope, userLoading]);
+
+  useEffect(() => {
     if (selectedFolder) {
       setExpanded((prev) => ({ ...prev, [selectedFolder.id]: true }));
       loadFolderFiles(selectedFolder.id);

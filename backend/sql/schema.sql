@@ -144,3 +144,74 @@ CREATE POLICY IF NOT EXISTS uploads_delete ON uploads
         auth.uid() = user_id OR
         CURRENT_SETTING('request.jwt.claims')::json->>'role' = 'service_role'
     );
+
+-- ========================================
+-- MINDMAPS & MINDMAP_NODES TABLES
+-- ========================================
+
+CREATE TABLE IF NOT EXISTS mindmaps (
+    id SERIAL PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title VARCHAR(255) NOT NULL,
+    description TEXT,
+    source_filename VARCHAR(255),
+    source_text TEXT,
+    status VARCHAR(50) DEFAULT 'draft' NOT NULL,
+    ai_model VARCHAR(50) DEFAULT 'gpt-3.5-turbo' NOT NULL,
+    estimated_cost DOUBLE PRECISION,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS mindmap_nodes (
+    id SERIAL PRIMARY KEY,
+    mindmap_id INTEGER NOT NULL REFERENCES mindmaps(id) ON DELETE CASCADE,
+    parent_id INTEGER REFERENCES mindmap_nodes(id) ON DELETE CASCADE,
+    content VARCHAR(500) NOT NULL,
+    notes TEXT,
+    color VARCHAR(7) DEFAULT '#6366f1' NOT NULL,
+    position_x DOUBLE PRECISION DEFAULT 0 NOT NULL,
+    position_y DOUBLE PRECISION DEFAULT 0 NOT NULL,
+    is_expanded BOOLEAN DEFAULT TRUE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_mindmaps_user_id ON mindmaps(user_id);
+CREATE INDEX IF NOT EXISTS idx_mindmap_nodes_mindmap_id ON mindmap_nodes(mindmap_id);
+CREATE INDEX IF NOT EXISTS idx_mindmap_nodes_parent_id ON mindmap_nodes(parent_id);
+
+-- Enable RLS
+ALTER TABLE mindmaps ENABLE ROW LEVEL SECURITY;
+ALTER TABLE mindmap_nodes ENABLE ROW LEVEL SECURITY;
+
+-- Users can only manage their own mind maps
+CREATE POLICY IF NOT EXISTS mindmaps_self_access ON mindmaps
+    FOR ALL USING (auth.uid() = user_id)
+    WITH CHECK (auth.uid() = user_id);
+
+-- Service role can access all mind maps
+CREATE POLICY IF NOT EXISTS mindmaps_service_role ON mindmaps
+    FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+-- Users can only manage nodes of their own mind maps
+CREATE POLICY IF NOT EXISTS mindmap_nodes_self_access ON mindmap_nodes
+    FOR ALL USING (
+        EXISTS (
+            SELECT 1 FROM mindmaps 
+            WHERE mindmaps.id = mindmap_nodes.mindmap_id 
+            AND mindmaps.user_id = auth.uid()
+        )
+    )
+    WITH CHECK (
+        EXISTS (
+            SELECT 1 FROM mindmaps 
+            WHERE mindmaps.id = mindmap_nodes.mindmap_id 
+            AND mindmaps.user_id = auth.uid()
+        )
+    );
+
+-- Service role can access all mind map nodes
+CREATE POLICY IF NOT EXISTS mindmap_nodes_service_role ON mindmap_nodes
+    FOR ALL TO service_role USING (true) WITH CHECK (true);
+

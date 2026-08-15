@@ -116,6 +116,17 @@ except ImportError as e:
 except Exception as e:
     print(f"[WARN] Auth/user routes skipped: {e}")
 
+
+# Mind Map routes (M3)
+try:
+    from routes.mindmap_routes import router as mindmap_router
+    app.include_router(mindmap_router, tags=["mindmaps"])
+    print("Mind map routes loaded (OpenAI GPT integration)")
+except ImportError as e:
+    print(f"Mind map routes skipped: {e}")
+
+
+
 # Quiz routes (M4)
 try:
     from routes.quiz_routes import router as quiz_router
@@ -129,7 +140,7 @@ except ImportError as e:
     missing = str(e).replace("No module named ", "").strip("'")
     print(f"[WARN] Quiz routes skipped (missing: {missing}). Run: pip install -r requirements-m4quiz.txt")
 except Exception as e:
-    print(f"[WARN] Quiz routes skipped: {e}")
+    print(f"[WARN] Quiz routes skipped: {e}")   
 
     # Flashcards routes
 try:
@@ -156,6 +167,7 @@ _optional_routes = [
     ("routes.calendar",      "router", "/api/v1/calendar",      ["calendar"]),
     ("routes.notifications", "router", "/api/v1/notifications", ["notifications"]),
     ("routes.task_list",     "router", "/api/v1/task-list",     ["task-list"]),
+    ("routes.mindmap_routes", "router", "",                      []),
 ]
 
 for _module, _attr, _prefix, _tags in _optional_routes:

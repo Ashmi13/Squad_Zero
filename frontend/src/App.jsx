@@ -47,6 +47,7 @@ import { workspaceApi } from '@/services/workspaceApi';
 import { getScopedStorageKey, useSupabaseUser } from '@/hooks/useSupabaseUser';
 import './index.css';
 
+const MindMapPage = React.lazy(() => import('@/pages/MindMapPage'));
 const ACTIVE_WORKSPACE_FOLDER_KEY = 'neuranote_active_workspace_folder';
 
 // Spinner shown while a lazy chunk is loading
@@ -119,6 +120,7 @@ const AppLayout = () => {
     else if (p === '/flashcards') setActiveView('flashcards');
     else if (p === '/second-brain') setActiveView('second-brain');
     else if (p.startsWith('/files')) setActiveView('files');
+    else if (p.startsWith('/mindmap')) setActiveView('mindmap');
     else if (p === '/admin') setActiveView('admin');
   }, [location.pathname]);
 
@@ -234,6 +236,7 @@ const AppLayout = () => {
             <Route path="/pomodoro" element={<PomodoroPage />} />
             <Route path="/flashcards" element={<FlashcardsPage />} />
             <Route path="/second-brain" element={<SecondBrainPage />} />
+            <Route path="/mindmap"      element={<MindMapPage />} />
 
             {/* Fallback */}
             <Route path="*" element={<Navigate to="/" replace />} />

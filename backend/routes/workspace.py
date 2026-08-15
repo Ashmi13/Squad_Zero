@@ -143,7 +143,7 @@ async def delete_file(
     supabase: Client = Depends(get_supabase_service_client),
 ):
     service = WorkspaceService(supabase)
-    result = service.delete_file(user_id=user_id, file_id=file_id)
+    result = service._file(user_id=user_id, file_id=file_id)
     return {"status": "success", **result}
 
 

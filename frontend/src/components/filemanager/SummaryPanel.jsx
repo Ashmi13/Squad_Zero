@@ -129,6 +129,21 @@ const SummaryPanel = ({ title, summary, onClose, panelLabel = 'GENERATED SUMMARY
     }
   };
 
+  const markdownComponents = {
+    h1: ({ children }) => <h1 style={{ fontSize: 18, margin: '6px 0 10px', color: '#111827' }}>{children}</h1>,
+    h2: ({ children }) => <h2 style={{ fontSize: 16, margin: '10px 0 8px', color: '#1f2937' }}>{children}</h2>,
+    h3: ({ children }) => <h3 style={{ fontSize: 14, margin: '8px 0 6px', color: '#334155' }}>{children}</h3>,
+    p: ({ children }) => <p style={{ margin: '0 0 8px', color: '#1f2937' }}>{children}</p>,
+    ul: ({ children }) => <ul style={{ margin: '0 0 8px 0', paddingLeft: 18 }}>{children}</ul>,
+    li: ({ children }) => <li style={{ marginBottom: 4, color: '#1f2937' }}>{children}</li>,
+    strong: ({ children }) => <strong style={{ color: '#111827' }}>{children}</strong>,
+    blockquote: ({ children }) => (
+      <blockquote style={{ margin: '6px 0', padding: '6px 10px', borderLeft: '3px solid #6366f1', background: '#eef2ff', borderRadius: 8 }}>
+        {children}
+      </blockquote>
+    ),
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'linear-gradient(180deg, #ffffff 0%, #f7f8ff 100%)' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 18px', borderBottom: '1px solid #e8eaf4' }}>
@@ -159,9 +174,9 @@ const SummaryPanel = ({ title, summary, onClose, panelLabel = 'GENERATED SUMMARY
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 0.9fr', gap: 16, padding: 16, minHeight: 0, flex: 1 }}>
-        <div style={{ minHeight: 0, overflow: 'auto', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 16, padding: 18, boxShadow: '0 8px 24px rgba(17,24,39,0.05)' }} onMouseUp={handleSelection}>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14, alignItems: 'center' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 0.9fr', gap: 16, padding: 16, minHeight: 0, flex: 1, overflow: 'hidden' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 16, boxShadow: '0 8px 24px rgba(17,24,39,0.05)' }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', padding: 18, paddingBottom: 0, alignItems: 'center' }}>
             <button onClick={handleAddTag} disabled={!selectedText} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, border: '1px solid #d9dcef', background: selectedText ? '#eef2ff' : '#f4f5f9', color: '#4f46e5', padding: '8px 12px', borderRadius: 10, cursor: selectedText ? 'pointer' : 'not-allowed' }}>
               <Tag size={14} /> Tag Selection
             </button>
@@ -170,24 +185,9 @@ const SummaryPanel = ({ title, summary, onClose, panelLabel = 'GENERATED SUMMARY
             </div>
           </div>
 
-          <div style={{ fontSize: 14, lineHeight: 1.7, color: '#1f2937' }}>
+          <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: '14px 18px 18px 18px', fontSize: 14, lineHeight: 1.7, color: '#1f2937' }} onMouseUp={handleSelection}>
             {markdownSummary ? (
-              <ReactMarkdown
-                components={{
-                  h1: ({ children }) => <h1 style={{ fontSize: 24, margin: '8px 0 12px', color: '#111827' }}>{children}</h1>,
-                  h2: ({ children }) => <h2 style={{ fontSize: 20, margin: '14px 0 10px', color: '#1f2937' }}>{children}</h2>,
-                  h3: ({ children }) => <h3 style={{ fontSize: 17, margin: '12px 0 8px', color: '#334155' }}>{children}</h3>,
-                  p: ({ children }) => <p style={{ margin: '0 0 10px', color: '#1f2937' }}>{children}</p>,
-                  ul: ({ children }) => <ul style={{ margin: '0 0 12px 0', paddingLeft: 20 }}>{children}</ul>,
-                  li: ({ children }) => <li style={{ marginBottom: 6, color: '#1f2937' }}>{children}</li>,
-                  strong: ({ children }) => <strong style={{ color: '#111827' }}>{children}</strong>,
-                  blockquote: ({ children }) => (
-                    <blockquote style={{ margin: '8px 0', padding: '8px 12px', borderLeft: '3px solid #6366f1', background: '#eef2ff', borderRadius: 8 }}>
-                      {children}
-                    </blockquote>
-                  ),
-                }}
-              >
+              <ReactMarkdown components={markdownComponents}>
                 {markdownSummary}
               </ReactMarkdown>
             ) : (
@@ -218,8 +218,16 @@ const SummaryPanel = ({ title, summary, onClose, panelLabel = 'GENERATED SUMMARY
             >
               <Send size={14} /> {isAsking ? 'Asking...' : 'Ask Question'}
             </button>
-            {askError && <div style={{ marginTop: 10, color: '#b91c1c', fontSize: 13 }}>{askError}</div>}
-            {answer && <div style={{ marginTop: 10, padding: 12, borderRadius: 12, background: '#f8fafc', border: '1px solid #e5e7eb', fontSize: 13, lineHeight: 1.6, color: '#111827' }}>{answer}</div>}
+            {askError && (
+              <div style={{ marginTop: 10, color: '#b91c1c', fontSize: 13 }}>{askError}</div>
+            )}
+            {answer && (
+              <div style={{ marginTop: 10, padding: 12, borderRadius: 12, background: '#f8fafc', border: '1px solid #e5e7eb', fontSize: 13, lineHeight: 1.6, color: '#111827' ,  maxHeight: 260, overflowY: 'auto',}}>
+                <ReactMarkdown components={markdownComponents}>
+                  {answer}
+                </ReactMarkdown>
+              </div>
+            )}
           </div>
 
           <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 16, padding: 14, boxShadow: '0 8px 24px rgba(17,24,39,0.05)', flex: 1, minHeight: 0, overflow: 'auto' }}>

@@ -43,14 +43,7 @@ def _clean_sentence(s: str) -> str:
 
 
 def _generate_local_flashcards(text: str, target: int = 12) -> List[Flashcard]:
-    """
-    Generate flashcards from text without AI using heuristic extraction.
-    Looks for:
-    1. Definition patterns  (X is/are Y, X refers to Y, X means Y)
-    2. Key-term bold/caps phrases with explanatory sentences
-    3. Numbered or bulleted list items
-    4. Important factual sentences
-    """
+    
     cards: List[Flashcard] = []
     seen_questions: set = set()
 
@@ -244,10 +237,7 @@ async def generate_flashcards(
     file: UploadFile = File(...),
     user_id: str = Depends(get_current_user_id),
 ):
-    """
-    Generate flashcards from an uploaded PDF file.
-    Tries AI generation first; falls back to local extraction if AI is unavailable.
-    """
+
     try:
         filename = file.filename or ""
         content_type = file.content_type or ""

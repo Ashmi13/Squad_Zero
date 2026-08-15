@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { X, User, Palette, Bot, Lock, Upload, HardDrive, CreditCard} from 'lucide-react';
+import { X, User, Palette, Lock, Upload, HardDrive, CreditCard} from 'lucide-react';
 import { useTheme } from '@/context/ThemeContext';
 import { config } from '@/config/env';
 import { getAccessToken, clearTokens } from '@/utils/tokenStorage';
@@ -9,8 +9,6 @@ const SettingsPanel = ({ onClose }) => {
   const [activeSection, setActiveSection] = useState('profile');
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
-  const [responseStyle, setResponseStyle] = useState('Simple');
-  const [tone, setTone] = useState('Friendly');
   const [reminder, setReminder] = useState(false);
   const [reminderTime, setReminderTime] = useState('09:00');
   const [saveChatHistory, setSaveChatHistory] = useState(true);
@@ -128,7 +126,6 @@ const SettingsPanel = ({ onClose }) => {
   const sections = [
     { id: 'profile', label: 'Profile', icon: User },
     { id: 'appearance', label: 'Appearance', icon: Palette },
-    { id: 'ai', label: 'AI Preferences', icon: Bot },
      { id: 'storage', label: 'Storage', icon: HardDrive },
   { id: 'payment', label: 'Payment', icon: CreditCard },
     { id: 'privacy', label: 'Privacy', icon: Lock },
@@ -298,55 +295,6 @@ const SettingsPanel = ({ onClose }) => {
                     }}
                   >
                     {size}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        );
-
-      case 'ai':
-        return (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '700', color: theme.colors.text.primary }}>🤖 AI Preferences</h3>
-
-            {/* Response style */}
-            <div>
-              <p style={{ margin: '0 0 10px', fontSize: '14px', fontWeight: '600', color: theme.colors.text.primary }}>Response Style</p>
-              <div style={{ display: 'flex', gap: '10px' }}>
-                {['Simple', 'Detailed'].map(style => (
-                  <button
-                    key={style}
-                    onClick={() => setResponseStyle(style)}
-                    style={{
-                      padding: '8px 18px', borderRadius: '10px', cursor: 'pointer',
-                      border: '1px solid #eee', fontSize: '13px', fontWeight: '600',
-                      backgroundColor: responseStyle === style ? '#6C5DD3' : 'white',
-                      color: responseStyle === style ? 'white' : '#555',
-                    }}
-                  >
-                    {style}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Tone */}
-            <div>
-              <p style={{ margin: '0 0 10px', fontSize: '14px', fontWeight: '600', color: theme.colors.text.primary }}>Tone</p>
-              <div style={{ display: 'flex', gap: '10px' }}>
-                {['Friendly', 'Formal'].map(t => (
-                  <button
-                    key={t}
-                    onClick={() => setTone(t)}
-                    style={{
-                      padding: '8px 18px', borderRadius: '10px', cursor: 'pointer',
-                      border: '1px solid #eee', fontSize: '13px', fontWeight: '600',
-                      backgroundColor: tone === t ? '#6C5DD3' : 'white',
-                      color: tone === t ? 'white' : '#555',
-                    }}
-                  >
-                    {t}
                   </button>
                 ))}
               </div>

@@ -34,6 +34,7 @@ import FileViewer from '../components/filemanager/FileViewer';
 import TopBar from '../components/filemanager/TopBar';
 import { useTheme } from '@/context/ThemeContext';
 import ProductivityDashboard from '@/components/dashboard/ProductivityDashboard';
+import { getScopedStorageKey, useSupabaseUser } from '@/hooks/useSupabaseUser';
 
 const sanitizeFilesForStorage = (items) => {
   const walk = (nodes) => (Array.isArray(nodes) ? nodes : []).map((item) => {
@@ -71,9 +72,50 @@ const FileManagerPage = ({ activeView, setActiveView }) => {
   const { theme } = useTheme();
   const location = useLocation();
   const navigate = useNavigate();
+  const { userScope, loading: userLoading } = useSupabaseUser();
+
+  const filesStorageKey = getScopedStorageKey('neuranote_files', userScope);
+  const foldersStorageKey = getScopedStorageKey('neuranote_folders', userScope);
 
   const [selectedFolder, setSelectedFolder] = useState(null);
   const [selectedFile, setSelectedFile] = useState(null);
+  const [files, setFiles] = useState({});
+  const [folders, setFolders] = useState([]);
+
+  useEffect(() => {
+    if (userLoading) {
+      return;
+    }
+
+    try {
+      const savedFiles = localStorage.getItem(filesStorageKey);
+      const savedFolders = localStorage.getItem(foldersStorageKey);
+      setFiles(savedFiles ? JSON.parse(savedFiles) : {});
+      setFolders(savedFolders ? JSON.parse(savedFolders) : []);
+    } catch {
+      setFiles({});
+      setFolders([]);
+    }
+
+    setSelectedFolder(null);
+    setSelectedFile(null);
+  }, [filesStorageKey, foldersStorageKey, userLoading]);
+
+  useEffect(() => {
+    if (userLoading) {
+      return;
+    }
+
+    localStorage.setItem(filesStorageKey, JSON.stringify(sanitizeFilesForStorage(files)));
+  }, [files, filesStorageKey, userLoading]);
+
+  useEffect(() => {
+    if (userLoading) {
+      return;
+    }
+
+    localStorage.setItem(foldersStorageKey, JSON.stringify(folders));
+  }, [folders, foldersStorageKey, userLoading]);
 
   useEffect(() => {
     if (location.state?.navigatedFromRecent) {
@@ -86,26 +128,14 @@ const FileManagerPage = ({ activeView, setActiveView }) => {
     }
   }, [location.state]);
 
-  const [files, setFiles] = useState(() => {
-    const saved = localStorage.getItem('neuranote_files');
-    return saved ? JSON.parse(saved) : {};
-  });
-
-  const [folders, setFolders] = useState(() => {
-    const saved = localStorage.getItem('neuranote_folders');
-    return saved ? JSON.parse(saved) : [];
-  });
-
   const handleFilesUpdate = (updatedFiles) => {
     if (typeof updatedFiles === 'function') {
       setFiles(prevFiles => {
         const newFiles = updatedFiles(prevFiles);
-        localStorage.setItem('neuranote_files', JSON.stringify(sanitizeFilesForStorage(newFiles)));
         return newFiles;
       });
     } else {
       setFiles(updatedFiles);
-      localStorage.setItem('neuranote_files', JSON.stringify(sanitizeFilesForStorage(updatedFiles)));
     }
   };
 
@@ -113,11 +143,9 @@ const FileManagerPage = ({ activeView, setActiveView }) => {
     const updatedFiles = { ...files };
     delete updatedFiles[folderName];
     setFiles(updatedFiles);
-    localStorage.setItem('neuranote_files', JSON.stringify(sanitizeFilesForStorage(updatedFiles)));
 
     const updatedFolders = folders.filter(f => f.name !== folderName);
     setFolders(updatedFolders);
-    localStorage.setItem('neuranote_folders', JSON.stringify(updatedFolders));
 
     setSelectedFolder(null);
     setSelectedFile(null);
@@ -128,13 +156,11 @@ const FileManagerPage = ({ activeView, setActiveView }) => {
     updatedFiles[newName] = updatedFiles[oldName] || [];
     delete updatedFiles[oldName];
     setFiles(updatedFiles);
-    localStorage.setItem('neuranote_files', JSON.stringify(sanitizeFilesForStorage(updatedFiles)));
 
     const updatedFolders = folders.map(f =>
       f.name === oldName ? { ...f, name: newName } : f
     );
     setFolders(updatedFolders);
-    localStorage.setItem('neuranote_folders', JSON.stringify(updatedFolders));
 
     setSelectedFolder(prev => prev?.name === oldName ? { ...prev, name: newName } : prev);
   };

@@ -44,6 +44,7 @@ const FlashcardsPage = lazy(() => import('@/pages/FlashcardsPage'));
 import DevNav from '@/components/DevNav';
 import { pomodoroTimer } from '@/utils/pomodoroTimer';
 import { workspaceApi } from '@/services/workspaceApi';
+import { getScopedStorageKey, useSupabaseUser } from '@/hooks/useSupabaseUser';
 import './index.css';
 
 const ACTIVE_WORKSPACE_FOLDER_KEY = 'neuranote_active_workspace_folder';
@@ -71,18 +72,9 @@ const noRailPages = ['/', '/login', '/signup', '/oauth/callback'];
 const AppLayout = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, isLoading } = useAuth();
-  
+  const { userScope, loading: userLoading } = useSupabaseUser();
   const [activeView, setActiveView] = useState('home');
-  const [quizStep, setQuizStep] = useState('upload'); // 'upload' | 'taking' | 'results'
-  const [selectedWorkspaceFolder, setSelectedWorkspaceFolder] = useState(() => {
-    try {
-      const savedFolder = localStorage.getItem(ACTIVE_WORKSPACE_FOLDER_KEY);
-      return savedFolder ? JSON.parse(savedFolder) : null;
-    } catch {
-      return null;
-    }
-  });
+  const [selectedWorkspaceFolder, setSelectedWorkspaceFolder] = useState(null);
   const lastSavedCompletionVersionRef = useRef(0);
 
   const showRail = !noRailPages.includes(location.pathname);
@@ -94,12 +86,25 @@ const AppLayout = () => {
 
   // Persist selected workspace folder
   useEffect(() => {
+    if (userLoading) return;
+
+    try {
+      const savedFolder = localStorage.getItem(getScopedStorageKey(ACTIVE_WORKSPACE_FOLDER_KEY, userScope));
+      setSelectedWorkspaceFolder(savedFolder ? JSON.parse(savedFolder) : null);
+    } catch {
+      setSelectedWorkspaceFolder(null);
+    }
+  }, [userLoading, userScope]);
+
+  useEffect(() => {
+    if (userLoading) return;
+
     if (selectedWorkspaceFolder) {
-      localStorage.setItem(ACTIVE_WORKSPACE_FOLDER_KEY, JSON.stringify(selectedWorkspaceFolder));
+      localStorage.setItem(getScopedStorageKey(ACTIVE_WORKSPACE_FOLDER_KEY, userScope), JSON.stringify(selectedWorkspaceFolder));
       return;
     }
-    localStorage.removeItem(ACTIVE_WORKSPACE_FOLDER_KEY);
-  }, [selectedWorkspaceFolder]);
+    localStorage.removeItem(getScopedStorageKey(ACTIVE_WORKSPACE_FOLDER_KEY, userScope));
+  }, [selectedWorkspaceFolder, userLoading, userScope]);
 
   // Sync activeView with current URL
   useEffect(() => {

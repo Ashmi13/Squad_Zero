@@ -27,6 +27,7 @@ from app.schemas.auth import (
     PasswordResetConfirm,
     RefreshTokenRequest,
     SessionResponse,
+    SuspendedAccountInfoResponse,
     UserResponse,
 )
 from app.services.auth_service import AuthService
@@ -73,7 +74,7 @@ def _create_profile_bucket_if_missing(supabase_client: Any, bucket: str) -> None
 async def signup(
     request: SignupRequest,
     response: Response,
-    supabase_client: Any = Depends(get_supabase_service_client),
+    supabase_client: Any = Depends(get_supabase_client),
 ):
     """Sign up a new user"""
     try:
@@ -141,6 +142,7 @@ async def signin(
                 "sub": user_data["id"],
                 "email": user_data["email"],
                 "role": user_data.get("role", "user"),
+                "is_suspended": bool(user_data.get("is_suspended", False)),
             }
         )
 
@@ -149,6 +151,7 @@ async def signin(
                 "sub": user_data["id"],
                 "email": user_data["email"],
                 "role": user_data.get("role", "user"),
+                "is_suspended": bool(user_data.get("is_suspended", False)),
             }
         )
 
@@ -163,11 +166,32 @@ async def signin(
                 email=user_data["email"],
                 full_name=user_data.get("full_name"),
                 role=user_data.get("role", "user"),
+                is_suspended=bool(user_data.get("is_suspended", False)),
             ),
         )
 
     except Exception as e:
-        raise HTTPException(status_code=401, detail=f"Signin failed: {str(e)}")
+        message = str(e)
+        if "suspend" in message.lower():
+            raise HTTPException(
+                status_code=403,
+                detail="Your account has been suspended. Please contact NeuroNote support.",
+            )
+        raise HTTPException(status_code=401, detail=f"Signin failed: {message}")
+
+
+@router.get("/suspended-info", response_model=SuspendedAccountInfoResponse)
+async def get_suspended_account_info():
+    """Public support details for the suspended-account page."""
+    return SuspendedAccountInfoResponse(
+        title="Your account has been suspended",
+        message=(
+            "Your access to Neura Note has been temporarily blocked by an administrator. "
+            "If you believe this is a mistake, please contact our support team."
+        ),
+        support_name=settings.support_contact_name,
+        contact_email=settings.support_contact_email,
+    )
 
 
 @router.post("/logout")
@@ -186,7 +210,7 @@ async def get_current_profile(
     try:
         user_response = (
             supabase_client.table("users")
-            .select("id,email,full_name,avatar_url,role")
+            .select("id,email,full_name,avatar_url,role,is_suspended")
             .eq("id", user_id)
             .single()
             .execute()
@@ -195,12 +219,19 @@ async def get_current_profile(
         if not user_data:
             raise HTTPException(status_code=404, detail="User profile not found")
 
+        effective_role = (
+            "admin"
+            if settings.super_admin_id and str(user_data.get("id")) == str(settings.super_admin_id)
+            else user_data.get("role", "user")
+        )
+
         return UserResponse(
             id=user_data["id"],
             email=user_data["email"],
             full_name=user_data.get("full_name"),
             avatar_url=user_data.get("avatar_url"),
-            role=user_data.get("role", "user"),
+            role=effective_role,
+            is_suspended=bool(user_data.get("is_suspended", False)),
         )
     except HTTPException:
         raise
@@ -232,6 +263,7 @@ async def update_current_profile(
             full_name=row.get("full_name"),
             avatar_url=row.get("avatar_url"),
             role=row.get("role", "user"),
+            is_suspended=bool(row.get("is_suspended", False)),
         )
     except HTTPException:
         raise
@@ -476,3 +508,51 @@ async def confirm_password_reset(
 
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Password reset failed: {str(e)}")
+
+
+@router.get("/verification-status")
+async def get_verification_status(
+    email: str,
+    supabase_client: Any = Depends(get_supabase_service_client),
+):
+    """Check whether an email is verified using Supabase Auth Admin API."""
+    normalized_email = (email or "").strip().lower()
+    if not normalized_email:
+        raise HTTPException(status_code=400, detail="Email is required")
+
+    try:
+        users_response = supabase_client.auth.admin.list_users()
+
+        users_payload = []
+        if isinstance(users_response, dict):
+            users_payload = users_response.get("users") or []
+        elif hasattr(users_response, "users"):
+            users_payload = getattr(users_response, "users") or []
+        elif isinstance(users_response, list):
+            users_payload = users_response
+
+        for user in users_payload:
+            user_email = ""
+            confirmed_at = None
+
+            if isinstance(user, dict):
+                user_email = str(user.get("email") or "").strip().lower()
+                confirmed_at = user.get("email_confirmed_at")
+            else:
+                user_email = str(getattr(user, "email", "") or "").strip().lower()
+                confirmed_at = getattr(user, "email_confirmed_at", None)
+
+            if user_email == normalized_email:
+                return {
+                    "email": normalized_email,
+                    "is_verified": bool(confirmed_at),
+                    "email_confirmed_at": confirmed_at,
+                }
+
+        return {
+            "email": normalized_email,
+            "is_verified": False,
+            "email_confirmed_at": None,
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to check verification status: {str(exc)}")

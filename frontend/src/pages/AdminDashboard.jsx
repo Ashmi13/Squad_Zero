@@ -135,12 +135,12 @@ const AdminDashboard = () => {
     return tId;
   };
 
-  const handleStatusToggle = async (userId, currentStatus) => {
+  const handleStatusToggle = async (userId, currentIsSuspended) => {
     if (userId === SUPER_ADMIN_ID) return;
-    const newStatus = currentStatus === 'suspended' ? 'approved' : 'suspended';
+    const nextSuspended = !Boolean(currentIsSuspended);
     try {
-      await axiosInstance.patch(`/api/v1/admin/users/${userId}`, { status: newStatus });
-      setUsers(prev => prev.map(u => u.id === userId ? { ...u, status: newStatus } : u));
+      await axiosInstance.patch(`/api/v1/admin/users/${userId}/suspend`, { is_suspended: nextSuspended });
+      setUsers(prev => prev.map(u => u.id === userId ? { ...u, is_suspended: nextSuspended } : u));
     } catch (err) {
       console.error('Status toggle error:', err);
       alert('Failed to update user status');
@@ -401,7 +401,7 @@ const AdminDashboard = () => {
                                   </span>
                                 )}
                                 
-                                {user.status === 'suspended' && (
+                                {Boolean(user.is_suspended) && (
                                   <span style={{
                                     padding: '4px 12px', borderRadius: '6px', fontSize: '11px', fontWeight: '700',
                                     backgroundColor: 'rgba(239, 68, 68, 0.1)',
@@ -431,7 +431,7 @@ const AdminDashboard = () => {
                                 </button>
 
                                 <button
-                                  onClick={() => handleStatusToggle(user.id, user.status)}
+                                  onClick={() => handleStatusToggle(user.id, user.is_suspended)}
                                   disabled={user.id === SUPER_ADMIN_ID}
                                   style={{
                                     padding: '8px', borderRadius: '8px', border: 'none', cursor: user.id === SUPER_ADMIN_ID ? 'not-allowed' : 'pointer',
@@ -440,7 +440,7 @@ const AdminDashboard = () => {
                                   }}
                                   onMouseEnter={(e) => { if (user.id !== SUPER_ADMIN_ID) e.currentTarget.style.color = '#f59e0b'; e.currentTarget.style.backgroundColor = '#334155'; }}
                                   onMouseLeave={(e) => { e.currentTarget.style.color = '#94a3b8'; e.currentTarget.style.backgroundColor = 'transparent'; }}
-                                  title={user.status === 'suspended' ? "Unsuspend" : "Suspend"}
+                                  title={Boolean(user.is_suspended) ? "Unsuspend" : "Suspend"}
                                 >
                                   <AlertCircle size={18} />
                                 </button>

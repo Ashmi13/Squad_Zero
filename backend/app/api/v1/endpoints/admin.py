@@ -32,15 +32,25 @@ class UserCreateRequest(BaseModel):
 
 class UserUpdateRequest(BaseModel):
     full_name: Optional[str] = None
+    is_suspended: Optional[bool] = None
+    status: Optional[str] = None
+
+class SuspensionUpdateRequest(BaseModel):
+    is_suspended: bool
 
 async def check_admin_role(current_user: Dict[str, Any] = Depends(get_current_user), supabase_client: Client = Depends(get_supabase_service_client)):
     """Check if the current user has the admin role"""
     user_id = current_user.get("sub")
     if not user_id:
         raise HTTPException(status_code=401, detail="Invalid token")
+
+    # Super admin must always have access, even if role column is not explicitly "admin".
+    if SUPER_ADMIN_ID and str(user_id) == str(SUPER_ADMIN_ID):
+        return user_id
     
     response = supabase_client.table("users").select("role").eq("id", user_id).single().execute()
-    if not response.data or response.data.get("role") != "admin":
+    role = str((response.data or {}).get("role", "")).lower()
+    if role != "admin":
         raise HTTPException(status_code=403, detail="Not authorized. Admin access required.")
     return user_id
 
@@ -90,6 +100,10 @@ async def update_user(
     update_data = {}
     if request.full_name is not None:
         update_data["full_name"] = request.full_name
+    if request.is_suspended is not None:
+        update_data["is_suspended"] = bool(request.is_suspended)
+    elif request.status is not None:
+        update_data["is_suspended"] = str(request.status).lower() == "suspended"
 
     if not update_data:
         raise HTTPException(status_code=400, detail="No fields to update")
@@ -97,8 +111,30 @@ async def update_user(
     response = supabase_client.table("users").update(update_data).eq("id", user_id).execute()
     if not response.data:
         raise HTTPException(status_code=404, detail="User not found")
-    
+
     return response.data[0]
+
+@router.patch("/users/{user_id}/suspend")
+async def toggle_user_suspension(
+    user_id: str,
+    request: SuspensionUpdateRequest,
+    admin_id: str = Depends(check_admin_role),
+    supabase_client: Client = Depends(get_supabase_service_client),
+):
+    """Suspend or unsuspend a user account."""
+    if user_id == SUPER_ADMIN_ID:
+        raise HTTPException(status_code=403, detail="Cannot suspend the Super Admin")
+
+    response = supabase_client.table("users").update({"is_suspended": bool(request.is_suspended)}).eq("id", user_id).execute()
+    if not response.data:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user = response.data[0]
+    return {
+        "status": "success",
+        "user_id": user_id,
+        "is_suspended": bool(user.get("is_suspended", False)),
+    }
 
 @router.delete("/users/{user_id}")
 async def delete_user(

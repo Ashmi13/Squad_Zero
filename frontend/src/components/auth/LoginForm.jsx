@@ -50,6 +50,15 @@ export function LoginForm() {
         password: data.password,
       });
 
+      if (response.data?.user?.is_suspended) {
+        setIsError(true);
+        setErrorMessage('This account has been suspended. Please contact support.');
+        setTimeout(() => {
+          window.location.href = '/account-suspended';
+        }, 600);
+        return;
+      }
+
       setTokens(response.data.access_token, response.data.refresh_token);
       localStorage.setItem('user', JSON.stringify(response.data.user));
 
@@ -58,10 +67,21 @@ export function LoginForm() {
         window.location.href = '/dashboard';
       }, 1000);
     } catch (error) {
+      const detail = error.response?.data?.detail || 'Invalid email or password. Please try again.';
+      const isSuspended = /suspend|suspended/i.test(detail);
+
       setIsError(true);
       setErrorMessage(
-        error.response?.data?.detail || 'Invalid email or password. Please try again.'
+        isSuspended
+          ? 'This account has been suspended. Please contact support.'
+          : detail
       );
+
+      if (isSuspended) {
+        setTimeout(() => {
+          window.location.href = '/account-suspended';
+        }, 600);
+      }
     } finally {
       setIsLoading(false);
     }

@@ -2,6 +2,43 @@ import { config } from '@/config/env';
 import { authFetch, getValidAccessToken, clearAuthAndRedirect } from '@/utils/authSession';
 
 const API_BASE = config.apiBaseUrl || '';
+const ROUTE_LIKE_LABEL = /^\/[a-z0-9][a-z0-9\-_/]*$/i;
+const BLOCKED_ENDPOINT_LABELS = new Set([
+  'verify-email',
+  '/verify-email',
+  'login',
+  '/login',
+  'signup',
+  '/signup',
+  'forgot-password',
+  '/forgot-password',
+  'reset-password',
+  '/reset-password',
+  'change-password',
+  '/change-password',
+  'account-verified',
+  '/account-verified',
+  'oauth/callback',
+  '/oauth/callback',
+  'account-suspended',
+  '/account-suspended',
+]);
+
+function shouldHideEndpointLikeLabel(label) {
+  const normalized = String(label || '').trim().toLowerCase();
+  if (!normalized) return true;
+  if (ROUTE_LIKE_LABEL.test(normalized)) return true;
+  return BLOCKED_ENDPOINT_LABELS.has(normalized);
+}
+
+function filterFolderTree(nodes = []) {
+  return (nodes || [])
+    .filter((node) => !shouldHideEndpointLikeLabel(node?.name))
+    .map((node) => ({
+      ...node,
+      children: filterFolderTree(node.children || []),
+    }));
+}
 
 async function request(path, options = {}) {
   const res = await authFetch(path, options);
@@ -21,8 +58,12 @@ async function request(path, options = {}) {
 }
 
 export const workspaceApi = {
-  getFolders() {
-    return request('/api/v1/workspace/folders');
+  async getFolders() {
+    const data = await request('/api/v1/workspace/folders');
+    return {
+      ...data,
+      folders: filterFolderTree(data?.folders || []),
+    };
   },
 
   createFolder(name, parentFolderId = null) {
@@ -49,7 +90,10 @@ export const workspaceApi = {
 
   getFiles(folderId = null) {
     const query = folderId ? `?folder_id=${encodeURIComponent(folderId)}` : '';
-    return request(`/api/v1/workspace/files${query}`);
+    return request(`/api/v1/workspace/files${query}`).then((data) => ({
+      ...data,
+      files: (data?.files || []).filter((file) => !shouldHideEndpointLikeLabel(file?.name || file?.original_filename)),
+    }));
   },
 
   async getRecentFiles(limit = 5) {
@@ -62,7 +106,7 @@ export const workspaceApi = {
       const historyJson = localStorage.getItem('neuranote_file_history');
       const localHistory = historyJson ? JSON.parse(historyJson) : {};
 
-      const folders = foldersRes?.folders || [];
+      const folders = filterFolderTree(foldersRes?.folders || []);
       const folderMap = {};
       folders.forEach(f => folderMap[f.id] = f);
 

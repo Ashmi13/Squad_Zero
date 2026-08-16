@@ -14,6 +14,46 @@ import {
 
 const LOCAL_FOLDER_MAP_KEY = 'neuranote_local_folder_map';
 const INVALID_WINDOWS_FOLDER_CHARS = /[<>:"/\\|?*\x00-\x1F]/;
+const ROUTE_LIKE_FOLDER_NAME = /^\/[a-z0-9][a-z0-9\-_/]*$/i;
+const HIDDEN_ROUTE_LABELS = new Set([
+  'verify-email',
+  '/verify-email',
+  'login',
+  '/login',
+  'signup',
+  '/signup',
+  'forgot-password',
+  '/forgot-password',
+  'reset-password',
+  '/reset-password',
+  'change-password',
+  '/change-password',
+  'account-verified',
+  '/account-verified',
+  'oauth/callback',
+  '/oauth/callback',
+  'account-suspended',
+  '/account-suspended',
+]);
+
+const shouldHideEndpointLikeName = (value) => {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return true;
+  if (ROUTE_LIKE_FOLDER_NAME.test(normalized)) return true;
+  return HIDDEN_ROUTE_LABELS.has(normalized);
+};
+
+const pruneNonFolderNodes = (nodes) => {
+  return (nodes || [])
+    .filter((node) => {
+      const name = String(node?.name || '').trim();
+      return !shouldHideEndpointLikeName(name);
+    })
+    .map((node) => ({
+      ...node,
+      children: pruneNonFolderNodes(node.children || []),
+    }));
+};
 
 const flattenFoldersForStorage = (nodes, output = []) => {
   (nodes || []).forEach((node) => {
@@ -131,7 +171,7 @@ const FolderPanel = ({ selectedFolder, onSelectFolder, onSelectFile, onFolderDel
           content: inlineAsset ? null : resolvedPayload,
           isParentPDF: (f.file_type || '').toUpperCase() === 'PDF',
         };
-      });
+      }).filter((file) => !shouldHideEndpointLikeName(file.name));
       setFilesByFolder((prev) => ({ ...prev, [folderId]: buildFileTree(normalized) }));
     } catch {
       setFilesByFolder((prev) => ({ ...prev, [folderId]: [] }));
@@ -142,7 +182,7 @@ const FolderPanel = ({ selectedFolder, onSelectFolder, onSelectFile, onFolderDel
 
   const loadFolders = async () => {
     const data = await workspaceApi.getFolders();
-    const nextFolders = data.folders || [];
+    const nextFolders = pruneNonFolderNodes(data.folders || []);
     setFolders(nextFolders);
     localStorage.setItem('neuranote_folders', JSON.stringify(flattenFoldersForStorage(nextFolders)));
   };

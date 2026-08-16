@@ -39,8 +39,9 @@ axiosInstance.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
+    const detail = String(error.response?.data?.detail || '').toLowerCase();
+    const isSuspendedUser = /suspend|suspended/i.test(detail) || error.response?.status === 403 && window.location.pathname !== '/account-suspended';
 
-    // Handle 401 Unauthorized - Token expired
     if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true;
 
@@ -67,6 +68,12 @@ axiosInstance.interceptors.response.use(
         window.location.href = '/login';
         return Promise.reject(refreshError);
       }
+    }
+
+    if (isSuspendedUser && window.location.pathname !== '/account-suspended') {
+      clearTokens();
+      window.location.href = '/account-suspended';
+      return Promise.reject(error);
     }
 
     return Promise.reject(error);

@@ -2,6 +2,9 @@ import React, { useState, useEffect, useRef, Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { ThemeProvider } from '@/context/ThemeContext';
 import { Toaster } from '@/lib/simpleToast';
+import { getAccessToken } from '@/utils/tokenStorage';
+import axiosInstance from '@/lib/axios';
+import AccountSuspendedPage from '@/pages/AccountSuspendedPage';
 
 // ===== MEMBER 1 (Nihaaj) - Auth =====
 import LandingPage from '@/pages/LandingPage';
@@ -46,13 +49,25 @@ import './index.css';
 
 const ACTIVE_WORKSPACE_FOLDER_KEY = 'neuranote_active_workspace_folder';
 
-// Pages that should NOT show the Rail
-const noRailPages = ['/', '/login', '/signup', '/oauth/callback'];
+// Pages that should NOT show the Rail/FolderPanel (auth + landing flows)
+const noRailPages = [
+  '/',
+  '/login',
+  '/signup',
+  '/verify-email',
+  '/forgot-password',
+  '/reset-password',
+  '/change-password',
+  '/account-verified',
+  '/oauth/callback',
+  '/account-suspended',
+];
 
 const AppLayout = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const [activeView, setActiveView] = useState('home');
+  const publicPaths = new Set(['/', '/login', '/signup', '/verify-email', '/forgot-password', '/reset-password', '/change-password', '/account-verified', '/oauth/callback', '/account-suspended']);
   const [selectedWorkspaceFolder, setSelectedWorkspaceFolder] = useState(() => {
     try {
       const savedFolder = localStorage.getItem(ACTIVE_WORKSPACE_FOLDER_KEY);
@@ -116,6 +131,47 @@ const AppLayout = () => {
     return unsubscribe;
   }, []);
 
+  useEffect(() => {
+    const token = getAccessToken();
+    const isPublicPath = publicPaths.has(location.pathname);
+
+    if (!token && !isPublicPath) {
+      navigate('/login', { replace: true });
+      return;
+    }
+
+    if (!token || isPublicPath || location.pathname === '/account-suspended') {
+      return;
+    }
+
+    let isMounted = true;
+
+    axiosInstance.get('/api/v1/users/me')
+      .then(({ data }) => {
+        const suspended = Boolean(data?.profile?.is_suspended || data?.user?.is_suspended || data?.is_suspended);
+        if (isMounted && suspended) {
+          navigate('/account-suspended', { replace: true });
+        }
+      })
+      .catch((error) => {
+        if (!isMounted) return;
+
+        const detail = String(error.response?.data?.detail || '').toLowerCase();
+        if (error.response?.status === 403 || detail.includes('suspend')) {
+          navigate('/account-suspended', { replace: true });
+          return;
+        }
+
+        if (error.response?.status === 401) {
+          navigate('/login', { replace: true });
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [location.pathname, navigate]);
+
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
 
@@ -160,6 +216,7 @@ const AppLayout = () => {
           <Route path="/change-password"  element={<ChangePassword />} />
           <Route path="/account-verified" element={<AccountVerification />} />
           <Route path="/oauth/callback"   element={<OAuthCallback />} />
+          <Route path="/account-suspended" element={<AccountSuspendedPage />} />
           <Route path="/admin"            element={<AdminDashboard />} />
 
           {/* Member 2 - File Manager */}

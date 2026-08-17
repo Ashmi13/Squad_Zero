@@ -1,10 +1,12 @@
 """Dependency injection for authentication and authorization"""
 from typing import Optional, Dict, Any
-from fastapi import Cookie, Depends, HTTPException, Request
+from fastapi import Cookie, Depends, HTTPException, Request,Response
 from app.core.config import settings
 from app.db.supabase import get_supabase
 from supabase import Client
 import jwt
+from app.core.security import clear_session_cookie
+from middleware.error_handler import SuspendedAccountError
 
 
 async def get_supabase_client(
@@ -37,6 +39,7 @@ async def get_supabase_service_client(
 
 async def get_current_user(
     request: Request,
+    response: Response,
     supabase_client: Client = Depends(get_supabase_service_client),
 ) -> Dict[str, Any]:
     """Dependency to get current user from session cookie or Authorization header
@@ -54,6 +57,7 @@ async def get_current_user(
 
     token = request.cookies.get(settings.cookie_name)
 
+    # Fall back to Authorization header (Bearer token)
     if not token:
         auth_header = request.headers.get("Authorization", "")
         if auth_header.startswith("Bearer "):
@@ -61,7 +65,8 @@ async def get_current_user(
 
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
-
+    
+    payload = None
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
     except jwt.InvalidTokenError:

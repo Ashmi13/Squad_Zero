@@ -113,7 +113,7 @@ async def update_task(task_id: str, task: TaskUpdate, current_user: dict = Depen
     user_id = current_user.get("sub")
 
     # only include fields that were actually sent
-    update_data = {k: v for k, v in task.dict().items() if v is not None}
+    update_data = task.model_dump(exclude_none=True)
     update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
 
     if "due_date" in update_data and update_data["due_date"]:

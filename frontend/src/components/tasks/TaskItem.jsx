@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import { Box, Typography, Checkbox, IconButton, Chip } from '@mui/material';
 import DeleteOutlineRoundedIcon from '@mui/icons-material/DeleteOutlineRounded';
 import EditOutlinedIcon         from '@mui/icons-material/EditOutlined';
@@ -7,6 +7,7 @@ import CheckCircleRoundedIcon   from '@mui/icons-material/CheckCircleRounded';
 import AccessTimeIcon           from '@mui/icons-material/AccessTime';
 import NotificationsNoneIcon    from '@mui/icons-material/NotificationsNone';
 import MenuBookOutlinedIcon     from '@mui/icons-material/MenuBookOutlined';
+import { useTheme } from '../../context/ThemeContext';
 
 // color per priority level
 const P_COLORS = { high: '#ef4444', medium: '#f59e0b', low: '#10b981' };
@@ -23,6 +24,9 @@ function formatDue(raw) {
 }
 
 export default function TaskItem({ task, onToggle, onEdit, onDelete }) {
+  const { isDark = true } = useTheme();
+  const accent = isDark ? '#818cf8' : '#6366f1';
+
   const done  = task.status === 'done';
   const due   = formatDue(task.due_date);
   const color = task.color || '#6366f1';
@@ -49,15 +53,14 @@ export default function TaskItem({ task, onToggle, onEdit, onDelete }) {
           {/* due date badge — goes red if overdue */}
           {due && (
             <Box className={`due-badge ${due.overdue && !done ? 'overdue' : ''}`}>
-              <AccessTimeIcon sx={{ fontSize: 11 }} />
+              <AccessTimeIcon sx={{ fontSize: 14 }} />
               <span>{due.label}</span>
             </Box>
           )}
 
-          {/* reminder badge */}
           {task.reminder_minutes_before && (
             <Box className="reminder-badge">
-              <NotificationsNoneIcon sx={{ fontSize: 11 }} />
+              <NotificationsNoneIcon sx={{ fontSize: 14 }} />
               <span>
                 {task.reminder_minutes_before >= 60
                   ? `${task.reminder_minutes_before / 60}h before`
@@ -75,18 +78,17 @@ export default function TaskItem({ task, onToggle, onEdit, onDelete }) {
               bgcolor: `${P_COLORS[task.priority]}18`,
               color: P_COLORS[task.priority],
               borderColor: P_COLORS[task.priority],
-              height: 20, fontSize: 10,
+              height: 24, fontSize: 12,
             }}
           />
 
-          {/* notebook tag — appears once the notes sprint is merged */}
           {task.notebook_title && (
             <Box sx={{
-              display: 'flex', alignItems: 'center', gap: '3px',
-              fontSize: 10, color: '#818cf8', padding: '2px 6px', borderRadius: '5px',
-              background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.2)',
+              display: 'flex', alignItems: 'center', gap: '4px',
+              fontSize: 12, color: accent, padding: '3px 7px', borderRadius: '5px',
+              background: `${accent}18`, border: `1px solid ${accent}30`,
             }}>
-              <MenuBookOutlinedIcon sx={{ fontSize: 11 }} />
+              <MenuBookOutlinedIcon sx={{ fontSize: 14 }} />
               <span>{task.notebook_title}</span>
             </Box>
           )}

@@ -41,6 +41,17 @@ async def get_attempt_details(
     return await service.get_attempt_details(attempt_id, user_id)
 
 
+@router.get("/history/{attempt_id}/retake")
+async def get_retake_config(
+    attempt_id: int,
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_current_user),
+):
+    """Return the quiz config needed to regenerate the same quiz from history"""
+    service = QuizService(db)
+    return await service.get_retake_config(attempt_id, user_id)
+
+
 @router.delete("/history/{attempt_id}")
 async def delete_quiz_attempt(
     attempt_id: int,

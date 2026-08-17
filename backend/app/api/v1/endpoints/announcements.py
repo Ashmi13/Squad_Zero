@@ -8,14 +8,14 @@ from app.schemas.announcements import (
     AnnouncementStatusResponse,
     AnnouncementWithStatusResponse,
 )
-
 router = APIRouter(prefix="/announcements", tags=["announcements"])
+
 
 @router.get("/", response_model=List[Announcement])
 async def list_announcements(
     supabase_client: Client = Depends(get_supabase_service_client),
 ):
-    """List all public announcements for users"""
+    """List all public announcements for users."""
     response = (
         supabase_client.table("announcements")
         .select("*")

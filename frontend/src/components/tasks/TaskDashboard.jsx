@@ -1,4 +1,5 @@
-﻿import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect, useRef } from 'react';
+import { useTheme } from '../../context/ThemeContext';
 import { Box, Paper, CircularProgress, Typography, IconButton } from '@mui/material';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import DeleteOutlineRoundedIcon from '@mui/icons-material/DeleteOutlineRounded';
@@ -19,6 +20,8 @@ const DEFAULT_CATEGORIES = [
 ];
 
 export default function TaskDashboard() {
+  const { isDark = true } = useTheme();
+  const notifiedRef = useRef(new Set());
   const [categories,       setCategories]       = useState([]);
   const [tasksByCategory,  setTasksByCategory]  = useState({});
   const [activeCategory,   setActiveCategory]   = useState(null);
@@ -94,7 +97,8 @@ export default function TaskDashboard() {
         if (!task.due_date || !task.reminder_minutes_before || task.status === 'done') return;
         const due = new Date(task.due_date);
         const diff = (due - now) / 60000;
-        if (diff > 0 && diff <= task.reminder_minutes_before && diff > task.reminder_minutes_before - 1) {
+        if (diff > 0 && diff <= task.reminder_minutes_before && !notifiedRef.current.has(task.id)) {
+          notifiedRef.current.add(task.id);
           new Notification(`Task Reminder: ${task.title}`, {
             body: `Due in ${Math.round(diff)} minute${Math.round(diff) !== 1 ? 's' : ''}`,
             icon: '/logo.png',
@@ -225,7 +229,7 @@ export default function TaskDashboard() {
   const allTasks    = Object.values(tasksByCategory).flat();
 
   return (
-    <Box className="zen-container">
+    <Box className={`zen-container ${!isDark ? 'zen-light' : ''}`}>
       <Box className="zen-grid">
 
         {/* left sidebar — list of categories */}

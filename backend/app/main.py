@@ -94,10 +94,13 @@ try:
         validation_exception_handler,
         database_exception_handler,
         general_exception_handler,
+        suspended_account_exception_handler,
+        SuspendedAccountError,
     )
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
     app.add_exception_handler(SQLAlchemyError, database_exception_handler)
     app.add_exception_handler(Exception, general_exception_handler)
+    app.add_exception_handler(SuspendedAccountError, suspended_account_exception_handler)
 except Exception as e:
     print(f"[WARN] Custom error handlers skipped: {e}")
 
@@ -112,6 +115,17 @@ except ImportError as e:
 except Exception as e:
     print(f"[WARN] Auth/user routes skipped: {e}")
 
+
+# Mind Map routes (M3)
+try:
+    from routes.mindmap_routes import router as mindmap_router
+    app.include_router(mindmap_router, tags=["mindmaps"])
+    print("Mind map routes loaded (OpenAI GPT integration)")
+except ImportError as e:
+    print(f"Mind map routes skipped: {e}")
+
+
+
 # Quiz routes (M4)
 try:
     from routes.quiz_routes import router as quiz_router
@@ -125,7 +139,7 @@ except ImportError as e:
     missing = str(e).replace("No module named ", "").strip("'")
     print(f"[WARN] Quiz routes skipped (missing: {missing}). Run: pip install -r requirements-m4quiz.txt")
 except Exception as e:
-    print(f"[WARN] Quiz routes skipped: {e}")
+    print(f"[WARN] Quiz routes skipped: {e}")   
 
     # Flashcards routes
 try:
@@ -152,6 +166,7 @@ _optional_routes = [
     ("routes.calendar",      "router", "/api/v1/calendar",      ["calendar"]),
     ("routes.notifications", "router", "/api/v1/notifications", ["notifications"]),
     ("routes.task_list",     "router", "/api/v1/task-list",     ["task-list"]),
+    ("routes.mindmap_routes", "router", "",                      []),
 ]
 
 for _module, _attr, _prefix, _tags in _optional_routes:
@@ -175,7 +190,7 @@ async def startup_event():
     # Warm up the column-detection cache so the first real request doesn't pay
     # the cost of 18 individual Supabase probes.
     try:
-        from app.db.supabase import get_supabase_client as _get_supabase
+        from app.db.supabase import get_supabase as _get_supabase
         from app.services.workspace_service import WorkspaceService
         _sb = _get_supabase()
         _svc = WorkspaceService(_sb)

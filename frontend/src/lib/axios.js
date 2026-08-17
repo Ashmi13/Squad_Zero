@@ -14,6 +14,9 @@ export const axiosInstance = axios.create({
   },
 });
 
+// Prevent multiple concurrent refresh token requests
+let refreshPromise = null;
+
 /**
  * Request interceptor to attach JWT token to requests
  */
@@ -43,30 +46,58 @@ axiosInstance.interceptors.response.use(
     const isSuspendedUser = /suspend|suspended/i.test(detail) || error.response?.status === 403 && window.location.pathname !== '/account-suspended';
 
     if (error.response?.status === 401 && !originalRequest._retry) {
+      // Prevent multiple concurrent refresh attempts
+      if (refreshPromise) {
+        try {
+          const newTokens = await refreshPromise;
+          originalRequest.headers.Authorization = `Bearer ${newTokens.accessToken}`;
+          return axiosInstance(originalRequest);
+        } catch (err) {
+          return Promise.reject(err);
+        }
+      }
+
       originalRequest._retry = true;
 
-      try {
-        const refreshToken = getRefreshToken();
+      refreshPromise = (async () => {
+        try {
+          const refreshToken = getRefreshToken();
 
-        if (!refreshToken) {
+          if (!refreshToken) {
+            clearTokens();
+            window.location.href = '/login';
+            throw new Error('No refresh token available');
+          }
+
+          const refreshResponse = await axios.post(
+            `${config.apiBaseUrl}/api/v1/auth/refresh-token`,
+            { refresh_token: refreshToken },
+            {
+              headers: { 'Content-Type': 'application/json' },
+              withCredentials: true,
+            }
+          );
+
+          const { access_token, refresh_token } = refreshResponse.data;
+          setTokens(access_token, refresh_token);
+          
+          return { accessToken: access_token, refreshToken: refresh_token };
+        } catch (refreshError) {
+          // Clear tokens and redirect to login on refresh failure
           clearTokens();
           window.location.href = '/login';
-          return Promise.reject(error);
+          throw refreshError;
+        } finally {
+          refreshPromise = null;
         }
+      })();
 
-        const refreshResponse = await axiosInstance.post(
-          '/api/v1/auth/refresh-token',
-          { refresh_token: refreshToken },
-          { headers: { 'Content-Type': 'application/json' } }
-        );
-
-        setTokens(refreshResponse.data.access_token, refreshResponse.data.refresh_token);
-        originalRequest.headers.Authorization = `Bearer ${refreshResponse.data.access_token}`;
+      try {
+        const newTokens = await refreshPromise;
+        originalRequest.headers.Authorization = `Bearer ${newTokens.accessToken}`;
         return axiosInstance(originalRequest);
-      } catch (refreshError) {
-        clearTokens();
-        window.location.href = '/login';
-        return Promise.reject(refreshError);
+      } catch (err) {
+        return Promise.reject(err);
       }
     }
 

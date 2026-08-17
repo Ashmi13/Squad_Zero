@@ -1,5 +1,7 @@
-import React from 'react';
-import { Clock, ChevronLeft, ChevronRight, XCircle } from 'lucide-react';
+import React, { useState } from 'react';
+import { Clock, ChevronLeft, ChevronRight, XCircle, PanelRightClose, PanelRightOpen } from 'lucide-react';
+
+const MIN_LONG_ANSWER_WORDS = 50;
 
 const QuizTaking = ({
   quiz,
@@ -17,11 +19,18 @@ const QuizTaking = ({
 }) => {
   if (!quiz) return <div>Loading quiz…</div>;
 
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+
   const question = quiz.questions[currentQuestion];
   const progress = ((currentQuestion + 1) / quiz.questions.length) * 100;
   const answeredCount = Object.values(answers).filter(
     v => v !== null && v !== undefined && String(v).trim() !== ''
   ).length;
+
+  const currentAnswer = answers[currentQuestion] || '';
+  const wordCount = currentAnswer.trim() ? currentAnswer.trim().split(/\s+/).length : 0;
+  const isLongAnswer = question.question_type === 'long_answer';
+  const longAnswerTooShort = isLongAnswer && currentAnswer.trim() !== '' && wordCount < MIN_LONG_ANSWER_WORDS;
 
   const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60);
@@ -36,8 +45,8 @@ const QuizTaking = ({
     ({ easy: '⭐', medium: '⭐⭐', hard: '⭐⭐⭐' })[d?.toLowerCase()] || '⭐';
 
   return (
-    <div className="quiz-layout">
-      {/* ── Main Column ── */}
+    <div className={`quiz-layout${sidebarOpen ? '' : ' sidebar-collapsed'}`}>
+      {/* Main Column */}
       <div className="quiz-main">
         {/* Header */}
         <div className="quiz-header">
@@ -81,6 +90,9 @@ const QuizTaking = ({
             {question.question_type === 'short_answer' && (
               <span className="question-type-badge">Short Answer</span>
             )}
+            {question.question_type === 'long_answer' && (
+              <span className="question-type-badge long-answer-badge">Long Answer</span>
+            )}
           </div>
           <h2 className="question-text">{question.question_text}</h2>
 
@@ -97,13 +109,33 @@ const QuizTaking = ({
                 </button>
               ))}
             </div>
+          ) : question.question_type === 'long_answer' ? (
+            <div className="short-answer-section">
+              <p className="short-answer-hint">📝 Write a detailed answer (minimum {MIN_LONG_ANSWER_WORDS} words required)</p>
+              <textarea
+                className={`short-answer-input long-answer-input${longAnswerTooShort ? ' answer-too-short' : ''}`}
+                placeholder="Write your detailed answer here… (at least 50 words required)"
+                value={currentAnswer}
+                onChange={onShortAnswerChange}
+                rows={8}
+              />
+              <div className={`word-count-indicator${longAnswerTooShort ? ' word-count-warning' : wordCount >= MIN_LONG_ANSWER_WORDS ? ' word-count-ok' : ''}`}>
+                {wordCount} / {MIN_LONG_ANSWER_WORDS} words minimum
+                {longAnswerTooShort && (
+                  <span className="word-count-msg"> — please write at least {MIN_LONG_ANSWER_WORDS} words to submit this answer</span>
+                )}
+                {wordCount >= MIN_LONG_ANSWER_WORDS && (
+                  <span className="word-count-msg"> ✓</span>
+                )}
+              </div>
+            </div>
           ) : (
             <div className="short-answer-section">
               <p className="short-answer-hint">💡 Write a concise answer based on your study materials</p>
               <textarea
                 className="short-answer-input"
                 placeholder="Type your answer here…"
-                value={answers[currentQuestion] || ''}
+                value={currentAnswer}
                 onChange={onShortAnswerChange}
                 rows={4}
               />
@@ -124,38 +156,51 @@ const QuizTaking = ({
         </div>
       </div>
 
-      {/* ── Sidebar ── */}
-      <div className="quiz-sidebar">
-        <h3>Questions</h3>
-        <div className="question-grid">
-          {quiz.questions.map((_, index) => (
-            <button
-              key={index}
-              className={`question-dot
-                ${index === currentQuestion ? 'current' : ''}
-                ${answers[index] !== undefined && String(answers[index]).trim() !== '' ? 'answered' : ''}
-              `}
-              onClick={() => onQuestionNavigate(index)}
-            >
-              {index + 1}
+      {/* Sidebar */}
+      <div className={`quiz-sidebar${sidebarOpen ? '' : ' quiz-sidebar--collapsed'}`}>
+        <div className="sidebar-toggle-row">
+          {sidebarOpen && <h3>Questions</h3>}
+          <button
+            className="sidebar-toggle-btn"
+            onClick={() => setSidebarOpen(o => !o)}
+            title={sidebarOpen ? 'Minimize sidebar' : 'Expand sidebar'}
+          >
+            {sidebarOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}
+          </button>
+        </div>
+        {sidebarOpen && (
+          <>
+            <div className="question-grid">
+              {quiz.questions.map((_, index) => (
+                <button
+                  key={index}
+                  className={`question-dot
+                    ${index === currentQuestion ? 'current' : ''}
+                    ${answers[index] !== undefined && String(answers[index]).trim() !== '' ? 'answered' : ''}
+                  `}
+                  onClick={() => onQuestionNavigate(index)}
+                >
+                  {index + 1}
+                </button>
+              ))}
+            </div>
+            <div className="sidebar-stats">
+              <div className="stat">
+                <span className="stat-value">{answeredCount}</span>
+                <span className="stat-label">Answered</span>
+              </div>
+              <div className="stat">
+                <span className="stat-value">{quiz.questions.length - answeredCount}</span>
+                <span className="stat-label">Remaining</span>
+              </div>
+            </div>
+            <button className="submit-btn sidebar-submit-btn" onClick={() => onSubmitQuiz()} disabled={isSubmitting}>
+              {isSubmitting
+                ? <><div className="spinner" style={{ borderColor: 'rgba(255,255,255,0.35)', borderTopColor: 'white' }}></div> Submitting…</>
+                : <>Submit ({answeredCount}/{quiz.questions.length})</>}
             </button>
-          ))}
-        </div>
-        <div className="sidebar-stats">
-          <div className="stat">
-            <span className="stat-value">{answeredCount}</span>
-            <span className="stat-label">Answered</span>
-          </div>
-          <div className="stat">
-            <span className="stat-value">{quiz.questions.length - answeredCount}</span>
-            <span className="stat-label">Remaining</span>
-          </div>
-        </div>
-        <button className="submit-btn sidebar-submit-btn" onClick={() => onSubmitQuiz()} disabled={isSubmitting}>
-          {isSubmitting
-            ? <><div className="spinner" style={{ borderColor: 'rgba(255,255,255,0.35)', borderTopColor: 'white' }}></div> Submitting…</>
-            : <>Submit ({answeredCount}/{quiz.questions.length})</>}
-        </button>
+          </>
+        )}
       </div>
     </div>
   );

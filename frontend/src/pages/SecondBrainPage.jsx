@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { Search, ZoomIn, ZoomOut, RefreshCw, Hash, Link2, FileText, X, Info } from 'lucide-react';
-
+import { Search, ZoomIn, ZoomOut, RefreshCw, Hash, Link2, FileText, X, Info, Upload } from 'lucide-react';
+import { secondBrainApi, ensureSecondBrainFolder } from '@/services/secondBrainApi';
+import { workspaceApi } from '@/services/workspaceApi';
 // demo notes used until the real notes API is connected after M3 merges
 // replace this with: GET /api/v1/notes/ -> { id, title, content, folder, updated_at }
 const DEMO_NOTES = [
@@ -46,6 +47,31 @@ const DEMO_NOTES = [
   },
 ];
 
+const FALLBACK_DEMO_NOTES = DEMO_NOTES.slice(0, 2);
+
+function apiNoteToGraphNote(n) {
+  const tagLine = n.tags?.length
+    ? n.tags.map(t => `#${t}`).join(' ')
+    : '';
+
+  const linkLine = n.outgoing_links?.length
+    ? n.outgoing_links.map(l => `[[${l.to_title}]]`).join(' ')
+    : '';
+
+  const cleanContent = (n.content || '')
+    .replace(/\[\[[^\]]+\]\]/g, '')
+    .trim();
+
+  return {
+    id: n.id,
+    title: n.title,
+    folder: 'Second Brain',
+    updatedAt: (n.updated_at || '').slice(0, 10),
+    content: [cleanContent, tagLine, linkLine]
+      .filter(Boolean)
+      .join('\n'),
+  };
+}
 // color per folder — used for node color and edge gradients
 const FOLDER_COLORS = {
   'Computer Science': '#6366f1',
@@ -176,10 +202,17 @@ const S = {
     transition: 'all 0.15s', margin: '0 3px 5px 0',
   }),
   rightPanel: {
-    width: 260, flexShrink: 0, padding: 16,
-    borderLeft: '1px solid rgba(255,255,255,0.06)',
-    background: '#0d1117', overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 14,
-  },
+  width: 280,
+  boxSizing: 'border-box',
+  flexShrink: 0,
+  padding: 16,
+  borderLeft: '1px solid rgba(255,255,255,0.06)',
+  background: '#0d1117',
+  overflow: 'auto',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 14,
+},
   infoRow:   { display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 8 },
   infoLabel: { fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#4b5563', minWidth: 60 },
   infoVal:   { fontSize: 12, color: '#9ca3af', lineHeight: 1.5 },
@@ -190,6 +223,196 @@ const S = {
     display: 'flex', gap: 16, backdropFilter: 'blur(8px)', pointerEvents: 'none', whiteSpace: 'nowrap',
   },
 };
+
+function NoteDropZone({ onNoteAdded }) {
+  const [isOver, setIsOver] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState('');
+
+  const handleFile = async (file, sourceFileId) => {
+    setBusy(true);
+    setStatus(`Adding "${file.name}"...`);
+    try {
+      await secondBrainApi.createNoteFromUpload(file, { title: file.name, sourceFileId });
+
+      if (!sourceFileId) {
+        try {
+          const folderId = await ensureSecondBrainFolder();
+          await workspaceApi.uploadFile(folderId, file);
+        } catch (workspaceErr) {
+          console.warn('Workspace save skipped (note was still created):', workspaceErr);
+          setStatus(`"${file.name}" added. (Workspace save skipped.)`);
+          setTimeout(() => setStatus(''), 4000);
+          await onNoteAdded();
+          setBusy(false);
+          return;
+        }
+      }
+
+      setStatus(`"${file.name}" added.`);
+      setTimeout(() => setStatus(''), 3000);
+      await onNoteAdded();
+    } catch (err) {
+      setStatus(`Failed: ${err.message}`);
+      setTimeout(() => setStatus(''), 4000);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onDrop = async (e) => {
+    e.preventDefault();
+    setIsOver(false);
+
+    const treeData = e.dataTransfer.getData('application/json');
+    if (treeData) {
+      try {
+        const { fileId, fileName } = JSON.parse(treeData);
+        setStatus('Fetching file from workspace...');
+        const { preview } = await workspaceApi.getFilePreview(fileId);
+        const url = preview?.url;
+        if (!url) throw new Error('No preview URL — file may not exist in workspace yet.');
+        const resp = await fetch(url);
+        const blob = await resp.blob();
+        const file = new File([blob], fileName, { type: blob.type });
+        await handleFile(file, fileId);
+      } catch (err) {
+        setStatus(`Failed: ${err.message}`);
+        setTimeout(() => setStatus(''), 4000);
+      }
+      return;
+    }
+
+    if (e.dataTransfer.files?.length) {
+      for (const file of e.dataTransfer.files) {
+        const ext = file.name.split('.').pop().toLowerCase();
+        if (!['pdf', 'txt', 'md'].includes(ext)) continue;
+        await handleFile(file, null);
+      }
+    }
+  };
+
+  return (
+    <div
+      onDragOver={(e) => { e.preventDefault(); setIsOver(true); }}
+      onDragLeave={() => setIsOver(false)}
+      onDrop={onDrop}
+      style={{
+        margin: '0 14px 10px', padding: '14px 10px', borderRadius: 10,
+        border: `1.5px dashed ${isOver ? '#818cf8' : 'rgba(255,255,255,0.15)'}`,
+        background: isOver ? 'rgba(99,102,241,0.08)' : 'rgba(255,255,255,0.02)',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+        color: '#6b7280', fontSize: 11.5, textAlign: 'center', transition: 'all 0.15s',
+      }}
+    >
+      <Upload size={16} color={isOver ? '#818cf8' : '#4b5563'} />
+      <span>{busy ? status || 'Working...' : 'Drop PDF/TXT/MD here'}</span>
+      {!busy && status && (
+        <span style={{ color: status.startsWith('Failed') ? '#f87171' : '#34d399' }}>{status}</span>
+      )}
+    </div>
+  );
+}
+
+function ManualTagBacklinkForm({ note, allNotes, onUpdated }) {
+  const [tagInput, setTagInput] = useState('');
+  const [linkTarget, setLinkTarget] = useState('');
+
+  const submitTag = async () => {
+    if (!tagInput.trim()) return;
+    await secondBrainApi.addTags(note.id, tagInput.split(',').map(t => t.trim()).filter(Boolean));
+    setTagInput('');
+    onUpdated();
+  };
+
+  const submitLink = async () => {
+    if (!linkTarget) return;
+    await secondBrainApi.addBacklink(note.id, linkTarget);
+    setLinkTarget('');
+    onUpdated();
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <span style={S.sidebarLabel}>Add tag / backlink</span>
+      <div style={{ display: 'flex', gap: 4 }}>
+        <input
+          value={tagInput}
+          onChange={(e) => setTagInput(e.target.value)}
+          placeholder="tag1, tag2"
+          style={{ flex: 1, fontSize: 11, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, padding: '4px 6px', color: '#e5e7eb' }}
+        />
+        <button onClick={submitTag} style={{ fontSize: 11, padding: '4px 8px', borderRadius: 6, border: 'none', background: '#6366f1', color: '#fff', cursor: 'pointer' }}>Add</button>
+      </div>
+     <div
+  style={{
+    display: 'grid',
+    gridTemplateColumns: 'minmax(0, 1fr) 44px',
+    gap: 4,
+    width: '100%',
+  }}
+>
+  <select
+    value={linkTarget}
+    onChange={(e) => setLinkTarget(e.target.value)}
+    style={{
+      width: '100%',
+      minWidth: 0,
+      boxSizing: 'border-box',
+      fontSize: 11,
+      background: 'rgba(255,255,255,0.05)',
+      border: '1px solid rgba(255,255,255,0.1)',
+      borderRadius: 6,
+      color: '#e5e7eb',
+      padding: '4px 6px',
+    }}
+  >
+   <option
+  value=""
+  style={{
+    background: '#111827',
+    color: '#e5e7eb',
+  }}
+>
+  Link to note...
+</option>
+
+    {allNotes
+      .filter(n => n.id !== note.id)
+      .map(n => (
+        <option
+  key={n.id}
+  value={n.id}
+  style={{
+    background: '#111827',
+    color: '#e5e7eb',
+  }}
+>
+  {n.title}
+</option>
+      ))}
+  </select>
+
+  <button
+    onClick={submitLink}
+    style={{
+      width: 44,
+      minWidth: 44,
+      padding: '4px 0',
+      borderRadius: 6,
+      border: 'none',
+      background: '#6366f1',
+      color: '#fff',
+      cursor: 'pointer',
+      fontSize: 11,
+    }}
+  >
+    Link
+  </button>
+</div>
+    </div>
+  );
+}
 
 export default function SecondBrainPage() {
   const canvasRef = useRef(null);
@@ -212,13 +435,34 @@ export default function SecondBrainPage() {
   const [searchQuery,  setSearchQuery]  = useState('');
   const [zoomDisplay,  setZoomDisplay]  = useState(100);
 
-  // parse the demo notes into nodes and edges on first render
-  useEffect(() => {
-    const g = parseGraph(DEMO_NOTES);
+  const loadGraphFrom = (notesArray) => {
+    const g = parseGraph(notesArray);
     g.idMap = {};
     g.nodes.forEach(n => { g.idMap[n.id] = n; });
     simRef.current = g;
     setGraphData(g);
+  };
+
+  const refetchNotes = async () => {
+    try {
+      const apiNotes = await secondBrainApi.listNotes();
+      loadGraphFrom(apiNotes?.length ? apiNotes.map(apiNoteToGraphNote) : FALLBACK_DEMO_NOTES);
+    } catch (err) {
+      console.warn('Second Brain notes fetch failed:', err);
+    }
+  };
+
+  // fetch real notes on first render, falling back to 2 demo notes if empty/failed
+  useEffect(() => {
+    (async () => {
+      try {
+        const apiNotes = await secondBrainApi.listNotes();
+        loadGraphFrom(apiNotes?.length ? apiNotes.map(apiNoteToGraphNote) : FALLBACK_DEMO_NOTES);
+      } catch (err) {
+        console.warn('Second Brain notes fetch failed, using demo notes:', err);
+        loadGraphFrom(FALLBACK_DEMO_NOTES);
+      }
+    })();
   }, []);
 
   // main physics + render loop — runs once graphData is ready
@@ -639,6 +883,8 @@ export default function SecondBrainPage() {
             </div>
           </div>
 
+          <NoteDropZone onNoteAdded={refetchNotes} />
+
           <div style={{ ...S.sidebarSection, flex: 1, overflowY: 'auto', paddingBottom: 14 }}>
             <span style={{ ...S.sidebarLabel, marginTop: 12, display: 'block' }}>
               Notes ({filteredNotes.length})
@@ -704,35 +950,148 @@ export default function SecondBrainPage() {
             </div>
 
             {/* tags on the selected note */}
-            {selectedNode.tags.length > 0 && (
-              <div>
-                <span style={S.sidebarLabel}>Tags</span>
-                <div style={{ display: 'flex', flexWrap: 'wrap' }}>
-                  {selectedNode.tags.map(t => (
-                    <span key={t} style={{ ...S.tagChip(false), margin: '0 4px 4px 0' }}>#{t}</span>
-                  ))}
-                </div>
-              </div>
-            )}
+           {selectedNode.tags.length > 0 && (
+  <div>
+    <span style={S.sidebarLabel}>Tags</span>
+
+    <div style={{ display: 'flex', flexWrap: 'wrap' }}>
+      {selectedNode.tags.map(t => (
+        <span
+          key={t}
+          style={{
+            ...S.tagChip(false),
+            margin: '0 4px 4px 0',
+            cursor: 'default',
+            paddingRight: 5,
+          }}
+        >
+          #{t}
+
+          <button
+            type="button"
+            title={`Remove #${t}`}
+            onClick={async (e) => {
+              e.stopPropagation();
+
+              try {
+                await secondBrainApi.removeTag(selectedNode.id, t);
+                await refetchNotes();
+              } catch (err) {
+                console.error('Failed to remove tag:', err);
+              }
+            }}
+            style={{
+              border: 'none',
+              background: 'transparent',
+              color: '#6b7280',
+              cursor: 'pointer',
+              padding: 0,
+              marginLeft: 3,
+              fontSize: 13,
+              lineHeight: 1,
+            }}
+          >
+            ×
+          </button>
+        </span>
+      ))}
+    </div>
+  </div>
+)}
 
             {/* notes this one links to */}
-            {selectedNode.backlinks.length > 0 && (
-              <div>
-                <span style={S.sidebarLabel}>Links to</span>
-                {selectedNode.backlinks.map(link => (
-                  <div key={link} style={{ color: '#6366f1', fontSize: 12, marginBottom: 4, cursor: 'pointer' }}
-                    onClick={() => {
-                      const target = graphData?.nodes.find(n => n.title.toLowerCase() === link.toLowerCase());
-                      if (target) focusNode(target);
-                    }}>
-                    {link}
-                  </div>
-                ))}
-              </div>
-            )}
+           {selectedNode.backlinks.length > 0 && (
+  <div>
+    <span style={S.sidebarLabel}>Links to</span>
+
+    {selectedNode.backlinks.map(link => {
+      const target = graphData?.nodes.find(
+        n => n.title.toLowerCase() === link.toLowerCase()
+      );
+
+      return (
+        <div
+          key={link}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            width: '100%',
+            marginBottom: 6,
+            minWidth: 0,
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => {
+              if (target) focusNode(target);
+            }}
+            title={`Open ${link}`}
+            style={{
+              flex: 1,
+              minWidth: 0,
+              border: 'none',
+              background: 'transparent',
+              color: '#6366f1',
+              fontSize: 12,
+              textAlign: 'left',
+              padding: 0,
+              cursor: target ? 'pointer' : 'default',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {link}
+          </button>
+
+          <button
+            type="button"
+            title={`Unlink ${link}`}
+            onClick={async (e) => {
+              e.stopPropagation();
+
+              if (!target) return;
+
+              try {
+                await secondBrainApi.removeBacklink(
+                  selectedNode.id,
+                  target.id
+                );
+
+                await refetchNotes();
+              } catch (err) {
+                console.error('Failed to unlink note:', err);
+              }
+            }}
+            style={{
+              flexShrink: 0,
+              width: 24,
+              height: 24,
+              border: '1px solid rgba(248,113,113,0.2)',
+              background: 'rgba(248,113,113,0.06)',
+              color: '#f87171',
+              borderRadius: 5,
+              cursor: 'pointer',
+              fontSize: 13,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            ×
+          </button>
+        </div>
+      );
+    })}
+  </div>
+)}
+
+            <ManualTagBacklinkForm note={selectedNode} allNotes={graphData?.nodes || []} onUpdated={refetchNotes} />
 
             {/* note content preview */}
             <div>
+              <span style={S.sidebarLabel}>Content</span>
               <span style={S.sidebarLabel}>Content</span>
               <p style={{ ...S.infoVal, fontSize: 11, lineHeight: 1.6 }}>
                 {selectedNode.content.replace(/\[\[.*?\]\]/g, '').replace(/#\w+/g, '').trim().slice(0, 200)}

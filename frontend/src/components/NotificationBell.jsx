@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
-    Bell, X, Inbox, Pin, CheckCircle2, Maximize2,
-    Info, AlertTriangle, AlertCircle, Edit2
+    Bell, X, Maximize2, Inbox, Pin, Star, CheckCircle2, Clock,
+    Info, AlertTriangle, AlertCircle, Edit2, Check, ChevronRight, ActivitySquare, LayoutGrid
 } from 'lucide-react';
 import { axiosInstance } from '../lib/axios';
 import { supabase } from '../lib/supabase';

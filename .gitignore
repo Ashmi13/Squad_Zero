@@ -18,6 +18,8 @@ backend/seed_*.py
 backend/dump.sql
 
 __pycache__/
+*.pyc
+__pycache__/
 *.py[cod]
 *.pyc
 *.pyo

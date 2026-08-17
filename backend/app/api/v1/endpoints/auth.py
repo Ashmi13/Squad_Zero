@@ -37,6 +37,7 @@ from app.api.deps import (
     get_current_user,
     get_current_user_id,
 )
+from middleware.error_handler import SuspendedAccountError
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 

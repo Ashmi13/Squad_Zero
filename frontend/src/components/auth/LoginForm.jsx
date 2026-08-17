@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useForm } from 'react-hook-form';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Mail, Lock, AlertCircle, CheckCircle } from 'lucide-react';
 import { z } from 'zod';
@@ -17,6 +17,7 @@ const loginSchema = z.object({
 });
 
 export function LoginForm() {
+  const navigate = useNavigate();
   const {
     register,
     handleSubmit,
@@ -131,9 +132,14 @@ export function LoginForm() {
             <input type="checkbox" className="h-4 w-4 rounded border-slate-300" />
             Remember me
           </label>
-          <Link to="/forgot-password" title="Forgot Password" className="text-indigo-600 hover:text-indigo-700">
+          <button
+            type="button"
+            onClick={() => navigate('/forgot-password')}
+            title="Forgot Password"
+            className="text-indigo-600 hover:text-indigo-700"
+          >
             Forgot Password
-          </Link>
+          </button>
         </div>
 
         <Button

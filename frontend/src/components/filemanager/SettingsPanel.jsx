@@ -128,7 +128,6 @@ const SettingsPanel = ({ onClose }) => {
   const sections = [
     { id: 'profile', label: 'Profile', icon: User },
     { id: 'appearance', label: 'Appearance', icon: Palette },
-    { id: 'ai', label: 'AI Preferences', icon: Bot },
      { id: 'storage', label: 'Storage', icon: HardDrive },
   { id: 'payment', label: 'Payment', icon: CreditCard },
     { id: 'privacy', label: 'Privacy', icon: Lock },

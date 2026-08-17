@@ -57,10 +57,16 @@ const AdminDashboard = () => {
         setAnnouncements(prev => prev.map(a => a.id === editingAnnouncement.id ? res.data : a));
       } else {
         const res = await axiosInstance.post('/api/v1/admin/announcements', announcementForm);
+        // Ensure we immediately see the new announcement at the top
         setAnnouncements(prev => [res.data, ...prev]);
       }
+      // Reset form and UI state
       setAnnouncementForm({ title: '', content: '', type: 'info' });
       setEditingAnnouncement(null);
+      
+      // Optional: switch to broadcast tab if they aren't there
+      setActiveTab('broadcast'); 
+      
     } catch (err) {
       console.error('Announcement Error:', err);
     } finally {

@@ -45,6 +45,7 @@ import { authFetch } from '@/utils/authSession';
 import { workspaceApi } from '@/services/workspaceApi';
 import { config } from '@/config/env';
 import { ensureReadWritePermission, getFolderHandleBinding, removeFileFromLocalFolder } from '@/utils/localFsSync';
+import { useTheme } from '@/context/ThemeContext';
 import SummaryPanel from './SummaryPanel';
 
 const API_BASE = config.apiBaseUrl || '';
@@ -106,6 +107,7 @@ const updateParentInAnyFolder = (filesMap, parentId, updater) => {
 
 // FIX #1: Enhanced FileViewer to support deleting currently open files
 const FileViewer = ({ selectedFile, onClose, onFilesUpdate, currentFolder, currentFolderId, onFileDeleted, onSelectGeneratedFile }) => {
+  const { theme, isDark } = useTheme();
   // CHANGED: Added state management for Extract Text and Generate Summary operations
   const [isExtracting, setIsExtracting] = useState(false);
   const [isSummarizing, setIsSummarizing] = useState(false);
@@ -123,10 +125,10 @@ const FileViewer = ({ selectedFile, onClose, onFilesUpdate, currentFolder, curre
         flex: 1,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         flexDirection: 'column', gap: '12px',
-        color: '#ccc', fontSize: '14px',
-        backgroundColor: '#f9f9f9',
+          color: theme.colors.text.tertiary, fontSize: '14px',
+          backgroundColor: theme.colors.bg.secondary,
       }}>
-        <FileText size={48} color="#ddd" />
+        <FileText size={48} color={theme.colors.text.tertiary} />
         <p>Click a file to view it here</p>
       </div>
     );
@@ -289,7 +291,19 @@ const FileViewer = ({ selectedFile, onClose, onFilesUpdate, currentFolder, curre
         // preview.preview_url: signed/public URL for PDFs and stored files
         // preview.content: inline text content for text files
         if (preview.preview_url) {
-          setPreviewUrl(preview.preview_url);
+          const shouldFetchText = preview.mime_type?.startsWith('text/') || isTextFile;
+          if (shouldFetchText) {
+            fetch(preview.preview_url)
+              .then(res => res.text())
+              .then(text => {
+                setPreviewContent(text);
+              })
+              .catch(err => {
+                setPreviewUrl(preview.preview_url);
+              });
+          } else {
+            setPreviewUrl(preview.preview_url);
+          }
         } else if (preview.content) {
           // Text content returned — display as text
           const content = preview.content;
@@ -406,13 +420,16 @@ const FileViewer = ({ selectedFile, onClose, onFilesUpdate, currentFolder, curre
 
       const extractedChildFile = {
         ...savedExtractedFile,
-        name: savedExtractedFile.name || `${selectedFile.name} - Extracted Text`,
-        content: extractedTextContent,
-        type: 'TXT',
-        mimeType: 'text/plain',
+        name: savedExtractedFile.name || `${selectedFile.name} - Extracted`,
+        content: null,
+        type: 'PDF',
+        file_type: 'PDF',
+        mimeType: 'application/pdf',
+        mime_type: 'application/pdf',
         isExtractedText: true,
         parentFileId: selectedFile.id,
-        fileUrl: data.file?.storage_url || null,
+        fileUrl: data.file?.storage_url || data.file?.file_url || data.file?.storage_path || null,
+        storagePath: data.file?.storage_path || null,
         folderId: selectedFile.folderId || selectedFile.folder_id || currentFolderId || null,
         folderName: selectedFile.folderName || selectedFile.folder_name || currentFolder || null,
         backendFile: true,
@@ -554,12 +571,15 @@ const FileViewer = ({ selectedFile, onClose, onFilesUpdate, currentFolder, curre
       const summaryChildFile = {
         ...savedSummaryFile,
         name: savedSummaryFile.name || `${selectedFile.name} - Summary`,
-        content: summaryText,
-        type: 'TXT',
-        mimeType: 'text/plain',
+        content: null,
+        type: 'PDF',
+        file_type: 'PDF',
+        mimeType: 'application/pdf',
+        mime_type: 'application/pdf',
         isSummary: true,
         parentFileId: selectedFile.id,
-        fileUrl: summaryData.file?.storage_url || null,
+        fileUrl: summaryData.file?.storage_url || summaryData.file?.file_url || summaryData.file?.storage_path || null,
+        storagePath: summaryData.file?.storage_path || null,
         folderId: selectedFile.folderId || selectedFile.folder_id || currentFolderId || null,
         folderName: selectedFile.folderName || selectedFile.folder_name || currentFolder || null,
         backendFile: true,
@@ -810,7 +830,7 @@ const FileViewer = ({ selectedFile, onClose, onFilesUpdate, currentFolder, curre
       flex: 1,
       display: 'flex',
       flexDirection: 'column',
-      backgroundColor: '#f9f9f9',
+      backgroundColor: theme.colors.bg.secondary,
       overflow: 'hidden',
     }}>
 
@@ -818,12 +838,12 @@ const FileViewer = ({ selectedFile, onClose, onFilesUpdate, currentFolder, curre
       <div style={{
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         padding: '16px 20px',
-        backgroundColor: 'white',
-        borderBottom: '1px solid #eee',
+        backgroundColor: theme.colors.bg.primary,
+        borderBottom: `1px solid ${theme.colors.ui.border}`,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <FileText size={18} color="#6C5DD3" />
-          <span style={{ fontWeight: '600', fontSize: '15px', color: '#1a1a2e' }}>
+          <span style={{ fontWeight: '600', fontSize: '15px', color: theme.colors.text.primary }}>
             {selectedFile.name}
           </span>
           <span style={{
@@ -835,7 +855,7 @@ const FileViewer = ({ selectedFile, onClose, onFilesUpdate, currentFolder, curre
         </div>
         <X
           size={18}
-          color="#aaa"
+          color={theme.colors.text.tertiary}
           style={{ cursor: 'pointer' }}
           onClick={onClose}
         />
@@ -854,7 +874,7 @@ const FileViewer = ({ selectedFile, onClose, onFilesUpdate, currentFolder, curre
         <>
           {/* CHANGED: PDF/image preview with fileUrl */}
           {isImageFile ? (
-            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'auto', backgroundColor: '#111827' }}>
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'auto', backgroundColor: isDark ? '#0b1220' : '#111827' }}>
               {(previewLoading || !assetReady) ? <div style={{ color: '#94a3b8', fontSize: 13 }}>Loading preview...</div> : null}
               <img
                 src={effectiveFileUrl}
@@ -867,7 +887,7 @@ const FileViewer = ({ selectedFile, onClose, onFilesUpdate, currentFolder, curre
           ) : (
             <div style={{ position: 'relative', flex: 1, width: '100%' }}>
               {(previewLoading || !assetReady) ? (
-                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b', fontSize: 13, background: '#f8fafc', zIndex: 1 }}>
+                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: theme.colors.text.tertiary, fontSize: 13, background: theme.colors.bg.secondary, zIndex: 1 }}>
                   Loading preview...
                 </div>
               ) : null}
@@ -892,9 +912,9 @@ const FileViewer = ({ selectedFile, onClose, onFilesUpdate, currentFolder, curre
           <div style={{
             flex: 1,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            flexDirection: 'column', gap: '12px', color: '#aaa', fontSize: '14px'
+            flexDirection: 'column', gap: '12px', color: theme.colors.text.tertiary, fontSize: '14px'
           }}>
-            <FileText size={48} color="#ddd" />
+            <FileText size={48} color={theme.colors.text.tertiary} />
             <p>File preview not available</p>
             <p style={{ fontSize: '12px' }}>Re-upload the file to view it</p>
           </div>

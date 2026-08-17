@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useForm } from 'react-hook-form';
+import { useNavigate } from 'react-router-dom';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Mail, Lock, AlertCircle, CheckCircle } from 'lucide-react';
 import { z } from 'zod';
@@ -30,6 +31,7 @@ const loginSchema = z.object({
  * - Security best practices
  */
 export const LoginCard = () => {
+  const navigate = useNavigate();
   // Form state management with React Hook Form + Zod validation
   const {
     register,
@@ -84,7 +86,10 @@ export const LoginCard = () => {
       }, 1000);
     } catch (error) {
       // Error handling
-      setIsError(true);
+      const backendMessage =
+        error.response?.data?.message ||
+        error.response?.data?.detail ||
+        error.response?.data?.error;
 
       const detail = error.response?.data?.detail || 'Invalid email or password. Please try again.';
       const isSuspended = /suspend|suspended/i.test(detail);
@@ -106,7 +111,7 @@ export const LoginCard = () => {
    * Handle forgot password
    */
   const handleForgotPassword = () => {
-    window.location.href = '/forgot-password';
+    navigate('/forgot-password');
   };
 
   /**

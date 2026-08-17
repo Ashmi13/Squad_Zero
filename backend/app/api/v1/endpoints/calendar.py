@@ -68,7 +68,7 @@ async def update_event(
     supabase = get_supabase().service_client
     user_id = current_user.get("sub")
 
-    update_data = {k: v for k, v in event.dict().items() if v is not None}
+    update_data = event.model_dump(exclude_none=True)
     update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
 
     res = (

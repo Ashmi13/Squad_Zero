@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Home, FolderOpen, BrainCircuit, CheckSquare, Edit3, Settings, BadgeHelp, ShieldAlert } from 'lucide-react';
+import { Home, FolderOpen, BrainCircuit, CheckSquare, Edit3, Settings, BadgeHelp,Network, ShieldAlert } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import SettingsPanel from './SettingsPanel';
 import SecondBrainIcon from '@/components/modules/secondbrain/SecondBrainIcon';
@@ -16,6 +16,7 @@ const Rail = ({ activeView, setActiveView }) => {
     { icon: Edit3, path: '/quiz', view: 'quiz' },
     { icon: BadgeHelp, path: '/flashcards', view: 'flashcards' },
     { icon: SecondBrainIcon, path: '/second-brain', view: 'second-brain' },
+    { icon: Network, path: '/mindmap', view: 'mindmap' },
   ];
 
   return (
@@ -130,7 +131,6 @@ const Rail = ({ activeView, setActiveView }) => {
             color: activeView === 'admin' ? 'white' : '#888',
             transition: 'all 0.2s',
           }}
-          title="Admin Dashboard"
         >
           <ShieldAlert size={22} strokeWidth={1.5} />
         </div>

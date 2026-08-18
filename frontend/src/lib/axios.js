@@ -45,7 +45,16 @@ axiosInstance.interceptors.response.use(
     const detail = String(error.response?.data?.detail || '').toLowerCase();
     const isSuspendedUser = /suspend|suspended/i.test(detail) || error.response?.status === 403 && window.location.pathname !== '/account-suspended';
 
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    // Skip token refresh/redirection for authentication endpoints
+    const isAuthRequest =
+      originalRequest?.url &&
+      (originalRequest.url.includes('/auth/signin') ||
+       originalRequest.url.includes('/auth/signup') ||
+       originalRequest.url.includes('/auth/request-password-reset') ||
+       originalRequest.url.includes('/auth/confirm-password-reset') ||
+       originalRequest.url.includes('/auth/refresh-token'));
+
+    if (error.response?.status === 401 && !originalRequest._retry && !isAuthRequest) {
       // Prevent multiple concurrent refresh attempts
       if (refreshPromise) {
         try {
@@ -65,7 +74,9 @@ axiosInstance.interceptors.response.use(
 
           if (!refreshToken) {
             clearTokens();
-            window.location.href = '/login';
+            if (window.location.pathname !== '/login') {
+              window.location.href = '/login';
+            }
             throw new Error('No refresh token available');
           }
 
@@ -85,7 +96,9 @@ axiosInstance.interceptors.response.use(
         } catch (refreshError) {
           // Clear tokens and redirect to login on refresh failure
           clearTokens();
-          window.location.href = '/login';
+          if (window.location.pathname !== '/login') {
+            window.location.href = '/login';
+          }
           throw refreshError;
         } finally {
           refreshPromise = null;

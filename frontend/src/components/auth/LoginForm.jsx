@@ -71,11 +71,18 @@ export function LoginForm() {
       const detail = error.response?.data?.detail || 'Invalid email or password. Please try again.';
       const isSuspended = /suspend|suspended/i.test(detail);
 
+      let displayMessage = detail;
+      if (error.response?.status === 401) {
+        displayMessage = 'Invalid email or password. Please try again';
+      } else if (!isSuspended && (detail.toLowerCase().includes('credentials') || detail.toLowerCase().includes('signin failed'))) {
+        displayMessage = 'Invalid email or password';
+      }
+
       setIsError(true);
       setErrorMessage(
         isSuspended
           ? 'This account has been suspended. Please contact support.'
-          : detail
+          : displayMessage
       );
 
       if (isSuspended) {

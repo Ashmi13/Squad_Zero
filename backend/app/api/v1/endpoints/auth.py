@@ -178,7 +178,9 @@ async def signin(
                 status_code=403,
                 detail="Your account has been suspended. Please contact NeuroNote support.",
             )
-        raise HTTPException(status_code=401, detail=f"Signin failed: {message}")
+        
+        detail_msg = message if message.startswith("Signin failed:") else f"Signin failed: {message}"
+        raise HTTPException(status_code=401, detail=detail_msg)
 
 
 @router.get("/suspended-info", response_model=SuspendedAccountInfoResponse)

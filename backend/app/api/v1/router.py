@@ -1,6 +1,6 @@
 """FastAPI v1 API router"""
 from fastapi import APIRouter
-from app.api.v1.endpoints import auth
+from app.api.v1.endpoints import auth, user
 
 _fm_loaded = False
 _pdf_loaded = False
@@ -39,6 +39,7 @@ router = APIRouter()
 async def health_check():
     return {"status": "ok", "version": "1.0"}
 router.include_router(auth.router)
+router.include_router(user.router)
 
 if _tasks_loaded:
     router.include_router(tasks_endpoints.router)

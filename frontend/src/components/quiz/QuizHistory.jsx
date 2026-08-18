@@ -6,6 +6,11 @@ import { API } from '@/config/api';
 import { getAccessToken } from '@/utils/tokenStorage';
 import { useAuth } from '@/hooks/useAuth';
 
+const getAuthHeaders = () => {
+  const token = getAccessToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
+
 const QuizHistory = ({ onBack, onRetakeQuiz }) => {
 
   // Get user from auth context — not use client-supplied userId

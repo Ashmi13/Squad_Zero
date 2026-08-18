@@ -1106,23 +1106,7 @@ class NoteService:
             f"[Validate] {len(content)} chars - PASS"
         )
         return True
-  
-    def save_note_to_db(self, user_id: str, pdf_id: str | None, title: str, content: str) -> str | None:
-        try:
-            conn = _get_conn()
-            cur = conn.cursor()
-            note_id = str(uuid.uuid4())
-            cur.execute(
-                "INSERT INTO notes (note_id, user_id, pdf_id, title, content) VALUES (%s, %s, %s, %s, %s) RETURNING note_id",
-                (note_id, user_id, pdf_id, title, content),
-            )
-            conn.commit()
-            cur.close()
-            conn.close()
-            return note_id
-        except Exception as e:
-            print(f"[save_note_to_db] ERROR: {e}")
-            return None
+
 
 # ---------------------------------------------------------------------------
 # Compatibility alias + singleton

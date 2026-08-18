@@ -139,7 +139,7 @@ const FolderPanel = ({ selectedFolder, onSelectFolder, onSelectFile, onFolderDel
           mimeType: f.mime_type,
           folderId: f.folder_id,
           parent_file_id: f.parent_file_id,
-          fileUrl: f.storage_url || inlineAsset,
+          fileUrl: f.file_url || f.storage_url || f.preview_url || inlineAsset,
           content: inlineAsset ? null : resolvedPayload,
           isParentPDF: (f.file_type || '').toUpperCase() === 'PDF',
         };

@@ -11,9 +11,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import boto3
 from fastapi import HTTPException, UploadFile
-from reportlab.lib.pagesizes import letter
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 from botocore.exceptions import ClientError
 from supabase import Client
 
@@ -24,6 +21,7 @@ from app.core.config import settings
 _COLUMNS_CACHE: Dict[str, Optional[bool]] = {}
 _PARENT_COLUMN_CACHE: Optional[str] = None
 _COLUMNS_DETECTED: bool = False
+_BUCKET_REGION_CACHE: Dict[str, str] = {}
 
 
 class WorkspaceService:
@@ -77,12 +75,13 @@ class WorkspaceService:
                 return col, True
             return col, self._column_exists("files", col)
 
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-            for col, exists in executor.map(check_col, columns):
-                _COLUMNS_CACHE[col] = exists
+        # Execute sequentially to avoid concurrent HTTP client errors with Supabase
+        for col in columns:
+            _, exists = check_col(col)
+            _COLUMNS_CACHE[col] = exists
 
-        _COLUMNS_DETECTED = True
+        if any(_COLUMNS_CACHE.values()):
+            _COLUMNS_DETECTED = True
 
     # Convenience properties that read from the module-level cache.
     @property
@@ -205,18 +204,12 @@ class WorkspaceService:
 
     def _extract_storage_location(self, file_row: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
         """Derive (bucket, object_key) from common metadata patterns."""
-        for key_field in ("storage_path", "s3_key", "object_key", "path"):
+        for key_field in ("storage_path", "file_url", "storage_url", "s3_key", "object_key", "path"):
             value = file_row.get(key_field)
             if not value:
                 continue
 
             bucket, object_key = self._normalize_storage_reference(value)
-            if object_key:
-                return bucket, object_key
-
-        storage_url = file_row.get("storage_url")
-        if storage_url:
-            bucket, object_key = self._normalize_storage_reference(storage_url)
             if object_key:
                 return bucket, object_key
 
@@ -252,15 +245,38 @@ class WorkspaceService:
     def _aws_storage_configured(self) -> bool:
         return bool(settings.aws_access_key_id and settings.aws_secret_access_key and settings.aws_s3_bucket)
 
-    def _s3_client(self):
+    def _get_bucket_region(self, bucket: str) -> str:
+        if bucket in _BUCKET_REGION_CACHE:
+            return _BUCKET_REGION_CACHE[bucket]
+        default_region = settings.aws_region or "eu-north-1"
+        try:
+            client = boto3.client(
+                "s3",
+                aws_access_key_id=settings.aws_access_key_id,
+                aws_secret_access_key=settings.aws_secret_access_key,
+                region_name=default_region,
+            )
+            response = client.get_bucket_location(Bucket=bucket)
+            location = response.get("LocationConstraint")
+            region = location if location else "us-east-1"
+            _BUCKET_REGION_CACHE[bucket] = region
+            return region
+        except Exception:
+            return default_region
+
+    def _s3_client(self, bucket: Optional[str] = None):
         if not self._aws_storage_configured():
             raise HTTPException(status_code=500, detail="AWS S3 credentials are not configured")
+
+        region = settings.aws_region
+        if bucket:
+            region = self._get_bucket_region(bucket)
 
         return boto3.client(
             "s3",
             aws_access_key_id=settings.aws_access_key_id,
             aws_secret_access_key=settings.aws_secret_access_key,
-            region_name=settings.aws_region,
+            region_name=region,
         )
 
     @staticmethod
@@ -270,7 +286,7 @@ class WorkspaceService:
 
     def _upload_to_s3(self, bucket: str, object_key: str, content: bytes, mime_type: str) -> str:
         try:
-            self._s3_client().put_object(
+            self._s3_client(bucket).put_object(
                 Bucket=bucket,
                 Key=object_key,
                 Body=content,
@@ -284,7 +300,7 @@ class WorkspaceService:
         if not object_key or (isinstance(object_key, str) and object_key.startswith("data:")):
             return
         try:
-            self._s3_client().delete_object(Bucket=bucket, Key=str(object_key).lstrip("/"))
+            self._s3_client(bucket).delete_object(Bucket=bucket, Key=str(object_key).lstrip("/"))
         except ClientError:
             # Continue DB cleanup even when the storage object is already gone.
             pass
@@ -295,7 +311,7 @@ class WorkspaceService:
         if not source_key or not destination_key or source_key == destination_key:
             return
 
-        client = self._s3_client()
+        client = self._s3_client(bucket)
         client.copy_object(
             Bucket=bucket,
             CopySource={"Bucket": bucket, "Key": source_key},
@@ -310,7 +326,7 @@ class WorkspaceService:
             if not normalized_key:
                 return None
 
-            return self._s3_client().generate_presigned_url(
+            return self._s3_client(bucket).generate_presigned_url(
                 ClientMethod="get_object",
                 Params={"Bucket": bucket, "Key": normalized_key},
                 ExpiresIn=expires_in,
@@ -343,7 +359,7 @@ class WorkspaceService:
         if storage_key and not str(storage_key).startswith("data:"):
             for candidate_bucket in self._candidate_buckets(storage_bucket):
                 try:
-                    obj = self._s3_client().get_object(Bucket=candidate_bucket, Key=str(storage_key).lstrip("/"))
+                    obj = self._s3_client(candidate_bucket).get_object(Bucket=candidate_bucket, Key=str(storage_key).lstrip("/"))
                     body = obj.get("Body")
                     if body is not None:
                         return body.read()
@@ -607,30 +623,64 @@ class WorkspaceService:
                 metadata["file_type"] = ext.replace(".", "").upper() if ext else "FILE"
             if self._files_has_storage_path:
                 metadata["storage_path"] = file_key
+            if self._files_has_file_url:
+                metadata["file_url"] = file_key
+            if self._files_has_storage_url:
+                metadata["storage_url"] = file_key
             now_iso = datetime.now(timezone.utc).isoformat()
             if self._files_has_last_accessed:
                 metadata["last_accessed"] = now_iso
             if self._files_has_updated_at:
                 metadata["updated_at"] = now_iso
-            if self._files_has_file_content and file.content_type and file.content_type.startswith("text/"):
-                metadata["file_content"] = content.decode("utf-8", errors="ignore")
-            elif self._files_has_file_content and ext in {".txt", ".md", ".csv", ".json", ".log"}:
-                metadata["file_content"] = content.decode("utf-8", errors="ignore")
 
             if not metadata:
                 metadata["name"] = os.path.splitext(file.filename)[0]
+
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"[FILES] Inserting file: {metadata.get('name')}")
+            logger.info(f"[FILES] file_url: {metadata.get('file_url')}")
 
             saved = self.supabase.table("files").insert(metadata).execute()
             if not saved.data:
                 self._delete_from_s3(bucket, file_key)
                 raise HTTPException(status_code=500, detail="File metadata insert failed")
             inserted = saved.data[0]
+            logger.info(f"[FILES] Created file id: {inserted.get('id')}")
 
             return inserted
         except HTTPException:
             raise
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"File upload failed: {exc}") from exc
+
+    def delete_file(self, user_id: str, file_id: str) -> Dict[str, Any]:
+        try:
+            self._detect_files_columns()
+            
+            file_query = self.supabase.table("files").select("*").eq("id", file_id).limit(1)
+            if self._files_has_user_id:
+                file_query = file_query.eq("user_id", user_id)
+            existing = file_query.execute()
+            if not existing.data:
+                raise HTTPException(status_code=404, detail="File not found")
+                
+            file_row = existing.data[0]
+            
+            bucket, storage_key = self._extract_storage_location(file_row)
+            if bucket and storage_key:
+                self._delete_from_s3(bucket, storage_key)
+                
+            delete_query = self.supabase.table("files").delete().eq("id", file_id)
+            if self._files_has_user_id:
+                delete_query = delete_query.eq("user_id", user_id)
+            delete_query.execute()
+            
+            return {"file_id": file_id}
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Failed to delete file: {exc}") from exc
 
     def list_files(self, user_id: str, folder_id: Optional[str] = None) -> Dict[str, Any]:
         try:
@@ -836,25 +886,6 @@ class WorkspaceService:
                         return value
                 return None
 
-            text_content = _first_non_empty("file_content", "raw_text", "summary", "content", "text")
-            if text_content is not None:
-                content = text_content
-                if isinstance(content, str) and content.startswith("data:"):
-                    return {
-                        "file_id": file_id,
-                        "preview_url": content,
-                        "content": None,
-                        "mime_type": row.get("mime_type"),
-                        "source": "database_data_url",
-                    }
-                return {
-                    "file_id": file_id,
-                    "preview_url": None,
-                    "content": content,
-                    "mime_type": row.get("mime_type"),
-                    "source": "database",
-                }
-
             parsed_bucket, storage_key = self._extract_storage_location(row)
             if storage_key and isinstance(storage_key, str) and storage_key.startswith("data:"):
                 return {
@@ -873,6 +904,10 @@ class WorkspaceService:
                         preview_url = self._s3_object_url(candidate_bucket, storage_key)
 
                     if preview_url:
+                        import logging
+                        logger = logging.getLogger(__name__)
+                        logger.info(f"[PREVIEW] file_url: {storage_key}")
+                        logger.info(f"[PREVIEW] Generated signed URL: {preview_url}")
                         return {
                             "file_id": file_id,
                             "preview_url": preview_url,
@@ -883,12 +918,48 @@ class WorkspaceService:
 
             storage_url = _first_non_empty("storage_url", "file_url", "url", "public_url")
             if storage_url:
+                if isinstance(storage_url, str) and (storage_url.startswith("http://") or storage_url.startswith("https://") or storage_url.startswith("data:")):
+                    return {
+                        "file_id": file_id,
+                        "preview_url": storage_url,
+                        "content": None,
+                        "mime_type": row.get("mime_type"),
+                        "source": "storage_url",
+                    }
+                # If storage_url is a relative S3 key (e.g. "workspace/..."), generate a presigned S3 URL
+                safe_expiry = max(60, min(int(expires_in or 3600), 86400))
+                for candidate_bucket in self._candidate_buckets(None):
+                    presigned = self._signed_url_from_s3(candidate_bucket, storage_url, safe_expiry)
+                    if presigned:
+                        import logging
+                        logger = logging.getLogger(__name__)
+                        logger.info(f"[PREVIEW] file_url: {storage_url}")
+                        logger.info(f"[PREVIEW] Generated signed URL: {presigned}")
+                        return {
+                            "file_id": file_id,
+                            "preview_url": presigned,
+                            "content": None,
+                            "mime_type": row.get("mime_type"),
+                            "source": "aws_s3",
+                        }
+
+            text_content = _first_non_empty("file_content", "raw_text", "summary", "content", "text")
+            if text_content is not None:
+                content = text_content
+                if isinstance(content, str) and content.startswith("data:"):
+                    return {
+                        "file_id": file_id,
+                        "preview_url": content,
+                        "content": None,
+                        "mime_type": row.get("mime_type"),
+                        "source": "database_data_url",
+                    }
                 return {
                     "file_id": file_id,
-                    "preview_url": storage_url,
-                    "content": None,
+                    "preview_url": None,
+                    "content": content,
                     "mime_type": row.get("mime_type"),
-                    "source": "storage_url",
+                    "source": "database",
                 }
 
             # DEBUG LOGGING to diagnose why file has no content
@@ -1029,6 +1100,16 @@ class WorkspaceService:
     @staticmethod
     def generate_pdf_document(title: str, content: str) -> bytes:
         """Produce a PDF document from the text payload while preserving real PDF bytes for preview."""
+        try:
+            from reportlab.lib.pagesizes import letter
+            from reportlab.lib.styles import getSampleStyleSheet
+            from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+        except ImportError as exc:
+            raise HTTPException(
+                status_code=500,
+                detail="reportlab is required for PDF generation. Run: pip install reportlab"
+            ) from exc
+
         buffer = BytesIO()
         styles = getSampleStyleSheet()
         title_text = str(title or "Document").strip() or "Document"
@@ -1100,16 +1181,29 @@ class WorkspaceService:
 
         if self._files_has_storage_path:
             metadata["storage_path"] = storage_key
+        if self._files_has_file_url:
+            metadata["file_url"] = storage_key
+        if self._files_has_storage_url:
+            metadata["storage_url"] = storage_key
 
         if not metadata:
             raise HTTPException(status_code=500, detail="No writable file metadata columns found")
+
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"[FILES] Detected columns: {list(k for k, v in _COLUMNS_CACHE.items() if v)}")
+        logger.info(f"[FILES] Inserting file: {name}")
+        logger.info(f"[FILES] file_url: {metadata.get('file_url')}")
 
         try:
             saved = self.supabase.table("files").insert(metadata).execute()
             if not saved.data:
                 self._delete_from_s3(bucket, storage_key)
                 raise HTTPException(status_code=500, detail="Generated PDF insert failed")
-            return saved.data[0]
+            
+            inserted = saved.data[0]
+            logger.info(f"[FILES] Created file id: {inserted.get('id')}")
+            return inserted
         except HTTPException:
             self._delete_from_s3(bucket, storage_key)
             raise
@@ -1154,17 +1248,7 @@ class WorkspaceService:
         if self._files_has_size_bytes:
             metadata["size_bytes"] = len(content_bytes)
 
-        # Always store content in DB columns for instant preview without needing storage
-        if self._files_has_file_content:
-            metadata["file_content"] = safe_content
-        elif self._files_has_raw_text:
-            metadata["raw_text"] = safe_content
-        elif self._files_has_text:
-            metadata["text"] = safe_content
-        elif self._files_has_content:
-            metadata["content"] = safe_content
-        elif self._files_has_summary:
-            metadata["summary"] = safe_content
+
 
         # Upload the generated text asset to AWS S3 so the object survives across sessions.
         safe_filename = (original_filename or name or "file").replace(" ", "_").replace("/", "_")
@@ -1183,6 +1267,10 @@ class WorkspaceService:
 
         if self._files_has_storage_path:
             metadata["storage_path"] = storage_key
+        if self._files_has_file_url:
+            metadata["file_url"] = storage_key
+        if self._files_has_storage_url:
+            metadata["storage_url"] = storage_key
 
         if not metadata:
             raise HTTPException(status_code=500, detail="No writable file metadata columns found")

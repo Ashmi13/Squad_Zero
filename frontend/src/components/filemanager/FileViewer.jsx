@@ -51,6 +51,17 @@ import SummaryPanel from './SummaryPanel';
 const API_BASE = config.apiBaseUrl || '';
 const apiUrl = (path) => `${API_BASE}${path}`;
 
+const parseErrorDetail = (payload, defaultMsg) => {
+  if (typeof payload?.detail === 'string') return payload.detail;
+  if (Array.isArray(payload?.detail)) {
+    return payload.detail.map((err) => err?.msg || JSON.stringify(err)).join(', ');
+  }
+  if (payload?.detail && typeof payload.detail === 'object') {
+    return JSON.stringify(payload.detail);
+  }
+  return payload?.message || defaultMsg;
+};
+
 const addChildFileToTree = (items, parentId, childFile) => {
   return (items || []).map((item) => {
     if (item.id === parentId) {
@@ -118,6 +129,8 @@ const FileViewer = ({ selectedFile, onClose, onFilesUpdate, currentFolder, curre
   const [localObjectUrl, setLocalObjectUrl] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [assetReady, setAssetReady] = useState(false);
+  // previewKey increments to force re-fetch when clicking the same file again
+  const [previewKey, setPreviewKey] = useState(0);
 
   if (!selectedFile) {
     return (
@@ -147,7 +160,21 @@ const FileViewer = ({ selectedFile, onClose, onFilesUpdate, currentFolder, curre
     '';
   const resolvedContentIsDataUrl = typeof resolvedContent === 'string' && resolvedContent.startsWith('data:');
   const effectiveContent = resolvedContentIsDataUrl ? (previewContent || '') : (resolvedContent || previewContent);
-  const effectiveFileUrl = selectedFile.fileUrl || selectedFile.storage_url || previewUrl || (resolvedContentIsDataUrl ? resolvedContent : null);
+  // A URL is "usable" only if it can actually be loaded directly in an iframe/img.
+  // Raw S3 object keys (workspace/user/folder/file.pdf) are NOT usable URLs.
+  const isValidUrl = (url) => typeof url === 'string' && (url.startsWith('http') || url.startsWith('blob:') || url.startsWith('data:'));
+  // isSignedOrUsableUrl: true only for actual signed S3 URLs, blob URLs, or data URLs.
+  // Rejects raw S3 object keys like "workspace/user/folder/file.pdf".
+  const isSignedOrUsableUrl = (url) => {
+    if (!url || typeof url !== 'string') return false;
+    if (url.startsWith('blob:') || url.startsWith('data:')) return true;
+    if (url.startsWith('https://') && url.includes('amazonaws.com') && url.includes('X-Amz-Signature')) return true;
+    return false;
+  };
+  const effectiveFileUrl = previewUrl || 
+    (isSignedOrUsableUrl(selectedFile.fileUrl) ? selectedFile.fileUrl : null) || 
+    (isSignedOrUsableUrl(selectedFile.storage_url) ? selectedFile.storage_url : null) || 
+    (resolvedContentIsDataUrl ? resolvedContent : null);
   const isGeneratedTextFile =
     normalizedType === 'TXT' ||
     normalizedMime.startsWith('text/') ||
@@ -201,10 +228,16 @@ const FileViewer = ({ selectedFile, onClose, onFilesUpdate, currentFolder, curre
     // - Files with a non-Supabase URL (e.g. local object URL) → already usable
     // - Files stored in Supabase (storage_url) OR with no content → fetch fresh signed URL
     const hasInlineTextContent = !!(resolvedContent && !resolvedContentIsDataUrl);
-    const hasLocalUrl = !!(selectedFile?.fileUrl && !String(selectedFile.fileUrl || '').includes('supabase.co'));
+    // Only skip the API call if we have a *usable* URL (signed S3 URL, blob:, data:).
+    // Raw S3 object keys like "workspace/user/folder/file.pdf" are NOT usable directly.
+    const hasUsableUrl = isSignedOrUsableUrl(selectedFile?.fileUrl) || isSignedOrUsableUrl(selectedFile?.storage_url);
 
-    // Skip API call if we already have displayable content/url
-    if (hasInlineTextContent || hasLocalUrl) {
+    console.log('[FILE SELECT] file_id=' + selectedFile?.id + ' file_name=' + selectedFile?.name);
+    console.log('[FILE SELECT] hasInlineTextContent=' + hasInlineTextContent + ' hasUsableUrl=' + hasUsableUrl);
+
+    // Skip API call only if we already have a truly usable/displayable URL or inline text
+    if (hasInlineTextContent || hasUsableUrl) {
+      console.log('[FILE SELECT] Skipping API call - using cached content');
       return () => {
         disposed = true;
       };
@@ -284,22 +317,24 @@ const FileViewer = ({ selectedFile, onClose, onFilesUpdate, currentFolder, curre
       return false;
     };
 
+    console.log('[PREVIEW] Calling API for file_id=' + selectedFile.id);
     workspaceApi.getFilePreview(selectedFile.id)
       .then((data) => {
         if (disposed) return;
         const preview = data?.preview || {};
+        console.log('[PREVIEW] response preview_url=' + (preview.preview_url ? 'YES' : 'NO') + ' content=' + (preview.content ? 'YES' : 'NO'));
         // preview.preview_url: signed/public URL for PDFs and stored files
         // preview.content: inline text content for text files
         if (preview.preview_url) {
-          const shouldFetchText = preview.mime_type?.startsWith('text/') || isTextFile;
+          const shouldFetchText = preview.mime_type?.startsWith('text/') || (isTextFile && !isPdfFile);
           if (shouldFetchText) {
             fetch(preview.preview_url)
               .then(res => res.text())
               .then(text => {
-                setPreviewContent(text);
+                if (!disposed) setPreviewContent(text);
               })
-              .catch(err => {
-                setPreviewUrl(preview.preview_url);
+              .catch(() => {
+                if (!disposed) setPreviewUrl(preview.preview_url);
               });
           } else {
             setPreviewUrl(preview.preview_url);
@@ -318,9 +353,12 @@ const FileViewer = ({ selectedFile, onClose, onFilesUpdate, currentFolder, curre
           } else {
             setPreviewContent(content);
           }
+        } else {
+          console.warn('[PREVIEW] No preview_url or content returned from API for file_id=' + selectedFile.id);
         }
       })
-      .catch(async () => {
+      .catch(async (err) => {
+        console.warn('[PREVIEW] API call failed:', err.message);
         // Fall back to local machine binding only for binary assets like PDFs.
         // For generated text files, local fallback can incorrectly resolve to the parent PDF.
         if (shouldAttemptLocalBinaryFallback) {
@@ -336,7 +374,9 @@ const FileViewer = ({ selectedFile, onClose, onFilesUpdate, currentFolder, curre
     return () => {
       disposed = true;
     };
-  }, [selectedFile?.id, selectedFile?.fileUrl, selectedFile?.type, selectedFile?.file_type, selectedFile?.mimeType, selectedFile?.mime_type, selectedFile?.name, selectedFile?.originalFilename, selectedFile?.original_filename, resolvedContent]);
+  // NOTE: previewKey is intentionally NOT in deps — it's only used to force re-runs when needed.
+  // The deps that matter are selectedFile?.id and properties that affect rendering logic.
+  }, [selectedFile?.id, selectedFile?.type, selectedFile?.file_type, selectedFile?.mimeType, selectedFile?.mime_type, selectedFile?.name, selectedFile?.originalFilename, selectedFile?.original_filename, resolvedContent, previewKey]);
 
   /**
    * BACKEND INTEGRATION #1: Extract Text from PDF
@@ -359,7 +399,7 @@ const FileViewer = ({ selectedFile, onClose, onFilesUpdate, currentFolder, curre
    * - BACKEND SERVICE: backend/app/services/pdf_reader.py (does the actual text extraction)
    */
   const handleExtractText = async () => {
-    if (!effectiveFileUrl) {
+    if (!selectedFile?.id && !effectiveFileUrl) {
       setExtractError('No file content available');
       return;
     }
@@ -371,15 +411,7 @@ const FileViewer = ({ selectedFile, onClose, onFilesUpdate, currentFolder, curre
     setExtractError(null);
 
     try {
-      // Step 1: Convert PDF from data URL to Blob
-      // The PDF is stored as a data URL (base64 string)
-      // We need to convert it to a Blob to send to the backend
-      const response = await fetch(effectiveFileUrl);
-      const blob = await response.blob();
-      
-      // Step 2: Create FormData (multipart/form-data) to send file to backend
       const formData = new FormData();
-      formData.append('file', blob, `${selectedFile.name}.pdf`);
       formData.append('source_file_id', selectedFile.id);
       formData.append('folder_id', resolvedFolderId);
       formData.append('source_file_name', resolvedSourceName);
@@ -397,7 +429,7 @@ const FileViewer = ({ selectedFile, onClose, onFilesUpdate, currentFolder, curre
         let detail = 'Failed to extract text from PDF';
         try {
           const payload = await extractResponse.json();
-          detail = payload?.detail || payload?.message || detail;
+          detail = parseErrorDetail(payload, detail);
         } catch {
           // ignore parsing errors
         }
@@ -428,7 +460,9 @@ const FileViewer = ({ selectedFile, onClose, onFilesUpdate, currentFolder, curre
         mime_type: 'application/pdf',
         isExtractedText: true,
         parentFileId: selectedFile.id,
-        fileUrl: data.file?.storage_url || data.file?.file_url || data.file?.storage_path || null,
+        // Do NOT pass the raw S3 object key as fileUrl - it's not a loadable URL.
+        // Leave fileUrl null so the preview useEffect calls the backend for a signed URL.
+        fileUrl: null,
         storagePath: data.file?.storage_path || null,
         folderId: selectedFile.folderId || selectedFile.folder_id || currentFolderId || null,
         folderName: selectedFile.folderName || selectedFile.folder_name || currentFolder || null,
@@ -500,10 +534,7 @@ const FileViewer = ({ selectedFile, onClose, onFilesUpdate, currentFolder, curre
       
       if (!textToSummarize) {
         // If we don't have extracted text yet, extract it first
-        const response = await fetch(effectiveFileUrl);
-        const blob = await response.blob();
         const formData = new FormData();
-        formData.append('file', blob, `${selectedFile.name}.pdf`);
         formData.append('source_file_id', selectedFile.id);
         formData.append('folder_id', resolvedFolderId);
         formData.append('source_file_name', resolvedSourceName);
@@ -518,7 +549,7 @@ const FileViewer = ({ selectedFile, onClose, onFilesUpdate, currentFolder, curre
           let detail = 'Failed to extract text';
           try {
             const payload = await extractResponse.json();
-            detail = payload?.detail || payload?.message || detail;
+            detail = parseErrorDetail(payload, detail);
           } catch {
             // ignore parsing errors
           }
@@ -548,7 +579,7 @@ const FileViewer = ({ selectedFile, onClose, onFilesUpdate, currentFolder, curre
         let detail = 'Failed to generate summary';
         try {
           const payload = await summaryResponse.json();
-          detail = payload?.detail || payload?.message || detail;
+          detail = parseErrorDetail(payload, detail);
         } catch {
           // ignore parsing errors
         }
@@ -578,7 +609,9 @@ const FileViewer = ({ selectedFile, onClose, onFilesUpdate, currentFolder, curre
         mime_type: 'application/pdf',
         isSummary: true,
         parentFileId: selectedFile.id,
-        fileUrl: summaryData.file?.storage_url || summaryData.file?.file_url || summaryData.file?.storage_path || null,
+        // Do NOT pass the raw S3 object key as fileUrl - it's not a loadable URL.
+        // Leave fileUrl null so the preview useEffect calls the backend for a signed URL.
+        fileUrl: null,
         storagePath: summaryData.file?.storage_path || null,
         folderId: selectedFile.folderId || selectedFile.folder_id || currentFolderId || null,
         folderName: selectedFile.folderName || selectedFile.folder_name || currentFolder || null,
@@ -892,6 +925,7 @@ const FileViewer = ({ selectedFile, onClose, onFilesUpdate, currentFolder, curre
                 </div>
               ) : null}
               <iframe
+                key={effectiveFileUrl}
                 src={effectiveFileUrl}
                 style={{
                   flex: 1,

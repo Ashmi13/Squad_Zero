@@ -149,7 +149,10 @@ const FileList = ({ selectedFolder, files, onSelectFile, onFilesUpdate }) => {
             year: 'numeric',
           }),
           type: computedType,
-          fileUrl: f.storage_url || inlineAsset,
+          // Do NOT pass raw S3 object keys (workspace/...) as fileUrl.
+          // They are not loadable URLs. Leave null so the preview useEffect
+          // calls the backend to get a fresh signed URL.
+          fileUrl: null,
           storagePath: f.storage_path,
           content: persistedTextContent,
           mimeType: f.mime_type,
@@ -240,7 +243,8 @@ const FileList = ({ selectedFolder, files, onSelectFile, onFilesUpdate }) => {
               year: 'numeric',
             }),
             type: uploadedType,
-            fileUrl: uploadedFile.storage_url || null,
+            // Do NOT pass raw S3 object keys as fileUrl - leave null so preview API is called.
+            fileUrl: null,
             storagePath: uploadedFile.storage_path,
             content: fileContent,
             mimeType: file.type || null,
@@ -260,7 +264,8 @@ const FileList = ({ selectedFolder, files, onSelectFile, onFilesUpdate }) => {
           originalFilename: uploadedFile.original_filename || file.name,
           folderId: selectedFolder.id,
           type: uploadedType,
-          fileUrl: uploadedFile.storage_url || null,
+          // Do NOT pass raw S3 object keys as fileUrl - leave null so preview API is called.
+          fileUrl: null,
           storagePath: uploadedFile.storage_path,
           content: fileContent,
           mimeType: file.type || null,

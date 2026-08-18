@@ -298,22 +298,48 @@ const FileList = ({ selectedFolder, files, onSelectFile, onFilesUpdate }) => {
     }
   };
 
+  const removeFileNodeById = (nodes, id) =>
+    (nodes || []).reduce((acc, node) => {
+      if (String(node.id) === String(id)) return acc;
+      return [...acc, { ...node, children: removeFileNodeById(node.children, id) }];
+    }, []);
+
   const handleDelete = async (fileId) => {
     if (!window.confirm('Delete this file? This action cannot be undone.')) return;
 
     try {
       const targetFile = findFileInTreeById(folderFiles, fileId);
+
+      // Call backend — only proceed with UI update on success
       await workspaceApi.deleteFile(fileId);
-      await removeFileFromLocalFolder(
-        {
-          ...selectedFolder,
-          name: targetFile?.name,
-          originalFilename: targetFile?.originalFilename,
-          original_filename: targetFile?.originalFilename,
-        },
-        targetFile?.originalFilename || targetFile?.name,
-      );
-      await loadFiles();
+
+      // Immediately remove from local folderFiles state (no page refresh needed)
+      setFolderFiles((prev) => removeFileNodeById(prev, fileId));
+
+      // Sync removal into parent (FileManagerPage) files state
+      if (onFilesUpdate && selectedFolder?.name) {
+        onFilesUpdate((prevFiles) => {
+          const folderKey = selectedFolder.name;
+          const updatedFolder = removeFileNodeById(prevFiles?.[folderKey] || [], fileId);
+          return { ...(prevFiles || {}), [folderKey]: updatedFolder };
+        });
+      }
+
+      // Best-effort: remove local file copy — do NOT let errors here block the UI update
+      try {
+        await removeFileFromLocalFolder(
+          {
+            ...selectedFolder,
+            name: targetFile?.name,
+            originalFilename: targetFile?.originalFilename,
+            original_filename: targetFile?.originalFilename,
+          },
+          targetFile?.originalFilename || targetFile?.name,
+        );
+      } catch {
+        // Ignore local sync errors; file is already deleted from the backend
+      }
+
       window.dispatchEvent(new Event('neuranote:files-updated'));
     } catch (err) {
       setError(err.message || 'Delete failed');

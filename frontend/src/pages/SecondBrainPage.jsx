@@ -67,6 +67,7 @@ function apiNoteToGraphNote(n) {
   return {
     id: n.id,
     title: n.title,
+    color: n.color || DEFAULT_COLOR,
     folder: 'Second Brain',
     updatedAt: (n.updated_at || '').slice(0, 10),
     content: [cleanContent, tagLine, linkLine]
@@ -74,16 +75,13 @@ function apiNoteToGraphNote(n) {
       .join('\n'),
   };
 }
-// color per folder — used for node color and edge gradients
-const FOLDER_COLORS = {
-  'Computer Science': '#6366f1',
-  'Mathematics':      '#10b981',
-  'Programming':      '#f59e0b',
-  'Science':          '#06b6d4',
-  'General':          '#8b5cf6',
-};
+// color per note — used for node color and edge gradients
+const NOTE_COLORS = [
+  '#6366f1', '#10b981', '#f59e0b', '#ef4444', '#06b6d4',
+  '#ec4899', '#8b5cf6', '#14b8a6', '#f97316', '#84cc16',
+];
 const DEFAULT_COLOR = '#6366f1';
-const getColor = (folder) => FOLDER_COLORS[folder] || DEFAULT_COLOR;
+const getColor = (node) => node?.color || DEFAULT_COLOR;
 
 // parse notes into graph nodes and edges
 // extracts #tags and [[backlinks]] from note content
@@ -104,7 +102,7 @@ function parseGraph(notes) {
     const angle = (i / parsed.length) * Math.PI * 2;
     const r     = 200;
     return {
-      id: note.id, title: note.title, folder: note.folder,
+      id: note.id, title: note.title, color: note.color, folder: note.folder,
       updatedAt: note.updatedAt, tags: note.tags,
       backlinks: note.backlinks, content: note.content,
       x: Math.cos(angle) * r, y: Math.sin(angle) * r,
@@ -590,8 +588,8 @@ export default function SecondBrainPage() {
         const highlighted = selectedId && (src.id === selectedId || tgt.id === selectedId);
         if ((isDimmed(src.id) || isDimmed(tgt.id)) && !highlighted) return;
 
-        const sc    = getColor(src.folder);
-        const tc    = getColor(tgt.folder);
+        const sc    = getColor(src);
+        const tc    = getColor(tgt);
         const alpha = highlighted ? 'cc' : e.type === 'backlink' ? '50' : '28';
         const grad  = ctx2.createLinearGradient(src.x, src.y, tgt.x, tgt.y);
         grad.addColorStop(0, sc + alpha);
@@ -609,7 +607,7 @@ export default function SecondBrainPage() {
 
       // draw nodes
       nodes.forEach(n => {
-        const color      = getColor(n.folder);
+        const color      = getColor(n);
         const isSelected = n.id === selectedId;
         const isHovered  = n.id === hoveredId;
         const dimmed     = isDimmed(n.id) && !isSelected;
@@ -888,7 +886,7 @@ export default function SecondBrainPage() {
             {filteredNotes.map(n => (
               <div key={n.id} style={S.noteItem(selectedNode?.id === n.id)} onClick={() => focusNode(n)}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ width: 7, height: 7, borderRadius: '50%', background: getColor(n.folder), flexShrink: 0 }} />
+                  <span style={{ width: 7, height: 7, borderRadius: '50%', background: getColor(n), flexShrink: 0 }} />
                   <div style={S.noteTitle}>{n.title}</div>
                 </div>
                 <div style={{ ...S.noteFolder, paddingLeft: 13 }}>
@@ -901,15 +899,14 @@ export default function SecondBrainPage() {
             )}
           </div>
 
-          {/* folder color legend */}
+          {/* note color palette — available colors */}
           <div style={{ padding: '10px 14px', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
-            <span style={S.sidebarLabel}>Folders</span>
-            {Object.entries(FOLDER_COLORS).map(([folder, color]) => (
-              <div key={folder} style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 5 }}>
-                <span style={{ width: 8, height: 8, borderRadius: '50%', background: color, boxShadow: `0 0 6px ${color}` }} />
-                <span style={{ fontSize: 11, color: '#4b5563' }}>{folder}</span>
-              </div>
-            ))}
+            <span style={S.sidebarLabel}>Note Colors</span>
+            <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 4 }}>
+              {NOTE_COLORS.map(c => (
+                <span key={c} style={{ width: 10, height: 10, borderRadius: '50%', background: c, boxShadow: `0 0 4px ${c}` }} />
+              ))}
+            </div>
           </div>
         </div>
 
@@ -989,11 +986,59 @@ export default function SecondBrainPage() {
               </div>
               <div style={S.infoRow}>
                 <span style={S.infoLabel}>Folder</span>
-                <span style={{ ...S.infoVal, color: getColor(selectedNode.folder) }}>{selectedNode.folder}</span>
+                <span style={{ ...S.infoVal, color: getColor(selectedNode) }}>{selectedNode.folder}</span>
               </div>
               <div style={S.infoRow}>
                 <span style={S.infoLabel}>Updated</span>
                 <span style={S.infoVal}>{selectedNode.updatedAt}</span>
+              </div>
+
+              {/* ── note color picker ── */}
+              <div>
+                <span style={S.sidebarLabel}>Note Color</span>
+                <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 4 }}>
+                  {NOTE_COLORS.map(c => (
+                    <button
+                      key={c}
+                      type="button"
+                      title={c}
+                      onClick={async () => {
+                        try {
+                          await secondBrainApi.updateNote(selectedNode.id, { color: c });
+                          // Update local graph node color
+                          const g = simRef.current;
+                          if (g?.idMap?.[selectedNode.id]) {
+                            g.idMap[selectedNode.id].color = c;
+                          }
+                          // Update sidebar node color in graphData
+                          setGraphData(prev => {
+                            if (!prev) return prev;
+                            return {
+                              ...prev,
+                              nodes: prev.nodes.map(n =>
+                                n.id === selectedNode.id ? { ...n, color: c } : n
+                              ),
+                            };
+                          });
+                          setSelectedNode(prev => ({ ...prev, color: c }));
+                        } catch (err) {
+                          console.error('Failed to update color:', err);
+                        }
+                      }}
+                      style={{
+                        width: 22,
+                        height: 22,
+                        borderRadius: '50%',
+                        border: `2px solid ${getColor(selectedNode) === c ? '#fff' : 'transparent'}`,
+                        background: c,
+                        cursor: 'pointer',
+                        transition: 'all 0.15s',
+                        outline: 'none',
+                        boxShadow: getColor(selectedNode) === c ? `0 0 8px ${c}` : 'none',
+                      }}
+                    />
+                  ))}
+                </div>
               </div>
             </div>
 

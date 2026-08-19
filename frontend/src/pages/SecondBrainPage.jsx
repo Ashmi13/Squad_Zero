@@ -2,6 +2,8 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Search, ZoomIn, ZoomOut, RefreshCw, Hash, Link2, FileText, X, Info, Upload } from 'lucide-react';
 import { secondBrainApi, ensureSecondBrainFolder } from '@/services/secondBrainApi';
 import { workspaceApi } from '@/services/workspaceApi';
+import ConfirmDialog from '../components/common/ConfirmDialog';
+
 // demo notes used until the real notes API is connected after M3 merges
 // replace this with: GET /api/v1/notes/ -> { id, title, content, folder, updated_at }
 const DEMO_NOTES = [
@@ -435,6 +437,18 @@ export default function SecondBrainPage() {
   const [searchQuery,  setSearchQuery]  = useState('');
   const [zoomDisplay,  setZoomDisplay]  = useState(100);
 
+  // ── confirm dialog for tag/backlink removal ──
+  const [confirm, setConfirm] = useState({
+    open: false,
+    type: 'danger',
+    title: '',
+    message: '',
+    confirmLabel: 'Remove',
+    onConfirm: () => {},
+  });
+  const closeConfirm = () => setConfirm(prev => ({ ...prev, open: false }));
+  const openConfirm = (opts) => setConfirm({ open: true, cancelLabel: 'Cancel', ...opts, onCancel: closeConfirm });
+
   const loadGraphFrom = (notesArray) => {
     const g = parseGraph(notesArray);
     g.idMap = {};
@@ -539,41 +553,25 @@ export default function SecondBrainPage() {
 
       // integrate forces into velocity and position
       nodes.forEach(n => {
-        if (n.pinned) return;
-        n.vx = (n.vx + n.fx) * DAMPING;
-        n.vy = (n.vy + n.fy) * DAMPING;
-        n.x += n.vx;
-        n.y += n.vy;
+        if (n.pinned) { n.vx = 0; n.vy = 0; return; }
+        n.vx += n.fx; n.vy += n.fy;
+        n.vx *= DAMPING; n.vy *= DAMPING;
+        n.x   += n.vx;   n.y   += n.vy;
       });
     };
 
-    // draw one frame onto the canvas
     const draw = () => {
+      const ctx2 = ctx;
       const { zoom, panX, panY, hoveredId, selectedId, filterTag, searchQuery: sq } = stateRef.current;
       const { nodes, edges } = simRef.current;
-      const W = canvas.width, H = canvas.height;
 
-      ctx.clearRect(0, 0, W, H);
+      // clear canvas
+      ctx2.setTransform(1, 0, 0, 1, 0, 0);
+      ctx2.clearRect(0, 0, canvas.width, canvas.height);
+      ctx2.translate(panX, panY);
+      ctx2.scale(zoom, zoom);
 
-      // dark background
-      ctx.fillStyle = '#0b0f19';
-      ctx.fillRect(0, 0, W, H);
-
-      // subtle dot grid that moves with pan/zoom
-      ctx.fillStyle = 'rgba(255,255,255,0.022)';
-      const gSize = 36 * zoom;
-      const offX  = ((panX % gSize) + gSize) % gSize;
-      const offY  = ((panY % gSize) + gSize) % gSize;
-      for (let x = offX; x < W; x += gSize)
-        for (let y = offY; y < H; y += gSize) {
-          ctx.beginPath(); ctx.arc(x, y, 1, 0, Math.PI * 2); ctx.fill();
-        }
-
-      ctx.save();
-      ctx.translate(panX, panY);
-      ctx.scale(zoom, zoom);
-
-      // figure out which nodes are dimmed by the current filter/search
+      // dimmed ids — nodes not matching the active filter/search
       const dimmedIds = new Set();
       if (filterTag || sq) {
         nodes.forEach(n => {
@@ -595,18 +593,18 @@ export default function SecondBrainPage() {
         const sc    = getColor(src.folder);
         const tc    = getColor(tgt.folder);
         const alpha = highlighted ? 'cc' : e.type === 'backlink' ? '50' : '28';
-        const grad  = ctx.createLinearGradient(src.x, src.y, tgt.x, tgt.y);
+        const grad  = ctx2.createLinearGradient(src.x, src.y, tgt.x, tgt.y);
         grad.addColorStop(0, sc + alpha);
         grad.addColorStop(1, tc + alpha);
 
-        ctx.beginPath();
-        ctx.moveTo(src.x, src.y);
-        ctx.lineTo(tgt.x, tgt.y);
-        ctx.strokeStyle = grad;
-        ctx.lineWidth   = (highlighted ? 2.5 : e.type === 'backlink' ? 1.5 : 1) / zoom;
-        if (highlighted) { ctx.shadowBlur = 10 / zoom; ctx.shadowColor = sc; }
-        ctx.stroke();
-        ctx.shadowBlur = 0;
+        ctx2.beginPath();
+        ctx2.moveTo(src.x, src.y);
+        ctx2.lineTo(tgt.x, tgt.y);
+        ctx2.strokeStyle = grad;
+        ctx2.lineWidth   = (highlighted ? 2.5 : e.type === 'backlink' ? 1.5 : 1) / zoom;
+        if (highlighted) { ctx2.shadowBlur = 10 / zoom; ctx2.shadowColor = sc; }
+        ctx2.stroke();
+        ctx2.shadowBlur = 0;
       });
 
       // draw nodes
@@ -617,46 +615,44 @@ export default function SecondBrainPage() {
         const dimmed     = isDimmed(n.id) && !isSelected;
         const r          = n.radius * (isSelected ? 1.35 : isHovered ? 1.18 : 1);
 
-        ctx.globalAlpha = dimmed ? 0.2 : 1;
+        ctx2.globalAlpha = dimmed ? 0.2 : 1;
 
         // glow ring around selected or hovered nodes
         if (isSelected || isHovered) {
           const glowR = r * 3;
-          const grd   = ctx.createRadialGradient(n.x, n.y, r * 0.5, n.x, n.y, glowR);
+          const grd   = ctx2.createRadialGradient(n.x, n.y, r * 0.5, n.x, n.y, glowR);
           grd.addColorStop(0, color + (isSelected ? '55' : '30'));
           grd.addColorStop(1, color + '00');
-          ctx.beginPath(); ctx.arc(n.x, n.y, glowR, 0, Math.PI * 2);
-          ctx.fillStyle = grd; ctx.fill();
+          ctx2.beginPath(); ctx2.arc(n.x, n.y, glowR, 0, Math.PI * 2);
+          ctx2.fillStyle = grd; ctx2.fill();
         }
 
         // node circle with radial gradient for a 3D look
-        const nodeGrd = ctx.createRadialGradient(n.x - r * 0.3, n.y - r * 0.35, 0, n.x, n.y, r);
+        const nodeGrd = ctx2.createRadialGradient(n.x - r * 0.3, n.y - r * 0.35, 0, n.x, n.y, r);
         nodeGrd.addColorStop(0, color + 'ff');
         nodeGrd.addColorStop(1, color + '88');
-        ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
-        ctx.fillStyle  = nodeGrd;
-        ctx.shadowBlur = isSelected ? 22 / zoom : isHovered ? 12 / zoom : 6 / zoom;
-        ctx.shadowColor = color;
-        ctx.fill();
-        ctx.shadowBlur = 0;
+        ctx2.beginPath(); ctx2.arc(n.x, n.y, r, 0, Math.PI * 2);
+        ctx2.fillStyle  = nodeGrd;
+        ctx2.shadowBlur = isSelected ? 22 / zoom : isHovered ? 12 / zoom : 6 / zoom;
+        ctx2.shadowColor = color;
+        ctx2.fill();
+        ctx2.shadowBlur = 0;
 
         // border ring
-        ctx.strokeStyle = isSelected ? '#ffffff' : color + '70';
-        ctx.lineWidth   = (isSelected ? 2 : 1) / zoom;
-        ctx.stroke();
+        ctx2.strokeStyle = isSelected ? '#ffffff' : color + '70';
+        ctx2.lineWidth   = (isSelected ? 2 : 1) / zoom;
+        ctx2.stroke();
 
         // label below node
         const fs  = Math.max(8.5, 11 / zoom);
-        ctx.font      = `${isSelected ? 600 : 400} ${fs}px system-ui, sans-serif`;
-        ctx.fillStyle = dimmed ? '#2d3748' : isSelected ? '#f9fafb' : '#64748b';
-        ctx.textAlign = 'center';
-        const label = n.title.length > 20 ? n.title.slice(0, 18) + '…' : n.title;
-        ctx.fillText(label, n.x, n.y + r + 13 / zoom);
+        ctx2.font      = `${isSelected ? 600 : 400} ${fs}px system-ui, sans-serif`;
+        ctx2.fillStyle = dimmed ? '#2d3748' : isSelected ? '#f9fafb' : '#64748b';
+        ctx2.textAlign = 'center';
+        const label = n.title.length > 20 ? n.title.slice(0, 18) + '\u2026' : n.title;
+        ctx2.fillText(label, n.x, n.y + r + 13 / zoom);
 
-        ctx.globalAlpha = 1;
+        ctx2.globalAlpha = 1;
       });
-
-      ctx.restore();
     };
 
     // run physics for first 320 frames to let layout settle, then only on drag
@@ -936,8 +932,60 @@ export default function SecondBrainPage() {
                 <span style={{ color: '#e5e7eb', fontWeight: 700, fontSize: 14, lineHeight: 1.4, flex: 1 }}>
                   {selectedNode.title}
                 </span>
-                <X size={14} color="#4b5563" style={{ cursor: 'pointer', flexShrink: 0, marginTop: 2 }}
-                  onClick={() => { stateRef.current.selectedId = null; setSelectedNode(null); }} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+  <button
+    type="button"
+    title="Delete note"
+    onClick={(e) => {
+      e.stopPropagation();
+
+      openConfirm({
+        title: `Delete "${selectedNode.title}"?`,
+        message: `Are you sure you want to permanently delete this note?`,
+        type: 'danger',
+        confirmLabel: 'Delete Note',
+        onConfirm: async () => {
+          closeConfirm();
+
+          try {
+            await secondBrainApi.deleteNote(selectedNode.id);
+
+            stateRef.current.selectedId = null;
+            setSelectedNode(null);
+
+            await refetchNotes();
+          } catch (err) {
+            console.error('Failed to delete note:', err);
+          }
+        },
+      });
+    }}
+    style={{
+      width: 28,
+      height: 28,
+      border: '1px solid rgba(248,113,113,0.2)',
+      background: 'rgba(248,113,113,0.06)',
+      color: '#f87171',
+      borderRadius: 6,
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+    }}
+  >
+    🗑
+  </button>
+
+  <X
+    size={14}
+    color="#4b5563"
+    style={{ cursor: 'pointer', flexShrink: 0, marginTop: 2 }}
+    onClick={() => {
+      stateRef.current.selectedId = null;
+      setSelectedNode(null);
+    }}
+  />
+</div>
               </div>
               <div style={S.infoRow}>
                 <span style={S.infoLabel}>Folder</span>
@@ -973,12 +1021,21 @@ export default function SecondBrainPage() {
             onClick={async (e) => {
               e.stopPropagation();
 
-              try {
-                await secondBrainApi.removeTag(selectedNode.id, t);
-                await refetchNotes();
-              } catch (err) {
-                console.error('Failed to remove tag:', err);
-              }
+              openConfirm({
+                title: `Remove tag #${t}?`,
+                message: `Are you sure you want to remove #${t} from "${selectedNode.title}"?`,
+                type: 'warning',
+                confirmLabel: 'Remove Tag',
+                onConfirm: async () => {
+                  closeConfirm();
+                  try {
+                    await secondBrainApi.removeTag(selectedNode.id, t);
+                    await refetchNotes();
+                  } catch (err) {
+                    console.error('Failed to remove tag:', err);
+                  }
+                },
+              });
             }}
             style={{
               border: 'none',
@@ -1053,16 +1110,24 @@ export default function SecondBrainPage() {
 
               if (!target) return;
 
-              try {
-                await secondBrainApi.removeBacklink(
-                  selectedNode.id,
-                  target.id
-                );
-
-                await refetchNotes();
-              } catch (err) {
-                console.error('Failed to unlink note:', err);
-              }
+              openConfirm({
+                title: `Remove link to "${link}"?`,
+                message: `Are you sure you want to remove the link from "${selectedNode.title}" to "${link}"?`,
+                type: 'warning',
+                confirmLabel: 'Remove Link',
+                onConfirm: async () => {
+                  closeConfirm();
+                  try {
+                    await secondBrainApi.removeBacklink(
+                      selectedNode.id,
+                      target.id
+                    );
+                    await refetchNotes();
+                  } catch (err) {
+                    console.error('Failed to unlink note:', err);
+                  }
+                },
+              });
             }}
             style={{
               flexShrink: 0,
@@ -1110,6 +1175,18 @@ export default function SecondBrainPage() {
         )}
 
       </div>
+
+      {/* ── confirmation dialog ── */}
+      <ConfirmDialog
+        isOpen={confirm.open}
+        title={confirm.title}
+        message={confirm.message}
+        type={confirm.type}
+        confirmLabel={confirm.confirmLabel}
+        cancelLabel={confirm.cancelLabel}
+        onConfirm={confirm.onConfirm}
+        onCancel={confirm.onCancel}
+      />
     </div>
   );
 }

@@ -41,6 +41,7 @@ class Note(Base):
     # Link back to the uploaded file (member 2's domain). Stored as a plain
     # string so this module never imports their code.
     source_file_id = Column(String(255), nullable=True, index=True)
+    color = Column(String(7), nullable=False, server_default="#6366f1")
     created_at = Column(DateTime(timezone=True), default=_now)
     updated_at = Column(DateTime(timezone=True), default=_now, onupdate=_now)
 

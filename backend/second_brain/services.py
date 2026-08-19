@@ -275,6 +275,7 @@ def note_view(db: Session, note: models.Note) -> dict:
         "title": note.title,
         "content": note.content,
         "source_file_id": note.source_file_id,
+        "color": note.color,
         "created_at": note.created_at.isoformat() if note.created_at else None,
         "updated_at": note.updated_at.isoformat() if note.updated_at else None,
         "tags": sorted(t.name for t in note.tags),
@@ -301,7 +302,7 @@ def graph(db: Session) -> dict:
     links = db.query(models.Link).all()
     return {
         "nodes": [
-            {"id": n.id, "title": n.title, "tags": sorted(t.name for t in n.tags)}
+            {"id": n.id, "title": n.title, "color": n.color, "tags": sorted(t.name for t in n.tags)}
             for n in notes
         ],
         "edges": [

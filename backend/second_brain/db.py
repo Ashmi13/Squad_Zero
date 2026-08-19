@@ -1,5 +1,6 @@
 import os
 
+import sqlalchemy as sa
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
@@ -103,6 +104,21 @@ def init_db():
         )
 
     print(f"[second_brain] Tables ready on: {engine.url}")
+
+    # ── Auto-migrate: add color column if it doesn't exist ──
+    with engine.begin() as conn:
+        # PostgreSQL (Supabase): add column — safe to re-run, catches error if exists
+        try:
+            conn.execute(
+                sa.text(
+                    "ALTER TABLE second_brain_notes "
+                    "ADD COLUMN color VARCHAR(7) NOT NULL DEFAULT '#6366f1'"
+                )
+            )
+            print("[second_brain] Color column added.")
+        except Exception as exc:
+            # Column likely already exists — ignore
+            print(f"[second_brain] Color column already exists (or skip): {exc}")
 
 
 # ---------------------------------------------------------------------------

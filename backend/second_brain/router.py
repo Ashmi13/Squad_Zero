@@ -19,6 +19,7 @@ class NoteCreate(BaseModel):
 class NoteUpdate(BaseModel):
     title: Optional[str] = None
     content: Optional[str] = None
+    color: Optional[str] = None
 
 
 class TagUpdate(BaseModel):
@@ -86,6 +87,8 @@ def update_note(note_id: str, payload: NoteUpdate, db: Session = Depends(get_db)
         note.title = payload.title
     if payload.content is not None:
         note.content = payload.content
+    if payload.color is not None:
+        note.color = payload.color
     db.commit()
     db.refresh(note)
     return services.note_view(db, note)

@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+import base64
 import os
 import uuid
 from datetime import datetime, timezone
 from io import BytesIO
-from urllib.parse import quote, unquote, urlparse
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import quote, unquote, urlparse
 
 import boto3
-from fastapi import HTTPException, UploadFile
 from botocore.exceptions import ClientError
+from fastapi import HTTPException, UploadFile
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 from supabase import Client
 
 from app.core.config import settings
@@ -210,6 +214,12 @@ class WorkspaceService:
                 continue
 
             bucket, object_key = self._normalize_storage_reference(value)
+            if object_key:
+                return bucket, object_key
+
+        storage_url = file_row.get("storage_url")
+        if storage_url:
+            bucket, object_key = self._normalize_storage_reference(storage_url)
             if object_key:
                 return bucket, object_key
 
@@ -1359,7 +1369,6 @@ class WorkspaceService:
             metadata["mime_type"] = "text/plain"
         if self._files_has_size_bytes:
             metadata["size_bytes"] = len(content_bytes)
-
 
 
         # Upload the generated text asset to AWS S3 so the object survives across sessions.

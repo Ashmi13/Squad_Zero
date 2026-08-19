@@ -46,6 +46,8 @@ async def get_current_user_profile(
             email=user_data["email"],
             full_name=user_data.get("full_name"),
             avatar_url=user_data.get("avatar_url"),
+            role=user_data.get("role", "user"),
+            is_suspended=bool(user_data.get("is_suspended", False)),
             created_at=user_data.get("created_at"),
         )
         

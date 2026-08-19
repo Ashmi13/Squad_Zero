@@ -1,6 +1,9 @@
 """FastAPI v1 API router"""
 from fastapi import APIRouter
-from app.api.v1.endpoints import auth
+from app.api.v1.endpoints import auth, user
+
+_fm_loaded = False
+_pdf_loaded = False
 
 def _safe_import(module_path: str, label: str):
     """Import a route module without breaking unrelated routes on failure."""
@@ -26,10 +29,24 @@ _tasks_loaded = False
 _calendar_loaded = False
 
 try:
+    from routes import files, summary, highlights, chat, workspace, admin_alerts, productivity
+    _fm_loaded = True
+    print("[OK] Successfully imported file manager routes")
+except Exception as e:
+    print(f"[ERROR] Error importing file manager routes: {e}")
+
+try:
+    from routes import pdf
+    _pdf_loaded = True
+    print("[OK] Successfully imported pdf routes")
+except Exception as e:
+    print(f"[ERROR] Error importing pdf routes: {e}")
+
+try:
     from app.api.v1.endpoints import tasks as tasks_endpoints
     _tasks_loaded = True
 except Exception as e:
-    print(f"[WARN] tasks endpoint skipped: {e}")
+    print(f"⚠️  tasks endpoint skipped: {e}")
 
 try:
     from app.api.v1.endpoints import calendar as calendar_endpoints
@@ -88,4 +105,4 @@ try:
     router.include_router(admin.router)
     print("[OK] Admin routes loaded")
 except Exception as e:
-    print(f"[WARN] Admin routes skipped: {e}")
+    print(f"⚠️ Admin routes skipped: {e}")

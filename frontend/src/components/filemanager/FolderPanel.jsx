@@ -532,7 +532,6 @@ const FolderPanel = ({ selectedFolder, onSelectFolder, onSelectFile, onFolderDel
     }
   };
 
-
   const handleFolderDragOver = (e, folderId) => {
     // Only highlight folder as drop target for folder-move drags, not quiz-file drags
     if (e.dataTransfer.types.includes('neuranote-quiz-file')) return;

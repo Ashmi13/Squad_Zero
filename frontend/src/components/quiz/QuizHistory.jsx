@@ -3,12 +3,12 @@ import { Clock, Calendar, TrendingUp, Award, BarChart3, Eye, Trash2, ChevronLeft
 import './styles/QuizHistory.css';
 
 import { API } from '@/config/api';
-import { getAuthHeaders } from '@/utils/tokenStorage';
-import { useAuth } from '@/hooks/useAuth.jsx';
+import { getAccessToken } from '@/utils/tokenStorage';
+import { useAuth } from '@/hooks/useAuth';
 
 const QuizHistory = ({ onBack, onRetakeQuiz }) => {
 
-  // Get user from auth context
+  // Get user from auth context — not use client-supplied userId
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('history'); // 'history' or 'analytics'
   const [history, setHistory] = useState([]);

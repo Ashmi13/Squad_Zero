@@ -1,9 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Mail, AlertCircle, ArrowLeft, CheckCircle, Loader2 } from 'lucide-react';
 import { Button } from '@/components/auth/Button';
 import { supabase } from '@/lib/supabase';
 import { setTokens } from '@/utils/tokenStorage';
+import axiosInstance from '@/lib/axios';
+import { config } from '@/config/env';
 
 /**
  * VerificationPage Component
@@ -15,101 +17,139 @@ export default function VerificationPage() {
   const [timeLeft, setTimeLeft] = useState(180); // 180 seconds = 3 minutes
   const [isVerifying, setIsVerifying] = useState(true);
   const [isExpired, setIsExpired] = useState(false);
+  const hasRedirectedRef = useRef(false);
 
   // Get user email from location state if available
-  const userEmail = location.state?.email || 'your email';
+  const userEmail = location.state?.email || localStorage.getItem('neuranote_pending_verification_email') || 'your email';
+
+  const handleSuccess = useCallback((session) => {
+    if (hasRedirectedRef.current) {
+      return;
+    }
+
+    hasRedirectedRef.current = true;
+    setIsExpired(false);
+    setIsVerifying(false);
+
+    if (session?.access_token) {
+      setTokens(session.access_token, session.refresh_token);
+      localStorage.setItem('user', JSON.stringify(session.user));
+    }
+
+    localStorage.removeItem('neuranote_pending_verification_email');
+
+    navigate('/dashboard');
+  }, [navigate]);
 
   // Initial loading state transition
   useEffect(() => {
-    const timer = setTimeout(() => {
+    const loadingTimeout = setTimeout(() => {
+      if (hasRedirectedRef.current) {
+        return;
+      }
       setIsVerifying(false);
     }, 1500);
-    return () => clearTimeout(timer);
+
+    return () => clearTimeout(loadingTimeout);
   }, []);
 
   // Periodic polling fallback (in case Real-time fails)
   useEffect(() => {
-    if (isExpired) return;
+    if (isExpired || hasRedirectedRef.current) return;
 
     const checkStatus = async () => {
       try {
-        // We check the 'users' table directly via Supabase client (which has the URL/Key)
-        const { data, error } = await supabase
-          .from('users')
-          .select('email_confirmed_at')
-          .eq('email', userEmail)
-          .single();
-        
-        if (data?.email_confirmed_at) {
+        if (hasRedirectedRef.current) {
+          return;
+        }
+
+        // Official Supabase Auth checks for email verification state
+        const { data: sessionData } = await supabase.auth.getSession();
+        const currentSession = sessionData?.session;
+
+        if (currentSession?.user?.email_confirmed_at) {
           console.log('Polling: Email confirmation detected!');
-          navigate('/dashboard');
+          handleSuccess(currentSession);
+          return;
+        }
+
+        // Fallback for cases where a user is present but session object is not yet refreshed
+        const { data: userData } = await supabase.auth.getUser();
+        if (userData?.user?.email_confirmed_at) {
+          console.log('Polling: Email confirmation detected via user profile!');
+          handleSuccess({
+            user: userData.user,
+            access_token: currentSession?.access_token || null,
+            refresh_token: currentSession?.refresh_token || null,
+          });
+          return;
+        }
+
+        // Cross-tab reliable fallback: check backend verification status by email.
+        if (userEmail && userEmail !== 'your email') {
+          const verifyResponse = await axiosInstance.get(config.endpoints.verificationStatus, {
+            params: { email: userEmail },
+          });
+
+          if (verifyResponse?.data?.is_verified) {
+            console.log('Polling: Backend verification status confirmed!');
+            handleSuccess(currentSession || null);
+          }
         }
       } catch (err) {
         console.debug('Polling check failed');
       }
     };
 
+    checkStatus();
+
     // Check every 3 seconds
     const interval = setInterval(checkStatus, 3000);
     return () => clearInterval(interval);
-  }, [userEmail, navigate, isExpired]);
+  }, [isExpired, handleSuccess, userEmail]);
+
+  useEffect(() => {
+    const onFocus = async () => {
+      if (hasRedirectedRef.current || isExpired) return;
+      if (!userEmail || userEmail === 'your email') return;
+
+      try {
+        const verifyResponse = await axiosInstance.get(config.endpoints.verificationStatus, {
+          params: { email: userEmail },
+        });
+        if (verifyResponse?.data?.is_verified) {
+          handleSuccess(null);
+        }
+      } catch {
+        // Best effort when tab regains focus.
+      }
+    };
+
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onFocus);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onFocus);
+    };
+  }, [handleSuccess, isExpired, userEmail]);
 
   // Auth Listener: Listen for session changes (e.g. if link is clicked)
   useEffect(() => {
     // 1. Auth Event Listener (for sessions)
     const { data: { subscription: authSubscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if ((event === 'SIGNED_IN' || event === 'USER_UPDATED') && session?.user?.email_confirmed_at) {
+      if ((event === 'SIGNED_IN' || event === 'USER_UPDATED' || event === 'TOKEN_REFRESHED') && session?.user?.email_confirmed_at) {
         handleSuccess(session);
       }
     });
 
-    // 2. Real-time Database Listener (for specific status change)
-    const userSubscription = supabase
-      .channel('public:users')
-      .on(
-        'postgres_changes',
-        {
-          event: '*', // Listen to ALL events (INSERT and UPDATE)
-          schema: 'public',
-          table: 'users'
-          // Temporarily removed filter to ensure we catch the event
-        },
-        (payload) => {
-          console.log('Real-time payload received:', payload);
-          // Check if this payload belongs to our user AND has email_confirmed_at
-          const isOurUser = payload.new && payload.new.email === userEmail;
-          
-          if (isOurUser && payload.new.email_confirmed_at) {
-            console.log('Real-time: Email confirmed detected for:', userEmail);
-            handleSuccess({
-              user: payload.new,
-              access_token: null
-            });
-          }
-        }
-      )
-      .subscribe((status, err) => {
-        console.log('Real-time status:', status);
-        if (err) console.error('Real-time Error:', err);
-      });
-
     return () => {
       authSubscription.unsubscribe();
-      supabase.removeChannel(userSubscription);
     };
-  }, [userEmail, navigate]);
-
-  const handleSuccess = (session) => {
-    if (session.access_token) {
-      setTokens(session.access_token, session.refresh_token);
-      localStorage.setItem('user', JSON.stringify(session.user));
-    }
-    navigate('/dashboard');
-  };
+  }, [handleSuccess]);
 
   // Countdown timer logic
   useEffect(() => {
-    if (isVerifying || isExpired) return;
+    if (isVerifying || isExpired || hasRedirectedRef.current) return;
 
     if (timeLeft <= 0) {
       setIsExpired(true);

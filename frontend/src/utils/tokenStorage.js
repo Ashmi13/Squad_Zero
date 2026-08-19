@@ -1,66 +1,96 @@
-//Token  and guest-session storage
+/**
+ * Secure JWT token storage utility
+ * Tokens are stored in localStorage for persistence
+ * For production, consider using httpOnly cookies for enhanced security
+ */
 
-const ACCESS_TOKEN_KEY  = 'access_token';
+const ACCESS_TOKEN_KEY = 'access_token';
 const REFRESH_TOKEN_KEY = 'refresh_token';
-const GUEST_SESSION_KEY = 'nn_guest_session_id';
+const GUEST_SESSION_KEY = 'guest_session_id';
 
-// Stale-token guard
-// Clear any non-JWT string that may have been left by old mock-auth code.
-(function clearStaleTokens() {
-  try {
-    const t = localStorage.getItem(ACCESS_TOKEN_KEY);
-    if (t && t.split('.').length !== 3) {
-      localStorage.removeItem(ACCESS_TOKEN_KEY);
-      localStorage.removeItem(REFRESH_TOKEN_KEY);
-      localStorage.removeItem('user');
-      console.warn('Cleared invalid (non-JWT) token from localStorage');
-    }
-  } catch (_) {}
-})();
-
-// Signed-in token helpers
+/**
+ * Store authentication tokens
+ */
 export const setTokens = (accessToken, refreshToken) => {
   try {
     localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
-    if (refreshToken) localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
-  } catch (e) {
-    console.error('Error storing tokens:', e);
+    if (refreshToken) {
+      localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+    }
+  } catch (error) {
+    console.error('Error storing tokens:', error);
   }
 };
 
+/**
+ * Retrieve access token
+ */
 export const getAccessToken = () => {
-  try { return localStorage.getItem(ACCESS_TOKEN_KEY); }
-  catch (e) { console.error('Error retrieving access token:', e); return null; }
+  try {
+    return localStorage.getItem(ACCESS_TOKEN_KEY);
+  } catch (error) {
+    console.error('Error retrieving access token:', error);
+    return null;
+  }
 };
 
+/**
+ * Retrieve refresh token
+ */
 export const getRefreshToken = () => {
-  try { return localStorage.getItem(REFRESH_TOKEN_KEY); }
-  catch (e) { return null; }
+  try {
+    return localStorage.getItem(REFRESH_TOKEN_KEY);
+  } catch (error) {
+    console.error('Error retrieving refresh token:', error);
+    return null;
+  }
 };
 
+/**
+ * Clear all authentication tokens
+ */
 export const clearTokens = () => {
   try {
     localStorage.removeItem(ACCESS_TOKEN_KEY);
     localStorage.removeItem(REFRESH_TOKEN_KEY);
-  } catch (e) {
-    console.error('Error clearing tokens:', e);
+  } catch (error) {
+    console.error('Error clearing tokens:', error);
   }
 };
 
-export const isAuthenticated = () => !!getAccessToken();
+/**
+ * Check if user is authenticated
+ */
+export const isAuthenticated = () => {
+  return !!getAccessToken();
+};
 
+/**
+ * Decode JWT token
+ */
 export const decodeToken = (token) => {
   try {
     if (!token || typeof token !== 'string') return null;
     const base64Url = token.split('.')[1];
-    const base64    = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-    return JSON.parse(decodeURIComponent(
-      atob(base64).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join('')
-    ));
-  } catch { return null; }
+    if (!base64Url) return null;
+
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const jsonPayload = decodeURIComponent(
+      atob(base64)
+        .split('')
+        .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+        .join('')
+    );
+    return JSON.parse(jsonPayload);
+  } catch (error) {
+    console.error('Error decoding token:', error);
+    return null;
+  }
 };
 
-// Guest session helpers
+/**
+ * Guest session helpers
+ */
 export const getGuestSessionId = () => {
   try {
     let id = sessionStorage.getItem(GUEST_SESSION_KEY);
@@ -71,27 +101,8 @@ export const getGuestSessionId = () => {
       sessionStorage.setItem(GUEST_SESSION_KEY, id);
     }
     return id;
-  } catch {
+  } catch (error) {
+    console.error('Error handling guest session ID:', error);
     return null;
   }
-};
-
-export const clearGuestSession = () => {
-  try { sessionStorage.removeItem(GUEST_SESSION_KEY); } catch (_) {}
-};
-
-/**
- * auth headers for fetch() calls.
- *  - Signed-in user → { Authorization: 'Bearer <jwt>' }
- *  - Guest           → { 'X-Guest-Session-ID': '<uuid>' }
- *  - Neither         → {}  (should not normally happen)
- */
-export const getAuthHeaders = () => {
-  const token = getAccessToken();
-  if (token) return { Authorization: `Bearer ${token}` };
-
-  const guestId = getGuestSessionId();
-  if (guestId) return { 'X-Guest-Session-ID': guestId };
-
-  return {};
 };

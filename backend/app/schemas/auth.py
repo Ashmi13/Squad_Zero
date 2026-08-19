@@ -32,6 +32,14 @@ class RefreshTokenRequest(BaseModel):
     refresh_token: str = Field(..., description="Refresh token")
 
 
+class SuspendedAccountInfoResponse(BaseModel):
+    """Suspended account support details shown in frontend."""
+    title: str = Field(..., description="Title for suspended-account page")
+    message: str = Field(..., description="Support message for suspended-account page")
+    support_name: str = Field(..., description="Display name for support team")
+    contact_email: str = Field(..., description="Support contact email")
+
+
 class SessionResponse(BaseModel):
     """Session/authentication response"""
     access_token: str = Field(..., description="Access token for Bearer auth")
@@ -47,6 +55,8 @@ class UserResponse(BaseModel):
     full_name: Optional[str] = Field(None, description="User full name")
     avatar_url: Optional[str] = Field(None, description="User avatar URL")
     role: Optional[str] = Field("user", description="User role")
-    is_suspended: bool = Field(default=False, description="Whether the account is suspended")
+    is_suspended: bool = Field(False, description="Whether the account is suspended")
+
+
 # Update forward references
 SessionResponse.model_rebuild()

@@ -175,7 +175,16 @@ for _module, _attr, _prefix, _tags in _optional_routes:
         app.include_router(getattr(_mod, _attr), prefix=_prefix, tags=_tags)
     except Exception as e:
         print(f"[WARN] {_module} skipped: {e}")
-
+# Second Brain routes (M5)
+try:
+    from second_brain.router import router as second_brain_router
+    app.include_router(second_brain_router)
+    print("[OK] Second Brain routes loaded")
+except ImportError as e:
+    missing = str(e).replace("No module named ", "").strip("'")
+    print(f"[WARN] Second Brain routes skipped (missing: {missing})")
+except Exception as e:
+    print(f"[WARN] Second Brain routes skipped: {e}")
 @app.get("/")
 async def root():
     return {
@@ -192,7 +201,7 @@ async def startup_event():
     try:
         from app.db.supabase import get_supabase as _get_supabase
         from app.services.workspace_service import WorkspaceService
-        _sb = _get_supabase()
+        _sb = _get_supabase().service_client
         _svc = WorkspaceService(_sb)
         _svc._detect_files_columns()
         print("[STARTUP] WorkspaceService column cache warmed up")

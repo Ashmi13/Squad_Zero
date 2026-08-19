@@ -139,7 +139,7 @@ const FolderPanel = ({ selectedFolder, onSelectFolder, onSelectFile, onFolderDel
           mimeType: f.mime_type,
           folderId: f.folder_id,
           parent_file_id: f.parent_file_id,
-          fileUrl: f.storage_url || inlineAsset,
+          fileUrl: f.file_url || f.storage_url || f.preview_url || inlineAsset,
           content: inlineAsset ? null : resolvedPayload,
           isParentPDF: (f.file_type || '').toUpperCase() === 'PDF',
         };
@@ -455,6 +455,13 @@ const FolderPanel = ({ selectedFolder, onSelectFolder, onSelectFile, onFolderDel
       return ids;
     };
 
+    const removeFolderNodeById = (nodes, id) =>
+      (nodes || []).filter((n) => {
+        if (String(n.id) === String(id)) return false;
+        n.children = removeFolderNodeById(n.children, id);
+        return true;
+      });
+
     try {
       let preselectedParentHandle = null;
 
@@ -477,6 +484,19 @@ const FolderPanel = ({ selectedFolder, onSelectFolder, onSelectFile, onFolderDel
       }
 
       await workspaceApi.deleteFolder(folder.id);
+
+      // ── Immediately update UI state after successful API delete ──────────────
+      // Remove from FolderPanel's own local state so the folder disappears at once.
+      setFolders((prev) => removeFolderNodeById([...prev], folder.id));
+
+      // Notify FileManagerPage to clear its folders/files state.
+      if (onFolderDelete) onFolderDelete(folder.name);
+
+      // Clear selection if the deleted folder was selected.
+      if (selectedFolder?.id === folder.id) onSelectFolder(null);
+      // ────────────────────────────────────────────────────────────────────────
+
+      // Best-effort: remove local folder copy and clean up handle bindings.
       let localDeleteIssue = null;
       try {
         const localDeleteResult = await removeFolderFromLocalMachine(folder, {
@@ -490,12 +510,19 @@ const FolderPanel = ({ selectedFolder, onSelectFolder, onSelectFile, onFolderDel
         localDeleteIssue = localErr?.message || 'Local folder deletion failed.';
       }
 
-      const folderIds = collectFolderIds(folder);
-      await Promise.all(folderIds.map((id) => deleteFolderHandleBinding(id)));
+      try {
+        const folderIds = collectFolderIds(folder);
+        await Promise.all(folderIds.map((id) => deleteFolderHandleBinding(id)));
+      } catch {
+        // Best-effort cleanup; folder is already deleted from the backend.
+      }
 
-      if (onFolderDelete) onFolderDelete(folder.name);
-      if (selectedFolder?.id === folder.id) onSelectFolder(null);
-      await loadFolders();
+      // Re-fetch from backend to ensure panel is in sync (e.g. cascaded deletes).
+      try {
+        await loadFolders();
+      } catch {
+        // If refresh fails, the optimistic state update above already reflects the delete.
+      }
 
       if (localDeleteIssue) {
         window.alert(`Folder deleted from app, but local deletion needs attention: ${localDeleteIssue}`);

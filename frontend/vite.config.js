@@ -25,7 +25,7 @@ export default defineConfig({
       '/folders':       'http://127.0.0.1:8000',
       '/notes': {
         target: 'http://127.0.0.1:8000',
-        bypass: (req) => {
+        bypass: (req, res) => {
           if (req.headers.accept && req.headers.accept.indexOf('html') !== -1) {
             return req.url; // serve index.html for page routes
           }

@@ -303,11 +303,6 @@ def extract_title_from_filename(filename: str) -> str:
     base = " ".join(w.capitalize() for w in base.split())
     return base or "Untitled"
 
-def clean_note_formatting(text: str) -> str:
-    text = re.sub(r"([^\n])(##)", r"\1\n\n\2", text)
-    text = re.sub(r"(## .+)\n([^\n])", r"\1\n\n\2", text)
-    text = re.sub(r"\n{4,}", "\n\n\n", text)
-    return text.strip()
 
 def count_source_items(full_text: str) -> Dict[str, int]:
     """
@@ -780,7 +775,7 @@ class NoteService:
     # generate_note — legacy generate-note route (Member 2 integration)
     # ------------------------------------------------------------------
 
-    def _llm_call_with_retry(
+    def generate_note(
         self,
         pdf_ids: List[str],
         user_id: str,
@@ -1009,7 +1004,6 @@ class NoteService:
             return {"folder_id": fid, "name": name}
         finally:
             conn.close()
-            print(f"[TIMER] DB insert ({len(data_list)} rows): {_time.time()-_t3:.2f}s")
 
     def list_folders(self, user_id: str) -> List[Dict[str, Any]]:
         conn = self._connect()
@@ -1091,21 +1085,6 @@ class NoteService:
         markdown = re.sub(r"\[IMAGE:\s*[^\]]+\]", "", markdown)
         markdown = re.sub(r"<img[^>]*>", "", markdown)
         return markdown
-
-    def validate_note_content(
-        self,
-        content: str,
-        pdf_ids: list = None
-    ) -> bool:
-        if not content or len(
-            content.strip()
-        ) < 30:
-            print("[Validate] Empty - FAIL")
-            return False
-        print(
-            f"[Validate] {len(content)} chars - PASS"
-        )
-        return True
 
 
 # ---------------------------------------------------------------------------

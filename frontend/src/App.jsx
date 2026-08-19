@@ -32,24 +32,24 @@ const M3Dashboard = lazy(() => import('./m3_structurednotes/pages/Dashboard'));
 const NoteEditor = lazy(() => import('./m3_structurednotes/pages/NoteEditor'));
 const ManualNoteEditor = lazy(() => import('./m3_structurednotes/pages/ManualNoteEditor'));
 
-// ===== MEMBER 4 - Quiz (LAZY LOADED) =====
+// MEMBER 4 - Quiz - LAZY LOADED
 const QuizPage = lazy(() => import('@/components/quiz/QuizPage'));
 const QuizHistory = lazy(() => import('@/components/quiz/QuizHistory'));
 
-// ===== MEMBER 5 - Tasks & MindMap (LAZY LOADED) =====
+// MEMBER 5 - Tasks - LAZY LOADED
 const TaskDashboard = lazy(() => import('@/components/tasks/TaskDashboard'));
 const PomodoroPage = lazy(() => import('@/pages/PomodoroPage'));
 const SecondBrainPage = lazy(() => import('@/pages/SecondBrainPage'));
 const FlashcardsPage = lazy(() => import('@/pages/FlashcardsPage'));
-const MindMapPage = lazy(() => import('@/pages/MindMapPage'));
 
-// ===== DEV NAVIGATION & UTILS =====
+// DEV NAVIGATION
 import DevNav from '@/components/DevNav';
 import { pomodoroTimer } from '@/utils/pomodoroTimer';
 import { workspaceApi } from '@/services/workspaceApi';
 import { getScopedStorageKey, useSupabaseUser } from '@/hooks/useSupabaseUser';
 import './index.css';
 
+const MindMapPage = React.lazy(() => import('@/pages/MindMapPage'));
 const ACTIVE_WORKSPACE_FOLDER_KEY = 'neuranote_active_workspace_folder';
 
 // Spinner shown while a lazy chunk is loading
@@ -126,7 +126,6 @@ const AppLayout = () => {
     }
   }, [userLoading, userScope]);
 
-  // Persist user-scoped workspace folder on change
   useEffect(() => {
     if (userLoading) return;
 
@@ -153,7 +152,7 @@ const AppLayout = () => {
   }, [location.pathname]);
 
   // Save completed pomodoro sessions to backend
-useEffect(() => {
+  useEffect(() => {
     const unsubscribe = pomodoroTimer.subscribe(async (snapshot) => {
       if (snapshot.completionVersion <= lastSavedCompletionVersionRef.current) return;
 
@@ -268,7 +267,8 @@ useEffect(() => {
           }}
         />
       )}
-{/* Page content — scrollable */}
+
+      {/* Page content — scrollable */}
       <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
         <Suspense fallback={<PageLoader />}>
           <Routes>
@@ -286,7 +286,9 @@ useEffect(() => {
             <Route path="/admin" element={<AdminDashboard />} />
 
             {/* Member 2 - File Manager */}
-            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/dashboard" element={
+              <FileManagerPage activeView={activeView} setActiveView={setActiveView} />
+            } />
             <Route path="/files" element={
               <FileManagerPage activeView={activeView} setActiveView={setActiveView} />
             } />
@@ -306,7 +308,7 @@ useEffect(() => {
             <Route path="/pomodoro" element={<PomodoroPage />} />
             <Route path="/flashcards" element={<FlashcardsPage />} />
             <Route path="/second-brain" element={<SecondBrainPage />} />
-            <Route path="/mindmap" element={<MindMapPage />} />
+            <Route path="/mindmap"      element={<MindMapPage />} />
 
             {/* Fallback */}
             <Route path="*" element={<Navigate to="/" replace />} />
@@ -315,8 +317,7 @@ useEffect(() => {
       </div>
 
       {/* Dev panel — floats on every page */}
-      <DevNav />
-      <Toaster />
+      {import.meta.env.DEV && import.meta.env.VITE_SHOW_DEVNAV === 'true' ? <DevNav /> : null}
     </div>
   );
 };

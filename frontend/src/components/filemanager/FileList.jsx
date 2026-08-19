@@ -149,7 +149,10 @@ const FileList = ({ selectedFolder, files, onSelectFile, onFilesUpdate }) => {
             year: 'numeric',
           }),
           type: computedType,
-          fileUrl: f.storage_url || inlineAsset,
+          // Do NOT pass raw S3 object keys (workspace/...) as fileUrl.
+          // They are not loadable URLs. Leave null so the preview useEffect
+          // calls the backend to get a fresh signed URL.
+          fileUrl: null,
           storagePath: f.storage_path,
           content: persistedTextContent,
           mimeType: f.mime_type,
@@ -240,7 +243,8 @@ const FileList = ({ selectedFolder, files, onSelectFile, onFilesUpdate }) => {
               year: 'numeric',
             }),
             type: uploadedType,
-            fileUrl: uploadedFile.storage_url || null,
+            // Do NOT pass raw S3 object keys as fileUrl - leave null so preview API is called.
+            fileUrl: null,
             storagePath: uploadedFile.storage_path,
             content: fileContent,
             mimeType: file.type || null,
@@ -260,7 +264,8 @@ const FileList = ({ selectedFolder, files, onSelectFile, onFilesUpdate }) => {
           originalFilename: uploadedFile.original_filename || file.name,
           folderId: selectedFolder.id,
           type: uploadedType,
-          fileUrl: uploadedFile.storage_url || null,
+          // Do NOT pass raw S3 object keys as fileUrl - leave null so preview API is called.
+          fileUrl: null,
           storagePath: uploadedFile.storage_path,
           content: fileContent,
           mimeType: file.type || null,
@@ -293,22 +298,48 @@ const FileList = ({ selectedFolder, files, onSelectFile, onFilesUpdate }) => {
     }
   };
 
+  const removeFileNodeById = (nodes, id) =>
+    (nodes || []).reduce((acc, node) => {
+      if (String(node.id) === String(id)) return acc;
+      return [...acc, { ...node, children: removeFileNodeById(node.children, id) }];
+    }, []);
+
   const handleDelete = async (fileId) => {
     if (!window.confirm('Delete this file? This action cannot be undone.')) return;
 
     try {
       const targetFile = findFileInTreeById(folderFiles, fileId);
+
+      // Call backend — only proceed with UI update on success
       await workspaceApi.deleteFile(fileId);
-      await removeFileFromLocalFolder(
-        {
-          ...selectedFolder,
-          name: targetFile?.name,
-          originalFilename: targetFile?.originalFilename,
-          original_filename: targetFile?.originalFilename,
-        },
-        targetFile?.originalFilename || targetFile?.name,
-      );
-      await loadFiles();
+
+      // Immediately remove from local folderFiles state (no page refresh needed)
+      setFolderFiles((prev) => removeFileNodeById(prev, fileId));
+
+      // Sync removal into parent (FileManagerPage) files state
+      if (onFilesUpdate && selectedFolder?.name) {
+        onFilesUpdate((prevFiles) => {
+          const folderKey = selectedFolder.name;
+          const updatedFolder = removeFileNodeById(prevFiles?.[folderKey] || [], fileId);
+          return { ...(prevFiles || {}), [folderKey]: updatedFolder };
+        });
+      }
+
+      // Best-effort: remove local file copy — do NOT let errors here block the UI update
+      try {
+        await removeFileFromLocalFolder(
+          {
+            ...selectedFolder,
+            name: targetFile?.name,
+            originalFilename: targetFile?.originalFilename,
+            original_filename: targetFile?.originalFilename,
+          },
+          targetFile?.originalFilename || targetFile?.name,
+        );
+      } catch {
+        // Ignore local sync errors; file is already deleted from the backend
+      }
+
       window.dispatchEvent(new Event('neuranote:files-updated'));
     } catch (err) {
       setError(err.message || 'Delete failed');

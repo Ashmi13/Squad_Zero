@@ -43,6 +43,11 @@ class SuspensionToggleResponse(BaseModel):
     status: str
     user: Dict[str, Any]
 
+
+class SuspensionToggleResponse(BaseModel):
+    status: str
+    user: Dict[str, Any]
+
 async def check_admin_role(current_user: Dict[str, Any] = Depends(get_current_user), supabase_client: Client = Depends(get_supabase_service_client)):
     """Check if the current user has the admin role"""
     user_id = current_user.get("sub")

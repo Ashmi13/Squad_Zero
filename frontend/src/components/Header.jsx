@@ -345,7 +345,7 @@ const Header = ({ title = "Dashboard", subtitle = "Manage your study materials a
                                                             </div>
                                                         </div>
                                                         {!readIds.includes(note.id) && (
-                                                            <div className="absolute left-1 top-1/2 -translate-y-1/2 w-1.5 h-6 bg-indigo-500 rounded-r-full" />
+                                                            <div className="absolute left-1 top-1/2 -tranzinc-y-1/2 w-1.5 h-6 bg-indigo-500 rounded-r-full" />
                                                         )}
                                                     </div>
                                                 </div>

@@ -584,6 +584,34 @@ class WorkspaceService:
             if not folder.data:
                 raise HTTPException(status_code=404, detail="Folder not found")
 
+            uploaded_file_size = getattr(file, "size", None)
+            if uploaded_file_size is None:
+                try:
+                    current_position = file.file.tell()
+                    file.file.seek(0, os.SEEK_END)
+                    uploaded_file_size = file.file.tell()
+                    file.file.seek(current_position)
+                except (AttributeError, OSError):
+                    uploaded_file_size = None
+
+            if uploaded_file_size is not None:
+                storage_usage = self.get_storage_usage(user_id)
+                storage_limit_bytes = int(storage_usage["storage_limit_bytes"])
+                storage_used_bytes = int(storage_usage["storage_used_bytes"])
+                uploaded_file_size = int(uploaded_file_size)
+
+                if storage_used_bytes + uploaded_file_size > storage_limit_bytes:
+                    plan_name = storage_usage.get("plan_name") or storage_usage.get("plan_code", "Free")
+                    limit_mb = storage_usage.get("storage_limit_mb")
+                    used_mb = storage_usage.get("storage_used_mb")
+                    raise HTTPException(
+                        status_code=413,
+                        detail=(
+                            f"Storage limit exceeded. Your {plan_name} plan allows "
+                            f"{limit_mb:g} MB of total storage. You currently use {used_mb:g} MB."
+                        ),
+                    )
+
             content = await file.read()
             if not content:
                 raise HTTPException(status_code=400, detail="Uploaded file is empty")
@@ -723,6 +751,90 @@ class WorkspaceService:
             return {"files": rows}
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"Failed to fetch files: {exc}") from exc
+
+    def get_storage_usage(self, user_id: str) -> Dict[str, Any]:
+        """Return the authenticated user's plan and current file storage usage."""
+        free_limit_bytes = 209715200
+        plan_code = "free"
+        plan_name = "Free"
+        storage_limit_bytes = free_limit_bytes
+
+        try:
+            subscription_response = (
+                self.supabase.table("subscriptions")
+                .select("plan_id")
+                .eq("user_id", user_id)
+                .eq("status", "active")
+                .limit(1)
+                .execute()
+            )
+            subscription = (subscription_response.data or [None])[0]
+
+            if subscription and subscription.get("plan_id"):
+                plan_response = (
+                    self.supabase.table("plans")
+                    .select("code,name,storage_limit_bytes")
+                    .eq("id", subscription["plan_id"])
+                    .limit(1)
+                    .execute()
+                )
+                plan = (plan_response.data or [None])[0]
+                if plan:
+                    plan_code = plan.get("code") or plan_code
+                    plan_name = plan.get("name") or plan_name
+                    storage_limit_bytes = int(plan.get("storage_limit_bytes") or free_limit_bytes)
+            else:
+                free_plan_response = (
+                    self.supabase.table("plans")
+                    .select("code,name,storage_limit_bytes")
+                    .eq("code", "free")
+                    .limit(1)
+                    .execute()
+                )
+                free_plan = (free_plan_response.data or [None])[0]
+                if free_plan:
+                    plan_code = free_plan.get("code") or plan_code
+                    plan_name = free_plan.get("name") or plan_name
+                    storage_limit_bytes = int(free_plan.get("storage_limit_bytes") or free_limit_bytes)
+        except Exception:
+            # Plan lookup must not prevent a user from seeing Free-plan usage.
+            pass
+
+        try:
+            self._detect_files_columns()
+            if not self._files_has_size_bytes:
+                storage_used_bytes = 0
+            else:
+                files_response = (
+                    self.supabase.table("files")
+                    .select("size_bytes")
+                    .eq("user_id", user_id)
+                    .execute()
+                )
+                storage_used_bytes = sum(
+                    int(file_row.get("size_bytes") or 0)
+                    for file_row in (files_response.data or [])
+                )
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Failed to calculate storage usage: {exc}") from exc
+
+        storage_remaining_bytes = max(storage_limit_bytes - storage_used_bytes, 0)
+        bytes_per_mb = 1024 * 1024
+        bytes_per_gb = 1024 * bytes_per_mb
+
+        return {
+            "plan_code": plan_code,
+            "plan_name": plan_name,
+            "storage_limit_bytes": storage_limit_bytes,
+            "storage_used_bytes": storage_used_bytes,
+            "storage_remaining_bytes": storage_remaining_bytes,
+            "storage_limit_mb": round(storage_limit_bytes / bytes_per_mb, 2),
+            "storage_limit_gb": round(storage_limit_bytes / bytes_per_gb, 2),
+            "storage_used_mb": round(storage_used_bytes / bytes_per_mb, 2),
+            "storage_used_gb": round(storage_used_bytes / bytes_per_gb, 2),
+            "storage_remaining_mb": round(storage_remaining_bytes / bytes_per_mb, 2),
+            "storage_remaining_gb": round(storage_remaining_bytes / bytes_per_gb, 2),
+        }
 
     def update_file_access(self, user_id: str, file_id: str) -> Dict[str, Any]:
         try:

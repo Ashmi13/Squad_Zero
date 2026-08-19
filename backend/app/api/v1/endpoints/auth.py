@@ -254,7 +254,11 @@ async def upload_profile_image(
     user_id: str = Depends(get_current_user_id),
     supabase_client: Any = Depends(get_supabase_service_client),
 ):
-    """Upload profile image to AWS S3 or Supabase Storage fallback."""
+    """Upload profile image to Supabase Storage (public bucket).
+
+    Always uses Supabase Storage instead of AWS S3 for profile images
+    because profile pictures must be publicly readable via direct URL.
+    """
     if not image.filename:
         raise HTTPException(status_code=400, detail="Image filename is required")
 
@@ -266,41 +270,43 @@ async def upload_profile_image(
     object_key = f"profiles/{user_id}/{uuid.uuid4().hex}{ext}"
     avatar_url = None
 
+    bucket = _profile_bucket_name()
     try:
-        if _aws_profile_storage_configured():
-            s3 = boto3.client(
-                "s3",
-                aws_access_key_id=settings.aws_access_key_id,
-                aws_secret_access_key=settings.aws_secret_access_key,
-                region_name=settings.aws_region,
+        # Remove the old profile image from Supabase Storage if it exists
+        try:
+            old_row = (
+                supabase_client.table("users")
+                .select("avatar_url")
+                .eq("id", user_id)
+                .single()
+                .execute()
             )
-            s3.put_object(
-                Bucket=settings.aws_s3_bucket,
-                Key=object_key,
-                Body=content,
-                ContentType=image.content_type or "image/jpeg",
+            old_url = (old_row.data or {}).get("avatar_url") or ""
+            # Only remove if it was stored in the same Supabase bucket
+            supabase_public_prefix = supabase_client.storage.from_(bucket).get_public_url("")
+            if old_url.startswith(supabase_public_prefix):
+                old_path = old_url[len(supabase_public_prefix):]
+                if old_path:
+                    supabase_client.storage.from_(bucket).remove([old_path])
+        except Exception:
+            pass  # non-critical — old file cleanup is best-effort
+
+        try:
+            supabase_client.storage.from_(bucket).upload(
+                path=object_key,
+                file=content,
+                file_options={"content-type": image.content_type or "image/jpeg", "upsert": "true"},
             )
-            avatar_url = f"https://{settings.aws_s3_bucket}.s3.{settings.aws_region}.amazonaws.com/{object_key}"
-        else:
-            bucket = _profile_bucket_name()
-            try:
-                supabase_client.storage.from_(bucket).upload(
-                    path=object_key,
-                    file=content,
-                    file_options={"content-type": image.content_type or "image/jpeg", "upsert": "true"},
-                )
-            except Exception as upload_exc:
-                if "bucket not found" not in str(upload_exc).lower():
-                    raise
-                _create_profile_bucket_if_missing(supabase_client, bucket)
-                supabase_client.storage.from_(bucket).upload(
-                    path=object_key,
-                    file=content,
-                    file_options={"content-type": image.content_type or "image/jpeg", "upsert": "true"},
-                )
-            avatar_url = supabase_client.storage.from_(bucket).get_public_url(object_key)
-    except ClientError as exc:
-        raise HTTPException(status_code=500, detail=f"Profile image upload failed: {str(exc)}")
+        except Exception as upload_exc:
+            if "bucket not found" not in str(upload_exc).lower():
+                raise
+            _create_profile_bucket_if_missing(supabase_client, bucket)
+            supabase_client.storage.from_(bucket).upload(
+                path=object_key,
+                file=content,
+                file_options={"content-type": image.content_type or "image/jpeg", "upsert": "true"},
+            )
+        avatar_url = supabase_client.storage.from_(bucket).get_public_url(object_key)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Profile image upload failed: {str(exc)}")
 
@@ -321,6 +327,7 @@ async def upload_profile_image(
             full_name=row.get("full_name"),
             avatar_url=row.get("avatar_url"),
             role=row.get("role", "user"),
+            is_suspended=bool(row.get("is_suspended", False)),
         )
     except HTTPException:
         raise

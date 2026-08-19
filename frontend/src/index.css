@@ -10,7 +10,7 @@
 }
 
 :root {
-  --app-font-size: 16px;
+  --app-font-size: 14px;
   font-size: var(--app-font-size);
 }
 
@@ -58,6 +58,16 @@ button {
 
 input {
   font-family: inherit;
+}
+
+button,
+input,
+textarea,
+select,
+optgroup,
+option,
+table {
+  font-size: inherit;
 }
 
 /* CUSTOM SCROLLBAR */

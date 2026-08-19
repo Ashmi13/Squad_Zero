@@ -3,6 +3,19 @@ import { X, User, Palette, Lock, Upload, HardDrive, CreditCard} from 'lucide-rea
 import { useTheme } from '@/context/ThemeContext';
 import { config } from '@/config/env';
 import { getAccessToken, clearTokens } from '@/utils/tokenStorage';
+import { workspaceApi } from '@/services/workspaceApi';
+
+const FREE_STORAGE_LIMIT_BYTES = 209715200;
+const BYTES_PER_MB = 1024 * 1024;
+const BYTES_PER_GB = 1024 * BYTES_PER_MB;
+
+const formatStorageValue = (bytes) => {
+  const value = Number(bytes) || 0;
+  if (value >= BYTES_PER_GB) {
+    return `${Math.round((value / BYTES_PER_GB) * 100) / 100} GB`;
+  }
+  return `${Math.round((value / BYTES_PER_MB) * 100) / 100} MB`;
+};
 
 const SettingsPanel = ({ onClose }) => {
   const { isDark, toggleTheme, theme, fontSize, setFontSize } = useTheme();
@@ -14,7 +27,17 @@ const SettingsPanel = ({ onClose }) => {
   const [saveChatHistory, setSaveChatHistory] = useState(true);
   const [profilePic, setProfilePic] = useState(null);
   const [savingProfile, setSavingProfile] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
   const [profileError, setProfileError] = useState('');
+  const [storageUsage, setStorageUsage] = useState({
+    plan_code: 'free',
+    plan_name: 'Free',
+    storage_limit_bytes: FREE_STORAGE_LIMIT_BYTES,
+    storage_used_bytes: 0,
+    storage_remaining_bytes: FREE_STORAGE_LIMIT_BYTES,
+  });
+  const [storageLoading, setStorageLoading] = useState(false);
+  const [storageError, setStorageError] = useState('');
 
   const request = async (path, options = {}) => {
     const token = getAccessToken();
@@ -76,6 +99,32 @@ const SettingsPanel = ({ onClose }) => {
     loadProfile();
   }, []);
 
+  useEffect(() => {
+    if (activeSection !== 'storage') return;
+
+    let isMounted = true;
+    setStorageLoading(true);
+    setStorageError('');
+    workspaceApi.getStorageUsage()
+      .then((usage) => {
+        if (isMounted) setStorageUsage(usage);
+      })
+      .catch((err) => {
+        if (isMounted) setStorageError(err.message || 'Failed to load storage usage');
+      })
+      .finally(() => {
+        if (isMounted) setStorageLoading(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [activeSection]);
+
+  const handleProUpgrade = () => {
+    // PayHere integration will be connected here in the next step.
+  };
+
   const handleProfileSave = async () => {
     setSavingProfile(true);
     setProfileError('');
@@ -100,7 +149,19 @@ const SettingsPanel = ({ onClose }) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
+    if (file.type && !file.type.startsWith('image/')) {
+      setProfileError('Please select a valid image file (JPG, PNG, WebP, etc.)');
+      return;
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      setProfileError('Image file size must be under 10MB');
+      return;
+    }
+
     setProfileError('');
+    setUploadingImage(true);
+    const previousPic = profilePic;
     const localPreview = URL.createObjectURL(file);
     setProfilePic(localPreview);
 
@@ -111,15 +172,17 @@ const SettingsPanel = ({ onClose }) => {
         method: 'POST',
         body: formData,
       });
-      setProfilePic(updated.avatar_url || localPreview);
-      setDisplayName(updated.full_name || displayName);
-      setEmail(updated.email || email);
+      const newAvatar = updated?.avatar_url || localPreview;
+      setProfilePic(newAvatar);
+      setDisplayName(updated?.full_name || displayName);
+      setEmail(updated?.email || email);
       syncUserToLocalStorage(updated);
     } catch (err) {
+      setProfilePic(previousPic);
       setProfileError(err.message || 'Failed to upload profile image');
     } finally {
+      setUploadingImage(false);
       event.target.value = '';
-      URL.revokeObjectURL(localPreview);
     }
   };
 
@@ -199,10 +262,18 @@ const SettingsPanel = ({ onClose }) => {
                 display: 'flex', alignItems: 'center', gap: '6px',
                 backgroundColor: '#f0eeff', color: '#6C5DD3',
                 padding: '8px 14px', borderRadius: '10px',
-                cursor: 'pointer', fontSize: '13px', fontWeight: '600'
+                cursor: uploadingImage ? 'not-allowed' : 'pointer',
+                fontSize: '13px', fontWeight: '600',
+                opacity: uploadingImage ? 0.7 : 1,
               }}>
-                <Upload size={14} /> Upload Photo
-                <input type="file" hidden accept="image/*" onChange={handleImageUpload} />
+                <Upload size={14} /> {uploadingImage ? 'Uploading...' : 'Upload Photo'}
+                <input
+                  type="file"
+                  hidden
+                  accept="image/png,image/jpeg,image/jpg,image/webp,image/*"
+                  disabled={uploadingImage}
+                  onChange={handleImageUpload}
+                />
               </label>
             </div>
 
@@ -366,7 +437,19 @@ const SettingsPanel = ({ onClose }) => {
         );
 
         case 'storage':
-  return (
+  {
+    const storageLimitBytes = Number(storageUsage.storage_limit_bytes) || FREE_STORAGE_LIMIT_BYTES;
+    const storageUsedBytes = Number(storageUsage.storage_used_bytes) || 0;
+    const storageRemainingBytes = Math.max(
+      Number(storageUsage.storage_remaining_bytes) || storageLimitBytes - storageUsedBytes,
+      0,
+    );
+    const storagePercentage = storageLimitBytes > 0
+      ? Math.min(100, Math.round((storageUsedBytes / storageLimitBytes) * 100))
+      : 0;
+    const planName = storageUsage.plan_name || (storageUsage.plan_code === 'pro' ? 'Pro' : 'Free');
+
+    return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
       <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '700', color: theme.colors.text.primary }}>🗄️ Storage</h3>
 
@@ -376,29 +459,33 @@ const SettingsPanel = ({ onClose }) => {
         display: 'flex', justifyContent: 'space-between', alignItems: 'center', transition: 'background-color 0.3s', border: `1px solid ${theme.colors.accent}20`,
       }}>
         <div>
-          <p style={{ margin: 0, fontWeight: '700', color: theme.colors.accent, fontSize: '16px' }}>Free Plan</p>
-          <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: theme.colors.text.secondary }}>500 MB storage on AWS</p>
+          <p style={{ margin: 0, fontWeight: '700', color: theme.colors.accent, fontSize: '16px' }}>{planName} Plan</p>
+          <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: theme.colors.text.secondary }}>{formatStorageValue(storageLimitBytes)} storage on AWS</p>
         </div>
         <span style={{
           backgroundColor: theme.colors.accent, color: 'white',
           padding: '6px 14px', borderRadius: '20px', fontSize: '12px', fontWeight: '600'
-        }}>FREE</span>
+        }}>{(storageUsage.plan_code || 'free').toUpperCase()}</span>
       </div>
 
       {/* Storage bar */}
       <div>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
           <span style={{ fontSize: '13px', fontWeight: '600', color: '#1a1a2e' }}>Storage Used</span>
-          <span style={{ fontSize: '13px', color: '#888' }}>120 MB / 500 MB</span>
+          <span style={{ fontSize: '13px', color: '#888' }}>
+            {storageLoading ? 'Loading...' : `${formatStorageValue(storageUsedBytes)} / ${formatStorageValue(storageLimitBytes)}`}
+          </span>
         </div>
         <div style={{ backgroundColor: theme.colors.ui.border, borderRadius: '10px', height: '12px', overflow: 'hidden' }}>
           <div style={{
-            width: '24%', height: '100%',
+            width: `${storagePercentage}%`, height: '100%',
             backgroundColor: theme.colors.accent, borderRadius: '10px',
             transition: 'width 0.3s ease'
           }} />
         </div>
-        <p style={{ fontSize: '12px', color: theme.colors.text.tertiary, marginTop: '8px', fontWeight: '500' }}>24% used — 380 MB remaining</p>
+        <p style={{ fontSize: '12px', color: theme.colors.text.tertiary, marginTop: '8px', fontWeight: '500' }}>
+          {storageError || `${storagePercentage}% used — ${formatStorageValue(storageRemainingBytes)} remaining`}
+        </p>
       </div>
 
       {/* Upgrade prompt */}
@@ -407,7 +494,7 @@ const SettingsPanel = ({ onClose }) => {
         backgroundColor: theme.colors.bg.secondary, transition: 'all 0.3s'
       }}>
         <p style={{ margin: '0 0 6px', fontWeight: '600', fontSize: '15px', color: theme.colors.text.primary }}>Need more storage?</p>
-        <p style={{ margin: '0 0 14px', fontSize: '13px', color: theme.colors.text.secondary, fontWeight: '500' }}>Upgrade to Pro for 10 GB on AWS Cloud</p>
+        <p style={{ margin: '0 0 14px', fontSize: '13px', color: theme.colors.text.secondary, fontWeight: '500' }}>Upgrade to Pro for 5 GB on AWS Cloud</p>
         <button style={{
           backgroundColor: theme.colors.accent, color: 'white', border: 'none',
           borderRadius: '10px', padding: '12px 20px',
@@ -416,12 +503,14 @@ const SettingsPanel = ({ onClose }) => {
         }}
         onMouseEnter={(e) => e.target.style.backgroundColor = theme.colors.accentLight}
         onMouseLeave={(e) => e.target.style.backgroundColor = theme.colors.accent}
+        onClick={handleProUpgrade}
         >
           Upgrade to Pro ✨
         </button>
       </div>
     </div>
-  );
+    );
+  }
 
 case 'payment':
   return (

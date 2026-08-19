@@ -22,9 +22,6 @@ import AdminDashboard from '@/pages/AdminDashboard';
 import FileManagerPage from '@/pages/FileManagerPage';
 import FolderPanel from '@/components/filemanager/FolderPanel';
 
-// SHARED DASHBOARD
-import Dashboard from '@/pages/Dashboard';
-
 // MEMBER 3 (Sandavi) - Structured Notes - LAZY LOADED
 const M3Dashboard = lazy(() => import('./m3_structurednotes/pages/Dashboard'));
 const NoteEditor = lazy(() => import('./m3_structurednotes/pages/NoteEditor'));
@@ -216,7 +213,9 @@ const AppLayout = () => {
             <Route path="/admin" element={<AdminDashboard />} />
 
             {/* Member 2 - File Manager */}
-            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/dashboard" element={
+              <FileManagerPage activeView={activeView} setActiveView={setActiveView} />
+            } />
             <Route path="/files" element={
               <FileManagerPage activeView={activeView} setActiveView={setActiveView} />
             } />
@@ -245,7 +244,7 @@ const AppLayout = () => {
       </div>
 
       {/* Dev panel — floats on every page */}
-      <DevNav />
+      {import.meta.env.DEV && import.meta.env.VITE_SHOW_DEVNAV === 'true' ? <DevNav /> : null}
     </div>
   );
 };

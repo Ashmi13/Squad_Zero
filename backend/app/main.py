@@ -202,7 +202,7 @@ async def startup_event():
     try:
         from app.db.supabase import get_supabase as _get_supabase
         from app.services.workspace_service import WorkspaceService
-        _sb = _get_supabase()
+        _sb = _get_supabase().service_client
         _svc = WorkspaceService(_sb)
         _svc._detect_files_columns()
         print("[STARTUP] WorkspaceService column cache warmed up")

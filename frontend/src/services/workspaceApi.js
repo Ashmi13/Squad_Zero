@@ -52,6 +52,10 @@ export const workspaceApi = {
     return request(`/api/v1/workspace/files${query}`);
   },
 
+  getStorageUsage() {
+    return request('/api/v1/workspace/storage-usage');
+  },
+
   async getRecentFiles(limit = 5) {
     try {
       const res = await request(`/api/v1/workspace/files/recent?limit=${encodeURIComponent(limit)}`);

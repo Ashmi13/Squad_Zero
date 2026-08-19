@@ -64,10 +64,10 @@ class ContextQuestionRequest(BaseModel):
 # CHANGED: Endpoint to extract text from uploaded PDF file
 @router.post("/extract-text")
 async def extract_text(
-    file: UploadFile = File(...),
-    source_file_id: str = Form(...),
-    folder_id: str = Form(...),
-    source_file_name: str = Form(...),
+    file: Optional[UploadFile] = File(None),
+    source_file_id: Optional[str] = Form(None),
+    folder_id: Optional[str] = Form(None),
+    source_file_name: Optional[str] = Form(None),
     user_id: str = Depends(get_current_user_id),
     supabase: Client = Depends(get_supabase_service_client),
 ):

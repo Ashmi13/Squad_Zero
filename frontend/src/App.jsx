@@ -326,6 +326,7 @@ const App = () => (
   <ThemeProvider>
     <Router>
       <AppLayout />
+      <Toaster />
     </Router>
   </ThemeProvider>
 );

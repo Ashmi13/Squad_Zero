@@ -19,8 +19,7 @@ SUPER_ADMIN_ID = settings.super_admin_id
 class AdminStats(BaseModel):
     total_users: int
     total_files: int
-    active_sessions: int
-    gemini_usage: float
+    total_announcements: int
 
 class RoleUpdateRequest(BaseModel):
     role: str
@@ -221,12 +220,18 @@ async def get_admin_stats(
         total_files = files_count.count if files_count.count is not None else 0
     except:
         total_files = 0
+
+    # Total announcements
+    try:
+        announcements_count = supabase_client.table("announcements").select("id", count="exact").execute()
+        total_announcements = announcements_count.count if announcements_count.count is not None else 0
+    except:
+        total_announcements = 0
         
     return AdminStats(
         total_users=users_count.count if users_count.count is not None else 0,
         total_files=total_files,
-        active_sessions=12,  # Placeholder for demo
-        gemini_usage=45.5    # Placeholder for demo
+        total_announcements=total_announcements
     )
 
 @router.patch("/users/{user_id}/role")

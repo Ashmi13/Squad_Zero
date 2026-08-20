@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
-import { ThemeProvider } from '@/context/ThemeContext';
+import { ThemeProvider, useTheme } from '@/context/ThemeContext';
 import { Toaster } from '@/lib/simpleToast';
 import { getAccessToken } from '@/utils/tokenStorage';
 import axiosInstance from '@/lib/axios';
@@ -87,6 +87,7 @@ const noRailPages = [
 ];
 
 const AppLayout = () => {
+  const { theme } = useTheme();
   const location = useLocation();
   const navigate = useNavigate();
   const { user, isLoading } = useAuth();
@@ -239,8 +240,16 @@ const AppLayout = () => {
     </div>
   );
 
-  return (
-    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
+  
+   return (
+  <div
+    style={{
+      display: 'flex',
+      height: '100vh',
+      overflow: 'hidden',
+      backgroundColor: theme.colors.bg.primary,
+    }}
+  >
 
       {/* Rail shown on all pages except auth */}
       {showRail && (

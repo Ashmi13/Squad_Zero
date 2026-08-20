@@ -29,10 +29,14 @@ export const ThemeProvider = ({ children }) => {
     localStorage.setItem('theme-mode', JSON.stringify(isDark));
     // Apply theme via class so CSS variables cascade properly
     if (isDark) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
+  document.documentElement.classList.add('dark');
+  document.documentElement.style.backgroundColor = '#0f1419';
+  document.body.style.backgroundColor = '#0f1419';
+} else {
+  document.documentElement.classList.remove('dark');
+  document.documentElement.style.backgroundColor = '#ffffff';
+  document.body.style.backgroundColor = '#ffffff';
+}
   }, [isDark]);
 
   useLayoutEffect(() => {

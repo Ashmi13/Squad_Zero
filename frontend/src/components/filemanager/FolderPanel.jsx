@@ -56,7 +56,7 @@ const resolveTextPayload = (file) => {
 };
 
 const FolderPanel = ({ selectedFolder, onSelectFolder, onSelectFile, onFolderDelete }) => {
-  const { theme } = useTheme();
+ const { theme, isDark } = useTheme();
   const { userScope, loading: userLoading } = useSupabaseUser();
   const [folders, setFolders] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -740,16 +740,16 @@ const FolderPanel = ({ selectedFolder, onSelectFolder, onSelectFile, onFolderDel
   };
 
   return (
-    <div style={{
-      width: '280px',
-      margin: '16px 0 16px 8px',
-      backgroundColor: theme.colors.bg.secondary,
-      borderRadius: '16px',
+  <div style={{
+    width: '280px',
+    margin: '0 0 0 8px',
+    backgroundColor: theme.colors.bg.secondary,
+     borderRadius: '16px',
       display: 'flex',
       flexDirection: 'column',
       padding: '20px 0',
       boxShadow: theme.isDark ? '0 4px 24px rgba(0,0,0,0.3)' : '0 4px 24px rgba(0,0,0,0.08)',
-      height: 'calc(100vh - 32px)',
+      height: '100vh',
       overflowY: 'auto',
       transition: 'background-color 0.3s, box-shadow 0.3s',
     }}>
@@ -779,9 +779,15 @@ const FolderPanel = ({ selectedFolder, onSelectFolder, onSelectFile, onFolderDel
             autoFocus
             disabled={creatingFolder}
             style={{
-              flex: 1, padding: '6px 10px', borderRadius: '8px',
-              border: '1px solid #ddd', fontSize: '13px', outline: 'none'
-            }}
+  flex: 1,
+  padding: '6px 10px',
+  borderRadius: '8px',
+  border: `1px solid ${theme.colors.ui.border}`,
+  backgroundColor: theme.colors.ui.input,
+  color: theme.colors.text.primary,
+  fontSize: '13px',
+  outline: 'none',
+}}
           />
           <button onClick={() => addFolder(null)} disabled={creatingFolder} style={{
             backgroundColor: '#6C5DD3', color: 'white', border: 'none',
@@ -818,8 +824,8 @@ const FolderPanel = ({ selectedFolder, onSelectFolder, onSelectFile, onFolderDel
             position: 'fixed',
             left: contextMenu.x,
             top: contextMenu.y,
-            background: '#fff',
-            border: '1px solid #e5e7eb',
+            background: isDark ? '#1a1f2e' : '#ffffff',
+border: `1px solid ${theme.colors.ui.border}`,
             borderRadius: 8,
             boxShadow: '0 6px 20px rgba(0,0,0,0.12)',
             zIndex: 9999,

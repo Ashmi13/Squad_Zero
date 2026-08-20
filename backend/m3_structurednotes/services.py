@@ -326,14 +326,17 @@ def extract_text_from_pdf(file_path: str, file_id: str = None) -> Tuple[str, Lis
         page_num = page_idx + 1
         page_text = page.get_text()
 
-        # Fast pre-check: if the page has absolutely no images or vector drawings,
-        # we skip rendering and calling the vision model completely!
+        # Fast pre-check: if the page has no raster images and simple/no drawings, skip vision analysis!
         # Note: we also skip if page text is very long (suggesting a standard dense textbook page, not a slide)
-        has_visuals = len(page.get_images()) > 0 or len(page.get_drawings()) > 0
+        images_list = page.get_images()
+        drawings_list = page.get_drawings()
+        
+        has_images = len(images_list) > 0
+        has_complex_drawings = len(drawings_list) >= 15
         is_dense_text = len(page_text.strip()) > 1500
         
-        if is_dense_text or not has_visuals:
-            logger.info("Page %d has no visuals or is dense text. Skipping vision.", page_num)
+        if is_dense_text or (not has_images and not has_complex_drawings):
+            logger.info("Page %d has no raster images and simple/no drawings (paths: %d) or is dense text. Skipping vision.", page_num, len(drawings_list))
             return page_num, page_text, None, None
 
         try:
@@ -385,15 +388,116 @@ def extract_text_from_pdf(file_path: str, file_id: str = None) -> Tuple[str, Lis
     return "\n".join(full_text_parts), images
 
 
-def extract_text_from_pptx(file_path: str) -> str:
-    """Extract text from a PowerPoint file."""
+def convert_pptx_to_pdf_libreoffice(pptx_path: str, output_dir: str) -> Optional[str]:
+    """Attempts to run LibreOffice headless to convert PPTX to PDF."""
+    import subprocess
+    soffice_paths = [
+        "soffice",
+        r"C:\Program Files\LibreOffice\program\soffice.exe",
+        r"C:\Program Files (x86)\LibreOffice\program\soffice.exe"
+    ]
+    for path in soffice_paths:
+        try:
+            cmd = [path, "--headless", "--convert-to", "pdf", "--outdir", output_dir, pptx_path]
+            subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+            base_name = os.path.splitext(os.path.basename(pptx_path))[0]
+            pdf_path = os.path.join(output_dir, f"{base_name}.pdf")
+            if os.path.exists(pdf_path):
+                return pdf_path
+        except Exception:
+            continue
+    return None
+
+
+def extract_text_from_pptx_with_images(file_path: str, file_id: str = None) -> Tuple[str, List[Dict[str, Any]]]:
+    """
+    Extracts text and diagram images from PPTX.
+    Uses LibreOffice to convert to PDF first if available, otherwise extracts picture shapes.
+    """
+    logger.info("Extracting PPTX with images: %s", file_path)
+    import shutil
+    import tempfile
+    temp_dir = tempfile.mkdtemp()
+    try:
+        pdf_path = convert_pptx_to_pdf_libreoffice(file_path, temp_dir)
+        if pdf_path:
+            logger.info("Successfully converted PPTX to PDF using LibreOffice.")
+            text, images = extract_text_from_pdf(pdf_path, file_id)
+            return text, images
+    except Exception as e:
+        logger.error("LibreOffice conversion failed: %s. Falling back to direct extraction.", e)
+    finally:
+        try:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        except Exception:
+            pass
+
+    # Direct python-pptx fallback
+    logger.info("PowerPoint LibreOffice conversion unavailable. Extracting shapes directly.")
+    from pptx import Presentation
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+    
     prs = Presentation(file_path)
-    parts: List[str] = []
+    full_text_parts = []
+    images = []
+    
+    os.makedirs(os.path.join("documents", "images"), exist_ok=True)
+    
+    slide_idx = 1
     for slide in prs.slides:
+        slide_text_parts = []
+        img_idx = 1
+        
         for shape in slide.shapes:
             if shape.has_text_frame:
-                parts.append(shape.text_frame.text)
-    return "\n\n".join(parts)
+                for paragraph in shape.text_frame.paragraphs:
+                    if paragraph.text.strip():
+                        slide_text_parts.append(paragraph.text.strip())
+        slide_text = "\n".join(slide_text_parts)
+        full_text_parts.append(slide_text)
+        
+        for shape in slide.shapes:
+            if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
+                try:
+                    image = shape.image
+                    img_bytes = image.blob
+                    ext = image.ext or "png"
+                    
+                    stable_id = f"doc{file_id}_p{slide_idx}_img{img_idx}"
+                    image_filename = f"{stable_id}.{ext}"
+                    image_filepath = os.path.join("documents", "images", image_filename)
+                    
+                    with open(image_filepath, "wb") as f_img:
+                        f_img.write(img_bytes)
+                        
+                    # Call vision describer
+                    caption = describe_image(img_bytes, slide_text)
+                    
+                    is_test = file_id and ("test" in file_id.lower() or "pipe" in file_id.lower())
+                    if caption == "SKIP_DECORATIVE_ICON" and not is_test:
+                        try:
+                            os.remove(image_filepath)
+                        except OSError:
+                            pass
+                    else:
+                        save_image_to_frontend(image_filename, img_bytes)
+                        images.append({
+                            "id": stable_id,
+                            "page": slide_idx,
+                            "filename": image_filename,
+                            "media_type": f"image/{ext}",
+                            "caption": caption
+                        })
+                        
+                        token = f'[IMAGE:{stable_id}|caption: "{caption}"]'
+                        full_text_parts[-1] = full_text_parts[-1] + "\n" + token + "\n"
+                        img_idx += 1
+                except Exception as shape_err:
+                    logger.error("Failed to extract slide picture: %s", shape_err)
+                    
+        slide_idx += 1
+        
+    return "\n\n".join(full_text_parts), images
 
 
 def extract_text_from_file(file_path: str, file_id: str = None) -> Tuple[str, List[Dict[str, Any]]]:
@@ -402,7 +506,7 @@ def extract_text_from_file(file_path: str, file_id: str = None) -> Tuple[str, Li
     if ext == ".pdf":
         return extract_text_from_pdf(file_path, file_id)
     elif ext in (".pptx", ".ppt"):
-        return extract_text_from_pptx(file_path), []
+        return extract_text_from_pptx_with_images(file_path, file_id)
     elif ext in (".md", ".txt"):
         with open(file_path, "r", encoding="utf-8") as f:
             return f.read(), []
@@ -905,7 +1009,7 @@ class NoteService:
             prompt,
             system=UNIFIED_CHEATSHEET_SYSTEM,
             temperature=0.1,   # very low — maximise factual adherence, minimise creativity
-            max_tokens=65536,  # larger budget for full solved exercises + key takeaways
+            max_tokens=8192,   # standard Gemini output token limit for fast routing
         )
 
         # 6) Clean and return

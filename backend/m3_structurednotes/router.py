@@ -314,19 +314,46 @@ async def generate_structured_note_route(req: StructuredNoteRequest, background_
     background_tasks.add_task(
         _run_structured_note_job,
         job_id=job_id, input_items=req.input_items,
-        user_id=req.user_id, language=req.language
+        user_id=req.user_id, language=req.language,
+        module_name=req.module_name
     )
     return {"job_id": job_id, "status": "queued"}
 
 
-async def _run_structured_note_job(job_id: str, input_items: list, user_id: str, language: str):
+async def _run_structured_note_job(job_id: str, input_items: list, user_id: str, language: str, module_name: str = None):
     try:
         content = note_service.generate_structured_note(
             input_items=input_items, user_id=user_id, language=language, job_id=job_id
         )
+
+        # Determine base topic / name
+        topic = module_name or "Document"
+        if not module_name or module_name == "Study Notes":
+            # If default name or blank, try to extract first filename topic
+            topic = "Document"
+            conn = get_db_connection()
+            if conn:
+                try:
+                    cur = conn.cursor()
+                    if input_items and isinstance(input_items[0], dict) and input_items[0].get("value"):
+                        first_id = input_items[0]["value"]
+                        cur.execute("SELECT file_name FROM document_files WHERE id = %s", (first_id,))
+                        row = cur.fetchone()
+                        if row and row[0]:
+                            import os
+                            topic, _ = os.path.splitext(row[0])
+                    cur.close()
+                    conn.close()
+                except Exception:
+                    if conn:
+                        conn.close()
+
+        # Format title to end with "— Structured Note"
+        title = f"{topic} — Structured Note"
+
         note_id = note_service.save_note_to_db(
             user_id, None,
-            "Structured Study Notes",
+            title,
             content
         )
         if note_id:

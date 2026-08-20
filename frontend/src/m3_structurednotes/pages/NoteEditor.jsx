@@ -6,6 +6,7 @@ import katex from 'katex'
 import 'katex/dist/katex.min.css'
 import RefineModal from '../components/RefineModal'
 import { useSupabaseUser, getScopedStorageKey } from '@/hooks/useSupabaseUser'
+import { workspaceApi } from '@/services/workspaceApi'
 
 const API_BASE = 'http://127.0.0.1:8000/api/m3'
 
@@ -71,6 +72,10 @@ export default function NoteEditor() {
   const [showTOC, setShowTOC] = useState(false)
   const [tocItems, setTocItems] = useState([])
   const [folders, setFolders] = useState([])
+  const [foldersLoading, setFoldersLoading] = useState(false)
+  const [showNewFolderInput, setShowNewFolderInput] = useState(false)
+  const [newFolderName, setNewFolderName] = useState('')
+  const [isCreatingFolder, setIsCreatingFolder] = useState(false)
   const [showSaveModal, setShowSaveModal] = useState(false)
   const [selectedFolder, setSelectedFolder] = useState(null)
   const [toast, setToast] = useState('')
@@ -130,32 +135,70 @@ export default function NoteEditor() {
     }
   }, [noteId])
 
+  // Helper to fetch and flatten workspace folders (exact same logic as sidebar)
+  const fetchWorkspaceFolders = async () => {
+    setFoldersLoading(true);
+    try {
+      const data = await workspaceApi.getFolders();
+      const flatFolders = [];
+      const flatten = (nodes) => {
+        (nodes || []).forEach(node => {
+          flatFolders.push({
+            id: node.id,
+            name: node.name,
+            parent_folder_id: node.parent_folder_id || node.parent_id || null
+          });
+          if (node.children?.length) {
+            flatten(node.children);
+          }
+        });
+      };
+      flatten(data.folders || []);
+      setFolders(flatFolders);
+      
+      if (userScope) {
+        const key = getScopedStorageKey('neuranote_folders', userScope);
+        localStorage.setItem(key, JSON.stringify(flatFolders));
+      }
+    } catch (err) {
+      console.error('Failed to fetch workspace folders:', err);
+    } finally {
+      setFoldersLoading(false);
+    }
+  };
+
+  // Helper to create folder inline in the modal
+  const handleCreateFolder = async () => {
+    if (!newFolderName.trim()) return;
+    setIsCreatingFolder(true);
+    try {
+      await workspaceApi.createFolder(newFolderName.trim());
+      setNewFolderName('');
+      setShowNewFolderInput(false);
+      await fetchWorkspaceFolders();
+      showToast('Folder created!');
+    } catch (e) {
+      showToast('Failed to create folder');
+    } finally {
+      setIsCreatingFolder(false);
+    }
+  };
+
   // Folder loading with scoped cache and API refresh
   useEffect(() => {
-    if (!userScope) return
+    if (!userScope) return;
 
     try {
-      const key = getScopedStorageKey('neuranote_folders', userScope)
-      const storedFolders = localStorage.getItem(key)
+      const key = getScopedStorageKey('neuranote_folders', userScope);
+      const storedFolders = localStorage.getItem(key);
       if (storedFolders) {
-        setFolders(JSON.parse(storedFolders))
+        setFolders(JSON.parse(storedFolders));
       }
     } catch (e) {
-      console.error('Failed to load folders from scoped cache', e)
+      console.error('Failed to load folders from scoped cache', e);
     }
 
-    // Always fetch latest folders from Supabase via M3 backend API
-    axios.get(`${API_BASE}/folders?user_id=${userScope}`)
-      .then(res => {
-        if (Array.isArray(res.data)) {
-          setFolders(res.data)
-          const key = getScopedStorageKey('neuranote_folders', userScope)
-          localStorage.setItem(key, JSON.stringify(res.data))
-        }
-      })
-      .catch(err => {
-        console.error('Failed to fetch folders from API:', err)
-      })
+    fetchWorkspaceFolders();
   }, [userScope])
 
   // Load content into editor when noteContent changes
@@ -1780,9 +1823,7 @@ ${bodyHtml}
             </div>
           ))}
         </div>
-      )}
-
-      {/* SAVE MODAL */}
+      )}      {/* SAVE MODAL */}
       {showSaveModal && (
         <div style={{
           position: 'fixed',
@@ -1839,18 +1880,31 @@ ${bodyHtml}
 
             {/* Folder list */}
             <div style={{
-              maxHeight: '260px',
+              maxHeight: '220px',
               overflowY: 'auto',
               padding: '8px 16px'
             }}>
-              {folders.length === 0 ? (
+              {foldersLoading && folders.length === 0 ? (
+                <div style={{
+                  padding: '24px 16px',
+                  fontSize: '13px',
+                  color: '#9CA3AF',
+                  textAlign: 'center',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px'
+                }}>
+                  <span className="animate-spin" style={{ fontSize: '16px' }}>⏳</span> Loading folders...
+                </div>
+              ) : folders.length === 0 ? (
                 <div style={{
                   padding: '24px 16px',
                   fontSize: '13px',
                   color: '#9CA3AF',
                   textAlign: 'center'
                 }}>
-                  No folders found. Please create a folder in your notebook directory first.
+                  No folders found. Please create one below!
                 </div>
               ) : (
                 folders.map(folder => (
@@ -1888,14 +1942,93 @@ ${bodyHtml}
               )}
             </div>
 
-            {/* Footer */}
+            {/* Inline New Folder Creation */}
+            <div style={{ padding: '8px 20px 12px 20px', borderTop: '1px solid #F3F4F6' }}>
+              {!showNewFolderInput ? (
+                <button
+                  onClick={() => setShowNewFolderInput(true)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: '#7C3AED',
+                    fontSize: '12.5px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '4px 0'
+                  }}
+                >
+                  <span>➕</span> Create New Folder
+                </button>
+              ) : (
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '4px' }}>
+                  <input
+                    value={newFolderName}
+                    onChange={e => setNewFolderName(e.target.value)}
+                    placeholder="Folder name..."
+                    style={{
+                      flex: 1,
+                      padding: '6px 12px',
+                      fontSize: '12.5px',
+                      borderRadius: '8px',
+                      border: '1px solid #D1D5DB',
+                      outline: 'none',
+                      backgroundColor: '#ffffff',
+                      color: '#1F2937'
+                    }}
+                    autoFocus
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') handleCreateFolder()
+                      if (e.key === 'Escape') setShowNewFolderInput(false)
+                    }}
+                  />
+                  <button
+                    onClick={handleCreateFolder}
+                    disabled={isCreatingFolder}
+                    style={{
+                      padding: '6px 12px',
+                      borderRadius: '8px',
+                      border: 'none',
+                      background: '#7C3AED',
+                      color: '#ffffff',
+                      cursor: 'pointer',
+                      fontSize: '12px',
+                      fontWeight: 600
+                    }}
+                  >
+                    {isCreatingFolder ? '...' : 'Create'}
+                  </button>
+                  <button
+                    onClick={() => setShowNewFolderInput(false)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: '#9CA3AF',
+                      fontSize: '12px',
+                      cursor: 'pointer',
+                      padding: '4px'
+                    }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Footer / Scope Info */}
             <div style={{
-              padding: '12px 20px',
+              padding: '10px 20px',
               borderTop: '1px solid #F3F4F6',
               display: 'flex',
-              justifyContent: 'flex-end',
+              alignItems: 'center',
+              justifyContent: 'space-between',
               backgroundColor: '#F9FAFB'
             }}>
+              <span style={{ fontSize: '10px', color: '#9CA3AF' }}>
+                Scope: {userScope || 'Loading...'}
+              </span>
               <button
                 onClick={() => setShowSaveModal(false)}
                 style={{

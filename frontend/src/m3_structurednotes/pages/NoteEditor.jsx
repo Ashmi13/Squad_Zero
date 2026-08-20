@@ -5,12 +5,14 @@ import { marked } from 'marked'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
 import RefineModal from '../components/RefineModal'
+import { useSupabaseUser, getScopedStorageKey } from '@/hooks/useSupabaseUser'
 
 const API_BASE = 'http://127.0.0.1:8000/api/m3'
 
 export default function NoteEditor() {
   const { noteId } = useParams()
   const navigate = useNavigate()
+  const { user, userScope } = useSupabaseUser()
   
   // Safety check — if this logs, component mounted
   useEffect(() => {
@@ -126,17 +128,35 @@ export default function NoteEditor() {
         console.error('[Source] parse error')
       }
     }
+  }, [noteId])
 
-    // Folder loading
+  // Folder loading with scoped cache and API refresh
+  useEffect(() => {
+    if (!userScope) return
+
     try {
-      const storedFolders = localStorage.getItem('neuranote_folders')
+      const key = getScopedStorageKey('neuranote_folders', userScope)
+      const storedFolders = localStorage.getItem(key)
       if (storedFolders) {
         setFolders(JSON.parse(storedFolders))
       }
     } catch (e) {
-      console.error('Failed to load folders')
+      console.error('Failed to load folders from scoped cache', e)
     }
-  }, [noteId])
+
+    // Always fetch latest folders from Supabase via M3 backend API
+    axios.get(`${API_BASE}/folders?user_id=${userScope}`)
+      .then(res => {
+        if (Array.isArray(res.data)) {
+          setFolders(res.data)
+          const key = getScopedStorageKey('neuranote_folders', userScope)
+          localStorage.setItem(key, JSON.stringify(res.data))
+        }
+      })
+      .catch(err => {
+        console.error('Failed to fetch folders from API:', err)
+      })
+  }, [userScope])
 
   // Load content into editor when noteContent changes
   useEffect(() => {
@@ -1764,17 +1784,136 @@ ${bodyHtml}
 
       {/* SAVE MODAL */}
       {showSaveModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
-          <div style={{ width: '340px', background: 'var(--color-background-primary)', borderRadius: '12px', border: '0.5px solid var(--color-border-tertiary)', overflow: 'hidden' }}>
-            <div style={{ padding: '14px 16px', borderBottom: '0.5px solid var(--color-border-tertiary)', fontSize: '14px', fontWeight: 500, color: 'var(--color-text-primary)' }}>Save to folder</div>
-            {folders.length === 0 && <div style={{ padding: '20px', fontSize: '13px', color: 'var(--color-text-secondary)' }}>No folders found. Create a folder in the notebook first.</div>}
-            {folders.map(folder => (
-              <div key={folder.id} onClick={() => confirmSave(folder)} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 16px', cursor: 'pointer', borderBottom: '0.5px solid var(--color-border-tertiary)', fontSize: '13px', color: 'var(--color-text-primary)' }} onMouseEnter={e => e.currentTarget.style.background = '#EDE9FE'} onMouseLeave={e => e.currentTarget.style.background = 'none'}>
-                <span>📁</span><span>{folder.name}</span>
-              </div>
-            ))}
-            <div style={{ padding: '12px 16px', display: 'flex', justifyContent: 'flex-end' }}>
-              <button onClick={() => setShowSaveModal(false)} style={{ padding: '6px 16px', borderRadius: '6px', border: '0.5px solid var(--color-border-tertiary)', background: 'none', cursor: 'pointer', fontSize: '12px', color: 'var(--color-text-secondary)' }}>Cancel</button>
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(15, 15, 20, 0.4)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+          padding: '16px'
+        }}>
+          <div style={{
+            width: '100%',
+            maxWidth: '380px',
+            backgroundColor: '#ffffff',
+            borderRadius: '16px',
+            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.05)',
+            border: '1px solid #E5E7EB',
+            overflow: 'hidden',
+            fontFamily: 'system-ui, -apple-system, sans-serif'
+          }}>
+            {/* Header */}
+            <div style={{
+              padding: '16px 20px',
+              borderBottom: '1px solid #F3F4F6',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between'
+            }}>
+              <span style={{ fontSize: '15px', fontWeight: 600, color: '#111827' }}>Save Study Notes</span>
+              <button
+                onClick={() => setShowSaveModal(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: '18px',
+                  color: '#9CA3AF',
+                  cursor: 'pointer',
+                  padding: '4px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Folder selection description */}
+            <div style={{ padding: '12px 20px 4px 20px', fontSize: '12.5px', color: '#6B7280' }}>
+              Select a notebook folder to save this study note:
+            </div>
+
+            {/* Folder list */}
+            <div style={{
+              maxHeight: '260px',
+              overflowY: 'auto',
+              padding: '8px 16px'
+            }}>
+              {folders.length === 0 ? (
+                <div style={{
+                  padding: '24px 16px',
+                  fontSize: '13px',
+                  color: '#9CA3AF',
+                  textAlign: 'center'
+                }}>
+                  No folders found. Please create a folder in your notebook directory first.
+                </div>
+              ) : (
+                folders.map(folder => (
+                  <div
+                    key={folder.id}
+                    onClick={() => confirmSave(folder)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '12px',
+                      padding: '10px 12px',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      fontSize: '13.5px',
+                      fontWeight: 500,
+                      color: '#374151',
+                      transition: 'all 0.2s',
+                      marginBottom: '4px'
+                    }}
+                    onMouseEnter={e => {
+                      e.currentTarget.style.backgroundColor = '#EDE9FE';
+                      e.currentTarget.style.color = '#7C3AED';
+                    }}
+                    onMouseLeave={e => {
+                      e.currentTarget.style.backgroundColor = 'transparent';
+                      e.currentTarget.style.color = '#374151';
+                    }}
+                  >
+                    <span style={{ fontSize: '16px' }}>📁</span>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {folder.name}
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Footer */}
+            <div style={{
+              padding: '12px 20px',
+              borderTop: '1px solid #F3F4F6',
+              display: 'flex',
+              justifyContent: 'flex-end',
+              backgroundColor: '#F9FAFB'
+            }}>
+              <button
+                onClick={() => setShowSaveModal(false)}
+                style={{
+                  padding: '6px 14px',
+                  borderRadius: '8px',
+                  border: '1px solid #D1D5DB',
+                  background: '#ffffff',
+                  cursor: 'pointer',
+                  fontSize: '12.5px',
+                  fontWeight: 500,
+                  color: '#4B5563',
+                  transition: 'background 0.2s'
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = '#F9FAFB'}
+                onMouseLeave={e => e.currentTarget.style.background = '#ffffff'}
+              >
+                Cancel
+              </button>
             </div>
           </div>
         </div>

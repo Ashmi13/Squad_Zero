@@ -809,49 +809,47 @@ class NoteService:
                 conn.commit()
 
             # --- Always store chunks (needed for generation) ---
-            with conn.cursor() as cur:
-                for batch_start in range(0, len(chunks), MAX_EMBEDDING_BATCH):
-                    batch = chunks[batch_start:batch_start + MAX_EMBEDDING_BATCH]
-                    for i, chunk_text in enumerate(batch):
-                        chunk_idx = batch_start + i
-                        # Store NULL embedding when embeddings are disabled
-                        if EMBEDDINGS_ENABLED:
-                            try:
-                                emb = self.get_embedding(chunk_text)
-                            except Exception as emb_err:
-                                logger.warning("Embedding failed for chunk %d: %s — storing NULL", chunk_idx, emb_err)
-                                emb = None
-                        else:
-                            emb = None
+            chunk_rows = []
+            for chunk_idx, chunk_text in enumerate(chunks):
+                if EMBEDDINGS_ENABLED:
+                    try:
+                        emb = self.get_embedding(chunk_text)
+                    except Exception as emb_err:
+                        logger.warning("Embedding failed for chunk %d: %s — storing NULL", chunk_idx, emb_err)
+                        emb = None
+                else:
+                    emb = None
+                
+                import uuid
+                chunk_id = str(uuid.uuid4())
+                chunk_rows.append((chunk_id, file_id, chunk_idx, chunk_text, emb))
 
-                        if emb is not None:
-                            cur.execute(
-                                """INSERT INTO document_chunks
-                                   (id, pdf_id, chunk_index, content, embedding)
-                                   VALUES (gen_random_uuid(), %s, %s, %s, %s::vector)""",
-                                (file_id, chunk_idx, chunk_text, emb),
-                            )
-                        else:
-                            cur.execute(
-                                """INSERT INTO document_chunks
-                                   (id, pdf_id, chunk_index, content)
-                                   VALUES (gen_random_uuid(), %s, %s, %s)""",
-                                (file_id, chunk_idx, chunk_text),
-                            )
+            with conn.cursor() as cur:
+                from psycopg2.extras import execute_values
+                execute_values(
+                    cur,
+                    """INSERT INTO document_chunks (id, pdf_id, chunk_index, content, embedding)
+                       VALUES %s""",
+                    chunk_rows
+                )
                 conn.commit()
 
             # Store image references
             if images:
+                image_rows = []
+                for img in images:
+                    image_rows.append((img["id"], file_id, img["page"], img.get("caption")))
+                
                 with conn.cursor() as cur:
-                    for img in images:
-                        cur.execute(
-                            """INSERT INTO document_images
-                               (id, pdf_id, page_number, caption)
-                               VALUES (%s, %s, %s, %s)
-                               ON CONFLICT (id) DO UPDATE
-                               SET caption = EXCLUDED.caption""",
-                            (img["id"], file_id, img["page"], img.get("caption")),
-                        )
+                    from psycopg2.extras import execute_values
+                    execute_values(
+                        cur,
+                        """INSERT INTO document_images (id, pdf_id, page_number, caption)
+                           VALUES %s
+                           ON CONFLICT (id) DO UPDATE
+                           SET caption = EXCLUDED.caption""",
+                        image_rows
+                    )
                     conn.commit()
 
             return {

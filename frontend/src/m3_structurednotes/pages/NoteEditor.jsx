@@ -1107,8 +1107,13 @@ img, .slide-image, .diagram {
   max-width: 100% !important;
   width: auto !important;
   height: auto !important;
-  display: block;
-  margin: 12px auto;
+  display: block !important;
+  margin: 16px auto !important;
+  border: 3px solid #EDE9FE !important;
+  border-radius: 12px !important;
+  padding: 6px !important;
+  background-color: #ffffff !important;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05) !important;
 }
 blockquote { border-left: 4px solid #7C3AED;
              padding-left: 14px; color: #5F5E5A;
@@ -1585,9 +1590,12 @@ ${bodyHtml}
     .note-editor-body img {
       display: block !important;
       max-width: 100%;
-      border-radius: 8px;
-      margin: 12px 0;
-      border: 1px solid #EDE9FE;
+      border-radius: 12px;
+      margin: 16px auto;
+      border: 3px solid #EDE9FE;
+      padding: 6px;
+      background-color: #ffffff;
+      box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -2px rgba(0, 0, 0, 0.03);
     }
 
     .note-editor-body mark.search-hl {

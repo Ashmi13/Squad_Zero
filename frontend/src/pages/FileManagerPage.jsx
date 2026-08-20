@@ -84,6 +84,17 @@ const FileManagerPage = ({ activeView, setActiveView }) => {
 
   const handleSelectFile = (file) => {
     const noteTypes = ['NOTE', 'STRUCTURED', 'CHEATSHEET', 'DETAILED'];
+    
+    const isMindMap = file?.type === 'MINDMAP' || 
+      file?.file_type === 'MINDMAP' || 
+      String(file?.id).startsWith('mindmap_');
+      
+    if (isMindMap) {
+      const realId = String(file.id).replace('mindmap_', '');
+      navigate(`/mindmap?id=${realId}`);
+      return;
+    }
+
     const isNote = file?.is_note || 
       noteTypes.includes(file?.type?.toUpperCase()) || 
       noteTypes.includes(file?.file_type?.toUpperCase());

@@ -409,7 +409,7 @@ async def generate_note(req: NoteRequest, background_tasks: BackgroundTasks):
     return {"job_id": job_id, "status": "queued"}
 
 
-async def _run_generation_job(
+def _run_generation_job(
     job_id: str,
     pdf_ids: list,
     user_id: str,

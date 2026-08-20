@@ -13,7 +13,7 @@
  *  - CSS Module classes preserved; new classes added at bottom
  */
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { useSupabaseUser } from '@/hooks/useSupabaseUser';
+import { useAuth } from '@/hooks/useAuth';
 import {
   CloudUpload, FolderOpen, Loader2, FileText, X,
   File, CheckCircle2, ChevronRight, ChevronDown,
@@ -114,7 +114,8 @@ function getNotebookNoteContent(note) {
 
 const UploadSection = ({ userId: userIdProp }) => {
   const navigate = useNavigate();
-  const { user, userScope } = useSupabaseUser();
+  const { user } = useAuth();
+  const userScope = user?.id || 'anonymous';
 
   // ── State ──────────────────────────────────────────────────
   const [selectedFiles, setSelectedFiles]     = useState([]);   // Real File objects

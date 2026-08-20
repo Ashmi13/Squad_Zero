@@ -5,7 +5,8 @@ import { marked } from 'marked'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
 import RefineModal from '../components/RefineModal'
-import { useSupabaseUser, getScopedStorageKey } from '@/hooks/useSupabaseUser'
+import { getScopedStorageKey } from '@/hooks/useSupabaseUser'
+import { useAuth } from '@/hooks/useAuth'
 import { workspaceApi } from '@/services/workspaceApi'
 
 const API_BASE = 'http://127.0.0.1:8000/api/m3'
@@ -13,7 +14,8 @@ const API_BASE = 'http://127.0.0.1:8000/api/m3'
 export default function NoteEditor() {
   const { noteId } = useParams()
   const navigate = useNavigate()
-  const { user, userScope } = useSupabaseUser()
+  const { user } = useAuth()
+  const userScope = user?.id || 'anonymous'
   
   // Safety check — if this logs, component mounted
   useEffect(() => {

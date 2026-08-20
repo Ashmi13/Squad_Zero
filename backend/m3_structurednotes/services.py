@@ -310,29 +310,53 @@ def describe_image(image_bytes: bytes, page_text: str = "") -> str:
 
 
 def extract_text_from_pdf(file_path: str, file_id: str = None) -> Tuple[str, List[Dict[str, Any]]]:
-    """Extract text and page-rasterized image references from a PDF."""
+    """Extract text and page-rasterized image references from a PDF in parallel."""
     if not file_id:
         file_id = "temp"
     doc = fitz.open(file_path)
-    full_text_parts: List[str] = []
+    full_text_parts: List[str] = [None] * len(doc)
     images: List[Dict[str, Any]] = []
 
     os.makedirs(os.path.join("documents", "images"), exist_ok=True)
 
-    for page_idx in range(len(doc)):
+    from concurrent.futures import ThreadPoolExecutor
+
+    def process_page(page_idx):
         page = doc[page_idx]
         page_num = page_idx + 1
         page_text = page.get_text()
+
+        # Fast pre-check: if the page has absolutely no images or vector drawings,
+        # we skip rendering and calling the vision model completely!
+        # Note: we also skip if page text is very long (suggesting a standard dense textbook page, not a slide)
+        has_visuals = len(page.get_images()) > 0 or len(page.get_drawings()) > 0
+        is_dense_text = len(page_text.strip()) > 1500
         
+        if is_dense_text or not has_visuals:
+            logger.info("Page %d has no visuals or is dense text. Skipping vision.", page_num)
+            return page_num, page_text, None, None
+
         try:
-            # Render the full PDF page as a PNG image
             pix = page.get_pixmap(dpi=150)
             image_bytes = pix.tobytes("png")
             
             # Analyze page content with vision model
             caption = describe_image(image_bytes, page_text)
+            return page_num, page_text, image_bytes, caption
+        except Exception as page_err:
+            logger.warning("Failed rasterizing page %d: %s", page_num, page_err)
+            return page_num, page_text, None, None
+
+    # Run in parallel across up to 10 workers
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        results = list(executor.map(process_page, range(len(doc))))
+
+    # Sort results to ensure correct order
+    results.sort(key=lambda x: x[0])
+
+    for page_num, page_text, image_bytes, caption in results:
+        if image_bytes and caption:
             is_test = file_id and ("test" in file_id.lower() or "pipe" in file_id.lower())
-            
             if caption == "SKIP_DECORATIVE_ICON" and not is_test:
                 logger.info("Skipping page %d image (text-only/decorative)", page_num)
             else:
@@ -354,10 +378,8 @@ def extract_text_from_pdf(file_path: str, file_id: str = None) -> Tuple[str, Lis
                 
                 token = f'[IMAGE:{stable_id}|caption: "{caption}"]'
                 page_text = page_text + "\n" + token + "\n"
-        except Exception as page_err:
-            logger.exception("Failed rasterizing page %d", page_num)
-            
-        full_text_parts.append(page_text)
+                
+        full_text_parts[page_num - 1] = page_text
 
     doc.close()
     return "\n".join(full_text_parts), images

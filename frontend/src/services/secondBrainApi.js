@@ -22,7 +22,18 @@ export const secondBrainApi = {
   listNotes() {
     return request('/api/second-brain/notes');
   },
-
+deleteNote(noteId) {
+  return request(`/api/second-brain/notes/${noteId}`, {
+    method: 'DELETE',
+  });
+},
+updateNote(noteId, data) {
+  return request(`/api/second-brain/notes/${noteId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+},
   createNoteFromUpload(file, { title, sourceFileId } = {}) {
     const formData = new FormData();
 

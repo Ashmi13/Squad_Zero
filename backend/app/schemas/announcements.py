@@ -23,3 +23,15 @@ class Announcement(AnnouncementBase):
 
     class Config:
         from_attributes = True
+
+
+class AnnouncementStatusResponse(BaseModel):
+    total_announcements: int
+    read_count: int
+    unread_count: int
+    read_announcement_ids: List[int]
+
+
+class AnnouncementWithStatusResponse(BaseModel):
+    announcements: List[Announcement]
+    status: AnnouncementStatusResponse

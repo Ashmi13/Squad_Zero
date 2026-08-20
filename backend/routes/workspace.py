@@ -79,6 +79,15 @@ async def get_files(
     return service.list_files(user_id=user_id, folder_id=folder_id)
 
 
+@router.get("/storage-usage")
+async def get_storage_usage(
+    user_id: str = Depends(get_current_user_id),
+    supabase: Client = Depends(get_supabase_service_client),
+):
+    service = WorkspaceService(supabase)
+    return service.get_storage_usage(user_id=user_id)
+
+
 @router.get("/files/recent")
 async def get_recent_files(
     limit: int = 5,
@@ -143,7 +152,7 @@ async def delete_file(
     supabase: Client = Depends(get_supabase_service_client),
 ):
     service = WorkspaceService(supabase)
-    result = service._file(user_id=user_id, file_id=file_id)
+    result = service.delete_file(user_id=user_id, file_id=file_id)
     return {"status": "success", **result}
 
 

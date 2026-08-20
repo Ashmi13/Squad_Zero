@@ -61,6 +61,7 @@ export function SignupForm() {
 
       setTokens(response.data.access_token, response.data.refresh_token);
       localStorage.setItem('user', JSON.stringify(response.data.user));
+      localStorage.setItem('neuranote_pending_verification_email', data.email);
 
       setIsSuccess(true);
       setTimeout(() => {

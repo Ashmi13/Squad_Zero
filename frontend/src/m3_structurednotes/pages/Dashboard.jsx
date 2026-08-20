@@ -49,7 +49,6 @@ const Dashboard = () => {
     return (
         <div className={styles.app}>
             <main className={styles.mainContent}>
-
                 <UploadSection />
 
                 <div className={styles.sectionHeader}>

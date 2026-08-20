@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useRef, Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { ThemeProvider } from '@/context/ThemeContext';
-import { useAuth } from '@/hooks/useAuth.jsx';
+import { Toaster } from '@/lib/simpleToast';
+import { getAccessToken } from '@/utils/tokenStorage';
+import axiosInstance from '@/lib/axios';
+import { useAuth } from '@/hooks/useAuth';
+import AccountSuspendedPage from '@/pages/AccountSuspendedPage';
 
-// Always loaded — needed on every page
-import Rail from '@/components/filemanager/Rail';
-
-// MEMBER 1 (Nihaaj) - Auth
+// ===== MEMBER 1 (Nihaaj) - Auth =====
 import LandingPage from '@/pages/LandingPage';
 import SignInPage from '@/pages/SignInPage';
 import SignUpPage from '@/pages/SignUpPage';
@@ -18,14 +19,15 @@ import AccountVerification from '@/pages/AccountVerification';
 import OAuthCallback from '@/pages/OAuthCallback';
 import AdminDashboard from '@/pages/AdminDashboard';
 
-// MEMBER 2 (Ashmitha) - File Manager
+// ===== MEMBER 2 (Ashmitha) - File Manager =====
 import FileManagerPage from '@/pages/FileManagerPage';
+import Rail from '@/components/filemanager/Rail';
 import FolderPanel from '@/components/filemanager/FolderPanel';
 
-// SHARED DASHBOARD
+// ===== SHARED DASHBOARD =====
 import Dashboard from '@/pages/Dashboard';
 
-// MEMBER 3 (Sandavi) - Structured Notes - LAZY LOADED
+// ===== MEMBER 3 (Sandavi) - Structured Notes (LAZY LOADED) =====
 const M3Dashboard = lazy(() => import('./m3_structurednotes/pages/Dashboard'));
 const NoteEditor = lazy(() => import('./m3_structurednotes/pages/NoteEditor'));
 const ManualNoteEditor = lazy(() => import('./m3_structurednotes/pages/ManualNoteEditor'));
@@ -67,27 +69,52 @@ const PageLoader = () => (
   </div>
 );
 
-// Pages that should NOT show the Rail
-const noRailPages = ['/', '/login', '/signup', '/oauth/callback'];
+// Pages that should NOT show the Rail/FolderPanel (auth + landing flows)
+const noRailPages = [
+  '/',
+  '/login',
+  '/signup',
+  '/verify-email',
+  '/forgot-password',
+  '/reset-password',
+  '/change-password',
+  '/account-verified',
+  '/oauth/callback',
+  '/account-suspended',
+];
 
 const AppLayout = () => {
   const location = useLocation();
   const navigate = useNavigate();
-   const { user, isLoading } = useAuth();
-  const [quizStep, setQuizStep] = useState('upload');
+  const { user, isLoading } = useAuth();
   const { userScope, loading: userLoading } = useSupabaseUser();
   const [activeView, setActiveView] = useState('home');
+  const [quizStep, setQuizStep] = useState('upload');
   const [selectedWorkspaceFolder, setSelectedWorkspaceFolder] = useState(null);
   const lastSavedCompletionVersionRef = useRef(0);
+
+  const publicPaths = new Set([
+    '/',
+    '/login',
+    '/signup',
+    '/verify-email',
+    '/forgot-password',
+    '/reset-password',
+    '/change-password',
+    '/account-verified',
+    '/oauth/callback',
+    '/account-suspended'
+  ]);
 
   const showRail = !noRailPages.includes(location.pathname);
   const showWorkspacePanel = showRail &&
     location.pathname !== '/dashboard' &&
     location.pathname !== '/files' &&
     location.pathname !== '/files/create-note' &&
+    !location.pathname.includes('/admin') &&
     !(location.pathname.startsWith('/quiz') && quizStep !== 'upload');
 
-  // Persist selected workspace folder
+  // Load user-scoped workspace folder
   useEffect(() => {
     if (userLoading) return;
 
@@ -149,6 +176,48 @@ const AppLayout = () => {
 
     return unsubscribe;
   }, []);
+
+  // Security Guard: Check token authentication and account suspension status
+  useEffect(() => {
+    const token = getAccessToken();
+    const isPublicPath = publicPaths.has(location.pathname);
+
+    if (!token && !isPublicPath) {
+      navigate('/login', { replace: true });
+      return;
+    }
+
+    if (!token || isPublicPath || location.pathname === '/account-suspended') {
+      return;
+    }
+
+    let isMounted = true;
+
+    axiosInstance.get('/api/v1/users/me')
+      .then(({ data }) => {
+        const suspended = Boolean(data?.profile?.is_suspended || data?.user?.is_suspended || data?.is_suspended);
+        if (isMounted && suspended) {
+          navigate('/account-suspended', { replace: true });
+        }
+      })
+      .catch((error) => {
+        if (!isMounted) return;
+
+        const detail = String(error.response?.data?.detail || '').toLowerCase();
+        if (error.response?.status === 403 || detail.includes('suspend')) {
+          navigate('/account-suspended', { replace: true });
+          return;
+        }
+
+        if (error.response?.status === 401) {
+          navigate('/login', { replace: true });
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [location.pathname, navigate]);
 
   // Show spinner while auth initialises
   if (isLoading) return (
@@ -213,10 +282,13 @@ const AppLayout = () => {
             <Route path="/change-password" element={<ChangePassword />} />
             <Route path="/account-verified" element={<AccountVerification />} />
             <Route path="/oauth/callback" element={<OAuthCallback />} />
+            <Route path="/account-suspended" element={<AccountSuspendedPage />} />
             <Route path="/admin" element={<AdminDashboard />} />
 
             {/* Member 2 - File Manager */}
-            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/dashboard" element={
+              <FileManagerPage activeView={activeView} setActiveView={setActiveView} />
+            } />
             <Route path="/files" element={
               <FileManagerPage activeView={activeView} setActiveView={setActiveView} />
             } />
@@ -245,7 +317,7 @@ const AppLayout = () => {
       </div>
 
       {/* Dev panel — floats on every page */}
-      <DevNav />
+      {import.meta.env.DEV && import.meta.env.VITE_SHOW_DEVNAV === 'true' ? <DevNav /> : null}
     </div>
   );
 };
@@ -254,6 +326,7 @@ const App = () => (
   <ThemeProvider>
     <Router>
       <AppLayout />
+      <Toaster />
     </Router>
   </ThemeProvider>
 );

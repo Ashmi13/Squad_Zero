@@ -124,6 +124,7 @@ __pycache__/
 *.pyc
 *.pyo
 
+
 # History files
 .history/
 
@@ -132,3 +133,12 @@ documents/
 frontend/public/notes-assets/
 *.pdf
 backend/*.pdf
+
+# Python bytecode cache
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Machine Learning Models & Cache
+backend/model_cache/

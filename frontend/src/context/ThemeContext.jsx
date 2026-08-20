@@ -1,6 +1,17 @@
-import React, { createContext, useState, useEffect } from 'react';
+import React, { createContext, useState, useEffect, useLayoutEffect } from 'react';
 
 export const ThemeContext = createContext();
+
+const FONT_SIZE_VALUES = {
+  Small: '14px',
+  Medium: '18px',
+  Large: '22px',
+};
+
+const getStoredFontSize = () => {
+  const saved = localStorage.getItem('font-size-mode');
+  return Object.prototype.hasOwnProperty.call(FONT_SIZE_VALUES, saved) ? saved : 'Small';
+};
 
 export const ThemeProvider = ({ children }) => {
   const [isDark, setIsDark] = useState(() => {
@@ -10,8 +21,7 @@ export const ThemeProvider = ({ children }) => {
   });
 
   const [fontSize, setFontSize] = useState(() => {
-    const saved = localStorage.getItem('font-size-mode');
-    return saved || 'Medium';
+    return getStoredFontSize();
   });
 
   // Save theme preference to localStorage
@@ -25,16 +35,14 @@ export const ThemeProvider = ({ children }) => {
     }
   }, [isDark]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     localStorage.setItem('font-size-mode', fontSize);
-    const map = {
-      Small: '14px',
-      Medium: '16px',
-      Large: '18px',
-    };
-    const nextSize = map[fontSize] || map.Medium;
+    const nextSize = FONT_SIZE_VALUES[fontSize] || FONT_SIZE_VALUES.Small;
     document.documentElement.style.setProperty('--app-font-size', nextSize);
     document.documentElement.style.fontSize = nextSize;
+    if (document.body) {
+      document.body.style.fontSize = nextSize;
+    }
   }, [fontSize]);
 
   const toggleTheme = () => {

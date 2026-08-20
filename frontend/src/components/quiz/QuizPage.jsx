@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useAuth } from '@/hooks/useAuth.jsx';
 import { useNavigate } from 'react-router-dom';
-import { getAuthHeaders, isAuthenticated } from '@/utils/tokenStorage';
+import { useAuth } from '@/hooks/useAuth';
+import { getAccessToken } from '@/utils/tokenStorage';
 import { API } from '@/config/api';
 import { workspaceApi } from '@/services/workspaceApi';
 
@@ -11,7 +11,12 @@ import QuizResults  from './QuizResults';
 import QuizHistory  from './QuizHistory';
 import Toast        from './Toast';
 import ConfirmDialog from './ConfirmDialog';
-import './styles/QuizPage.css';
+import './QuizPage.css';
+
+const getAuthHeaders = () => {
+  const token = getAccessToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
 
 const MAX_FILES    = 20;
 const MAX_FILE_SIZE = 100 * 1024 * 1024;

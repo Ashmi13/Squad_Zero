@@ -205,7 +205,12 @@ const FileManagerPage = ({ activeView, setActiveView }) => {
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {activeView === 'home' ? (
-          <TopBar folderName="NeuraNote" />
+          <>
+            <TopBar folderName="NeuraNote" />
+            <div style={{ display: 'flex', flex: 1, overflow: 'auto' }}>
+              <HomeView />
+            </div>
+          </>
         ) : (
           <>
             <div style={{
@@ -250,12 +255,13 @@ const FileManagerPage = ({ activeView, setActiveView }) => {
               </button>
             </div>
 
-            <TopBar
-              folderName={activeView === 'home' ? 'Home' : (selectedFolder?.name || 'My Files')}
-            />
+            {location.pathname !== '/files' && (
+              <TopBar
+                folderName={activeView === 'home' ? 'Home' : (selectedFolder?.name || 'My Files')}
+              />
+            )}
 
-            <div style={{ display: 'flex', flex: 1, overflow: activeView === 'home' ? 'auto' : 'hidden' }}>
-              {activeView === 'home' && <HomeView />}
+            <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
 
               {activeView === 'files' && !selectedFile && (
                 <div style={{ padding: '24px 32px', overflowY: 'auto', flex: 1 }}>

@@ -3,16 +3,18 @@ Flashcard Routes - AI-powered flashcard generation from PDF text.
 Falls back to a local NLP-style extractor when the AI API is unavailable.
 """
 
-from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Form
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 import logging
 import json
 import re
 import os
 
 from app.services.pdf_reader import extract_text_from_pdf, validate_pdf
-from app.api.deps import get_current_user_id
+from app.api.deps import get_current_user_id, get_supabase_service_client
+from app.services.workspace_service import WorkspaceService
+from supabase import Client
 
 router = APIRouter(tags=["flashcards"])
 logger = logging.getLogger(__name__)
@@ -234,14 +236,42 @@ def _try_ai_flashcards(text_input: str) -> List[Flashcard]:
 
 @router.post("/generate", response_model=FlashcardsResponse)
 async def generate_flashcards(
-    file: UploadFile = File(...),
+    file: Optional[UploadFile] = File(None),
+    workspace_file_id: Optional[str] = Form(None),
     user_id: str = Depends(get_current_user_id),
+    supabase: Client = Depends(get_supabase_service_client),
 ):
 
     try:
-        filename = file.filename or ""
-        content_type = file.content_type or ""
-        
+        file_bytes = None
+        filename = ""
+        content_type = ""
+
+        if workspace_file_id:
+            service = WorkspaceService(supabase)
+            # Retrieve file metadata to determine filename and content_type
+            query = supabase.table("files").select("*").eq("id", workspace_file_id).limit(1)
+            if service._files_has_user_id:
+                query = query.eq("user_id", user_id)
+            existing = query.execute()
+            if not existing.data:
+                raise HTTPException(status_code=404, detail="File not found")
+            file_meta = existing.data[0]
+            filename = file_meta.get("original_filename") or file_meta.get("name") or ""
+            content_type = file_meta.get("mime_type") or ""
+
+            # Download file bytes from S3
+            file_bytes = service.get_file_object_bytes(user_id=user_id, file_id=workspace_file_id)
+        elif file is not None and getattr(file, "filename", None):
+            filename = file.filename or ""
+            content_type = file.content_type or ""
+            file_bytes = await file.read()
+        else:
+            raise HTTPException(status_code=400, detail="Either file or workspace_file_id must be provided")
+
+        if not file_bytes:
+            raise HTTPException(status_code=400, detail="File content is empty")
+
         # We accept PDF and plain text (or octet stream which could be either)
         is_pdf = (
             content_type == "application/pdf"
@@ -255,8 +285,6 @@ async def generate_flashcards(
 
         if not (is_pdf or is_text or is_generic):
             raise HTTPException(status_code=400, detail="Only PDF or Text files are supported")
-
-        file_bytes = await file.read()
         
         # Try to parse as PDF first
         extracted_text = ""

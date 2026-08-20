@@ -25,9 +25,9 @@ const loginSchema = z.object({
  * Login Card Component
  * Production-ready authentication component with:
  * - Email/Password form validation using React Hook Form + Zod
- * - OAuth2 integration (Google/GitHub)
+ * - OAuth2 integration (Google)
  * - Loading, error, and success state management
- * - Responsive design with Tailwind CSS
+ 
  * - Security best practices
  */
 export const LoginCard = () => {
@@ -64,6 +64,15 @@ export const LoginCard = () => {
         password: data.password,
       });
 
+      if (response.data?.user?.is_suspended) {
+        setIsError(true);
+        setErrorMessage('This account has been suspended. Please contact support.');
+        setTimeout(() => {
+          window.location.href = '/account-suspended';
+        }, 600);
+        return;
+      }
+
       // Store JWT tokens securely
       setTokens(response.data.access_token, response.data.refresh_token);
       // Persist user record and notify UI listeners so profile appears immediately
@@ -84,21 +93,14 @@ export const LoginCard = () => {
         error.response?.data?.detail ||
         error.response?.data?.error;
 
-      if (error.response?.status === 403) {
-        navigate('/suspended', {
-          state: {
-            fromSuspension: true,
-            message: backendMessage || 'Your account has been suspended by the admin.',
-          },
-        });
-        return;
-      }
+      const detail = error.response?.data?.detail || 'Invalid email or password. Please try again.';
+      const isSuspended = /suspend|suspended/i.test(detail);
+      setErrorMessage(isSuspended ? 'This account has been suspended. Please contact support.' : detail);
 
-      setIsError(true);
-      if (backendMessage) {
-        setErrorMessage(backendMessage);
-      } else {
-        setErrorMessage('Invalid email or password. Please try again.');
+      if (isSuspended) {
+        setTimeout(() => {
+          window.location.href = '/account-suspended';
+        }, 600);
       }
 
       console.error('Login error:', error);

@@ -25,11 +25,6 @@ export function LoginForm() {
   } = useForm({
     resolver: zodResolver(loginSchema),
     mode: 'onBlur',
-    // Pre-filling test credentials as per sprint planning
-    defaultValues: {
-      email: '',
-      password: ''
-    }
   });
 
   const [isLoading, setIsLoading] = useState(false);
@@ -51,11 +46,19 @@ export function LoginForm() {
     setIsSuccess(false);
 
     try {
-      // Standard API Call
       const response = await axiosInstance.post(config.endpoints.login, {
         email: data.email,
         password: data.password,
       });
+
+      if (response.data?.user?.is_suspended) {
+        setIsError(true);
+        setErrorMessage('This account has been suspended. Please contact support.');
+        setTimeout(() => {
+          window.location.href = '/account-suspended';
+        }, 600);
+        return;
+      }
 
       setTokens(response.data.access_token, response.data.refresh_token);
       localStorage.setItem('user', JSON.stringify(response.data.user));
@@ -65,20 +68,28 @@ export function LoginForm() {
         window.location.href = '/dashboard';
       }, 1000);
     } catch (error) {
-      if (error.response?.status === 403) {
-        const backendMessage =
-          error.response?.data?.message ||
-          error.response?.data?.detail ||
-          'Your account has been suspended by the admin.';
-        navigate('/suspended', { state: { fromSuspension: true, message: backendMessage } });
-        return;
+      const detail = error.response?.data?.detail || 'Invalid email or password. Please try again.';
+      const isSuspended = /suspend|suspended/i.test(detail);
+
+      let displayMessage = detail;
+      if (error.response?.status === 401) {
+        displayMessage = 'Invalid email or password. Please try again';
+      } else if (!isSuspended && (detail.toLowerCase().includes('credentials') || detail.toLowerCase().includes('signin failed'))) {
+        displayMessage = 'Invalid email or password';
       }
+
       setIsError(true);
       setErrorMessage(
-        error.response?.data?.detail ||
-          error.response?.data?.message ||
-          'Invalid email or password. Please try again.'
+        isSuspended
+          ? 'This account has been suspended. Please contact support.'
+          : displayMessage
       );
+
+      if (isSuspended) {
+        setTimeout(() => {
+          window.location.href = '/account-suspended';
+        }, 600);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -87,13 +98,6 @@ export function LoginForm() {
   return (
     <div>
       <h2 className="font-display text-3xl text-slate-900 mb-2">Welcome Back</h2>
-      <p className="text-slate-500 mb-4">Sign in to your account</p>
-      
-      {/* Admin / Test Credentials Notice */}
-      <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg flex items-center gap-3">
-        <AlertCircle className="text-blue-600" size={20} />
-        <p className="text-blue-800 text-sm"></p>
-      </div>
       <p className="text-slate-500 mb-8">Sign in to your account</p>
 
       {isSuccess && (

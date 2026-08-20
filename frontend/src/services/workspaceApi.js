@@ -2,6 +2,43 @@ import { config } from '@/config/env';
 import { authFetch, getValidAccessToken, clearAuthAndRedirect } from '@/utils/authSession';
 
 const API_BASE = config.apiBaseUrl || '';
+const ROUTE_LIKE_LABEL = /^\/[a-z0-9][a-z0-9\-_/]*$/i;
+const BLOCKED_ENDPOINT_LABELS = new Set([
+  'verify-email',
+  '/verify-email',
+  'login',
+  '/login',
+  'signup',
+  '/signup',
+  'forgot-password',
+  '/forgot-password',
+  'reset-password',
+  '/reset-password',
+  'change-password',
+  '/change-password',
+  'account-verified',
+  '/account-verified',
+  'oauth/callback',
+  '/oauth/callback',
+  'account-suspended',
+  '/account-suspended',
+]);
+
+function shouldHideEndpointLikeLabel(label) {
+  const normalized = String(label || '').trim().toLowerCase();
+  if (!normalized) return true;
+  if (ROUTE_LIKE_LABEL.test(normalized)) return true;
+  return BLOCKED_ENDPOINT_LABELS.has(normalized);
+}
+
+function filterFolderTree(nodes = []) {
+  return (nodes || [])
+    .filter((node) => !shouldHideEndpointLikeLabel(node?.name))
+    .map((node) => ({
+      ...node,
+      children: filterFolderTree(node.children || []),
+    }));
+}
 
 async function request(path, options = {}) {
   const res = await authFetch(path, options);
@@ -56,6 +93,10 @@ export const workspaceApi = {
   getFiles(folderId = null) {
     const query = folderId ? `?folder_id=${encodeURIComponent(folderId)}` : '';
     return request(`/api/v1/workspace/files${query}`);
+  },
+
+  getStorageUsage() {
+    return request('/api/v1/workspace/storage-usage');
   },
 
   async getRecentFiles(limit = 5) {

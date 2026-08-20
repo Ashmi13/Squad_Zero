@@ -149,6 +149,7 @@ export default function ExpandedCalendar({ tasks, events, onClose, onAddEvent, o
                 {day && <>
                   <span className={`exp-day-num ${isToday(day) ? 'today-num' : ''}`}>{day}</span>
                   <Box className="exp-day-items">
+                    {/* show max 3 pills per day, then a "+N more" label */}
                     {(dayMap[day] || []).slice(0, 3).map((item, j) => (
                       <Box key={j} className="exp-item-pill"
                         style={{ background: item._color + '28', borderLeft: `3px solid ${item._color}` }}>

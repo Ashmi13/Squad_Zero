@@ -51,6 +51,8 @@ class Settings(BaseSettings):
     # Admin
     admin_email: str = Field(default="admin@university.com", env="ADMIN_EMAIL")
     super_admin_id: str = Field(default="b422ac95-a9dd-4aa0-ab5c-54c09fa58267", env="SUPER_ADMIN_ID")
+    support_contact_name: str = Field(default="NeuroNote Support", env="SUPPORT_CONTACT_NAME")
+    support_contact_email: str = Field(default="nihaajahamed@gmail.com", env="SUPPORT_CONTACT_EMAIL")
 
     # Google OAuth
     google_client_id: Optional[str] = Field(default=None, env="GOOGLE_CLIENT_ID")

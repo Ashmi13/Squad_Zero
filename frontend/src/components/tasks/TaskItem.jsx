@@ -9,8 +9,10 @@ import NotificationsNoneIcon    from '@mui/icons-material/NotificationsNone';
 import MenuBookOutlinedIcon     from '@mui/icons-material/MenuBookOutlined';
 import { useTheme } from '../../context/ThemeContext';
 
+// color per priority level
 const P_COLORS = { high: '#ef4444', medium: '#f59e0b', low: '#10b981' };
 
+// format the due date and check if it's already past
 function formatDue(raw) {
   if (!raw) return null;
   const d   = new Date(raw);
@@ -48,6 +50,7 @@ export default function TaskItem({ task, onToggle, onEdit, onDelete }) {
         )}
 
         <Box className="task-meta">
+          {/* due date badge — goes red if overdue */}
           {due && (
             <Box className={`due-badge ${due.overdue && !done ? 'overdue' : ''}`}>
               <AccessTimeIcon sx={{ fontSize: 14 }} />

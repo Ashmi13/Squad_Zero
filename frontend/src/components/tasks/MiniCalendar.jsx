@@ -37,6 +37,7 @@ export default function MiniCalendar({ tasks, events, onExpand }) {
   tasks.forEach(t  => t.due_date   && addDot(t.due_date,   t.color || '#6366f1'));
   events.forEach(e => e.start_time && addDot(e.start_time, e.color || '#ec4899'));
 
+  // pad the start of the grid with empty cells so day 1 lands on the right weekday
   const cells = [...Array(firstDay).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)];
 
   const now = new Date();

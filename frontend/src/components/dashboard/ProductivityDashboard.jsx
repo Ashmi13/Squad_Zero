@@ -184,6 +184,7 @@ const ProductivityDashboard = () => {
   // Refs (don't trigger re-render)
   const alarmRef             = useRef(null);
   const completionVersionRef = useRef(0);
+  const alarmFiredRef        = useRef(false); // prevents duplicate alarm on same session
 
   // ── States ──────────────────────────────────
   const [dashboard,      setDashboard]      = useState(INITIAL_DASHBOARD);
@@ -207,17 +208,27 @@ const ProductivityDashboard = () => {
   };
 
   // ── Fetch dashboard + recent files ──────────
+  // Each source is fetched independently so a failure in one
+  // (e.g. 404 from /recent while the table is still being set up)
+  // does NOT block the other or render a red error banner.
   const refreshDashboard = useCallback(async ({ showLoader = true } = {}) => {
+    if (showLoader) setLoading(true);
     try {
-      if (showLoader) setLoading(true);
-      const [stats, files] = await Promise.all([
-        workspaceApi.getProductivityDashboard(),
-        workspaceApi.getRecentFiles(20),
-      ]);
-      setDashboard(normalizeDashboardStats(stats));
-      setRecentFiles(normalizeRecentFiles(files).slice(0, 5));
-    } catch (err) {
-      setError(err.message || 'Failed to refresh dashboard');
+      // ── productivity stats ──
+      try {
+        const stats = await workspaceApi.getProductivityDashboard();
+        setDashboard(normalizeDashboardStats(stats));
+      } catch {
+        // Non-critical: keep existing/default stats, no banner
+      }
+
+      // ── recent files ──
+      try {
+        const files = await workspaceApi.getRecentFiles(20);
+        setRecentFiles(normalizeRecentFiles(files).slice(0, 5));
+      } catch {
+        // Non-critical: keep existing/empty list, no banner
+      }
     } finally {
       if (showLoader) setLoading(false);
     }
@@ -237,19 +248,28 @@ const ProductivityDashboard = () => {
     const load = async () => {
       setLoading(true);
       setError('');
+
+      // ── productivity stats (non-blocking) ──
       try {
-        const [stats, files] = await Promise.all([
-          workspaceApi.getProductivityDashboard(),
-          workspaceApi.getRecentFiles(20),
-        ]);
+        const stats = await workspaceApi.getProductivityDashboard();
         if (!mounted) return;
         setDashboard(normalizeDashboardStats(stats));
-        setRecentFiles(normalizeRecentFiles(files).slice(0, 5));
-      } catch (err) {
-        if (mounted) setError(err.message || 'Failed to load dashboard');
-      } finally {
-        if (mounted) setLoading(false);
+      } catch {
+        // Endpoint not ready / network error — show zeroed defaults, no banner
+        if (!mounted) return;
       }
+
+      // ── recent files (non-blocking) ──
+      try {
+        const files = await workspaceApi.getRecentFiles(20);
+        if (!mounted) return;
+        setRecentFiles(normalizeRecentFiles(files).slice(0, 5));
+      } catch {
+        // Endpoint not ready / network error — show empty list, no banner
+        if (!mounted) return;
+      }
+
+      if (mounted) setLoading(false);
     };
 
     load();
@@ -290,11 +310,22 @@ const ProductivityDashboard = () => {
 
       if (justFinished) {
         completionVersionRef.current = snap.completionVersion;
+        alarmFiredRef.current = false; // reset guard for this new completion
+
         setSessionBanner('Focus Session Completed');
         setSessionStatus('Nice work. Your completed session has been saved.');
         setSavingSession(false);
-        if (!alarmRef.current) alarmRef.current = createAlarm();
-        alarmRef.current?.play?.().catch(() => {});
+
+        // Play alarm exactly once per completion.
+        // alarmRef is guaranteed to exist because startTimer() always
+        // creates it during the user-gesture click, which keeps the
+        // AudioContext in a non-suspended state.
+        if (alarmRef.current && !alarmFiredRef.current) {
+          alarmFiredRef.current = true;
+          alarmRef.current.play().catch((err) => {
+            console.warn('Pomodoro alarm failed to play:', err);
+          });
+        }
       }
     });
 
@@ -305,12 +336,20 @@ const ProductivityDashboard = () => {
   // ── Timer controls ───────────────────────────
   const startTimer = async () => {
     if (isRunning) return;
-    if (!alarmRef.current) alarmRef.current = createAlarm();
+
+    // Always (re-)create the alarm here, inside the user-gesture handler.
+    // This ensures the AudioContext is created with autoplay permission
+    // granted, avoiding the browser's suspended-context restriction.
+    alarmRef.current = createAlarm();
+    alarmFiredRef.current = false;
+
+    // Warm up the AudioContext immediately (some browsers need this).
     try {
       if (alarmRef.current?.audioContext?.state === 'suspended') {
         await alarmRef.current.audioContext.resume();
       }
-    } catch {}
+    } catch { /* non-critical */ }
+
     pomodoroTimer.setFocusMinutes(Number(focusMinutes) || DEFAULT_MINUTES);
     setSessionBanner('');
     setSessionStatus('');

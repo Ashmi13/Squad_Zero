@@ -783,6 +783,7 @@ async def delete_note(note_id: str):
 # ─────────────────────────────────────────────────────────────
 
 @router.get("/documents/{filename}")
+@router.head("/documents/{filename}")
 async def serve_document(filename: str):
     """
     Returns the actual PDF file.

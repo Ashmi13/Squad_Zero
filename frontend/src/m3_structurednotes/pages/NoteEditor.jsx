@@ -31,6 +31,35 @@ export default function NoteEditor() {
   const [noteContent, setNoteContent] = useState('')
   const [sourceFiles, setSourceFiles] = useState([])
   const [activeFile, setActiveFile] = useState(null)
+  const [pdfError, setPdfError] = useState(false)
+  const [checkingPdf, setCheckingPdf] = useState(false)
+
+  useEffect(() => {
+    if (!activeFile) {
+      setPdfError(false)
+      return
+    }
+    const url = getFullPdfUrl(activeFile)
+    if (!url) {
+      setPdfError(true)
+      return
+    }
+    setCheckingPdf(true)
+    setPdfError(false)
+    
+    axios.head(url)
+      .then(() => {
+        setPdfError(false)
+      })
+      .catch((err) => {
+        console.error('[PDF] Verification HEAD request failed:', err)
+        setPdfError(true)
+      })
+      .finally(() => {
+        setCheckingPdf(false)
+      })
+  }, [activeFile])
+
   const [sourceVisible, setSourceVisible] = useState(false)
   const [editorWidth, setEditorWidth] = useState(50)
   const [searchTerm, setSearchTerm] = useState('')
@@ -962,6 +991,7 @@ export default function NoteEditor() {
 <html>
 <head>
 <meta charset="UTF-8">
+<base href="${window.location.origin}/">
 <title>${noteTitle || 'Study Notes'}</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" crossorigin="anonymous">
 <style>
@@ -1007,6 +1037,14 @@ pre { background: #1e1e2e; color: #cdd6f4;
       padding: 14px; border-radius: 8px;
       font-size: 12px; white-space: pre-wrap;
       margin: 12px 0; }
+pre code { background: none !important; padding: 0 !important; border-radius: 0 !important; color: inherit !important; }
+img, .slide-image, .diagram {
+  max-width: 100% !important;
+  width: auto !important;
+  height: auto !important;
+  display: block;
+  margin: 12px auto;
+}
 blockquote { border-left: 4px solid #7C3AED;
              padding-left: 14px; color: #5F5E5A;
              margin: 12px 0; font-style: italic; }
@@ -1429,6 +1467,15 @@ ${bodyHtml}
       margin: 14px 0;
     }
 
+    .note-editor-body pre code {
+      background: none !important;
+      padding: 0 !important;
+      border-radius: 0 !important;
+      color: inherit !important;
+      font-size: inherit !important;
+      font-family: inherit !important;
+    }
+
     .note-editor-body blockquote {
       display: block !important;
       border-left: 4px solid #7C3AED;
@@ -1585,31 +1632,60 @@ ${bodyHtml}
               </select>
               <button onClick={() => setSourceVisible(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', color: 'var(--color-text-secondary)' }}>✕</button>
             </div>
-            <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', height: '100%' }}>
               {activeFile ? (
-                <iframe
-                  className="source-iframe"
-                  key={activeFile.pdf_id}
-                  src={getFullPdfUrl(activeFile)}
-                  style={{
-                    width: '100%',
-                    height: '100%',
-                    border: 'none'
-                  }}
-                  title={activeFile.filename || 'Source'}
-                  onLoad={(e) => {
-                    console.log(
-                      '[iframe] Loaded:',
-                      e.target.src
-                    )
-                  }}
-                  onError={(e) => {
-                    console.error(
-                      '[iframe] Failed to load:',
-                      e.target.src
-                    )
-                  }}
-                />
+                checkingPdf ? (
+                  <div style={{
+                    padding: '40px 20px',
+                    fontSize: '14px',
+                    color: 'var(--color-text-secondary)',
+                    textAlign: 'center'
+                  }}>
+                    Loading document viewer...
+                  </div>
+                ) : pdfError ? (
+                  <div style={{
+                    padding: '40px 20px',
+                    fontSize: '14px',
+                    color: '#c41a16',
+                    textAlign: 'center',
+                    background: '#fff5f5',
+                    border: '1px solid #fecaca',
+                    borderRadius: '8px',
+                    margin: '20px'
+                  }}>
+                    <div style={{ fontSize: '20px', marginBottom: '8px' }}>⚠️</div>
+                    <strong>Original PDF unavailable</strong>
+                    <div style={{ fontSize: '12px', marginTop: '6px', color: '#7f1d1d' }}>
+                      The source document file could not be retrieved from the server.
+                    </div>
+                  </div>
+                ) : (
+                  <iframe
+                    className="source-iframe"
+                    key={activeFile.pdf_id}
+                    src={getFullPdfUrl(activeFile)}
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      border: 'none'
+                    }}
+                    title={activeFile.filename || 'Source'}
+                    onLoad={(e) => {
+                      console.log(
+                        '[iframe] Loaded:',
+                        e.target.src
+                      )
+                    }}
+                    onError={(e) => {
+                      console.error(
+                        '[iframe] Failed to load:',
+                        e.target.src
+                      )
+                      setPdfError(true)
+                    }}
+                  />
+                )
               ) : (
                 <div style={{
                   padding: '20px',

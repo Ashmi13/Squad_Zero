@@ -670,6 +670,36 @@ class WorkspaceService:
             if folder_id and not self._files_has_folder_id:
                 rows = [row for row in rows if self._row_matches_folder(row, folder_id)]
 
+            # Fetch notes from supabase notes table
+            try:
+                notes_query = self.supabase.table("notes").select("note_id, title, folder_id, created_at, updated_at, note_type")
+                if folder_id:
+                    notes_query = notes_query.eq("folder_id", folder_id)
+                notes_query = notes_query.eq("user_id", user_id)
+                notes_response = notes_query.execute()
+                notes_rows = notes_response.data or []
+                
+                normalized_notes = []
+                for n in notes_rows:
+                    note_type = (n.get("note_type") or "note").upper()
+                    normalized_notes.append({
+                        "id": n.get("note_id"),
+                        "name": n.get("title") or "Untitled Note",
+                        "original_filename": n.get("title") or "Untitled Note",
+                        "folder_id": n.get("folder_id"),
+                        "parent_file_id": None,
+                        "created_at": n.get("created_at"),
+                        "updated_at": n.get("updated_at"),
+                        "file_type": note_type,
+                        "mime_type": "text/markdown",
+                        "storage_url": "",
+                        "storage_path": "",
+                        "is_note": True,
+                    })
+                rows.extend(normalized_notes)
+            except Exception as notes_err:
+                logger.warning("Failed fetching notes in list_files: %s", notes_err)
+
             return {"files": rows}
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"Failed to fetch files: {exc}") from exc

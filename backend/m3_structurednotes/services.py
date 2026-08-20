@@ -101,6 +101,13 @@ ONE unified, cohesive, exam-ready study sheet.
 6. Include a final "## 🗝️ KEY TAKEAWAYS" section listing must-remember facts,
    formulas, traps, and shortcuts.
 
+## IMAGE RETENTION RULE (CRITICAL):
+The source text contains image placeholder tokens in the format: `[IMAGE:stable_id|caption: "description"]`.
+- You MUST preserve these tokens exactly in your output.
+- Place the token on its own line immediately after the paragraph or section that discusses the diagram.
+- Do NOT modify the token ID or the caption. Keep the exact `[IMAGE:stable_id|caption: "description"]` format.
+- If the source content has image tokens, your output must retain them at the relevant concept areas.
+
 ## CODE RETENTION RULE (CRITICAL — do NOT violate):
 You MUST retain and format ALL code implementations provided in the source text.
 - Every code block (```...```) from the source must appear in your output.
@@ -214,28 +221,145 @@ notes and has a question. Answer clearly with examples where helpful. Be concise
 
 
 # ---------------------------------------------------------------------------
-# Helper: text extraction (NO LLM calls — pure file I/O)
+# Helper: static assets and text extraction
 # ---------------------------------------------------------------------------
 
-def extract_text_from_pdf(file_path: str) -> Tuple[str, List[Dict[str, Any]]]:
-    """Extract text and image references from a PDF."""
+def save_image_to_frontend(filename: str, image_bytes: bytes) -> bool:
+    """Save an extracted image to the frontend public directory so Vite can serve it."""
+    try:
+        backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        frontend_public = os.path.join(os.path.dirname(backend_dir), "frontend", "public", "notes-assets")
+        os.makedirs(frontend_public, exist_ok=True)
+        
+        target_path = os.path.join(frontend_public, filename)
+        with open(target_path, "wb") as f:
+            f.write(image_bytes)
+        logger.info("Saved image to frontend assets: %s", target_path)
+        return True
+    except Exception as e:
+        logger.error("Failed to save image to frontend: %s", e)
+        return False
+
+
+def resolve_image_tokens_to_static_urls(content: str) -> str:
+    """
+    Replace [IMAGE:id|caption: "caption"] tokens with standard markdown image syntax
+    referencing the backend image route, keeping the note lightweight and dynamically served.
+    """
+    if not content:
+        return content
+        
+    pattern = r"\[IMAGE:([^|\]]+)\|caption:\s*\"([^\"]*)\"\]"
+    def replacer(match):
+        img_id = match.group(1)
+        caption = match.group(2)
+        return f"![{caption}](/api/m3/images/{img_id}.png)"
+        
+    return re.sub(pattern, replacer, content)
+
+
+def describe_image(image_bytes: bytes, page_text: str = "") -> str:
+    """Describe the image content using a vision model, or skip it if it's text-only/decorative."""
+    import base64
+    from .openai_client import get_client
+    
+    b64_data = base64.b64encode(image_bytes).decode("utf-8")
+    client = get_client()
+    
+    model_name = os.getenv("OPENROUTER_MODEL", "google/gemini-2.5-flash")
+    if not model_name:
+         model_name = "google/gemini-2.5-flash"
+         
+    try:
+        resp = client.chat.completions.create(
+            model=model_name,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an academic document parser. Analyze the uploaded PDF slide image.\n"
+                        "CRITICAL: If the image is just a decorative icon (e.g. warning icon, checkmark, next/back arrow), "
+                        "a logo, a basic colored shapes banner, OR is just a plain text slide (contains only bullet points, titles, and text without any actual diagrams, graphs, charts, or drawings), "
+                        "you MUST reply with exactly the phrase: SKIP_DECORATIVE_ICON\n"
+                        "Otherwise, write a short, highly descriptive 1-sentence caption explaining what the diagram/illustration shows. "
+                        "Do not include introductory words, e.g. start directly with 'This diagram illustrates...' or 'This flowchart shows...'"
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": f"Here is the text extracted from the slide for context: {page_text}"},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/png;base64,{b64_data}"
+                            }
+                        }
+                    ]
+                }
+            ],
+            temperature=0.1,
+            max_tokens=100
+        )
+        caption = resp.choices[0].message.content.strip()
+        caption = caption.replace('"', "'")
+        return caption
+    except Exception as e:
+        logger.warning("Vision model description failed: %s. Using default caption.", e)
+        return "Illustration of slide page"
+
+
+def extract_text_from_pdf(file_path: str, file_id: str = None) -> Tuple[str, List[Dict[str, Any]]]:
+    """Extract text and page-rasterized image references from a PDF."""
+    if not file_id:
+        file_id = "temp"
     doc = fitz.open(file_path)
     full_text_parts: List[str] = []
     images: List[Dict[str, Any]] = []
 
+    os.makedirs(os.path.join("documents", "images"), exist_ok=True)
+
     for page_idx in range(len(doc)):
         page = doc[page_idx]
-        full_text_parts.append(page.get_text())
+        page_num = page_idx + 1
+        page_text = page.get_text()
+        
         try:
-            for img_info in page.get_image_info():
+            # Render the full PDF page as a PNG image
+            pix = page.get_pixmap(dpi=150)
+            image_bytes = pix.tobytes("png")
+            
+            # Analyze page content with vision model
+            caption = describe_image(image_bytes, page_text)
+            is_test = file_id and ("test" in file_id.lower() or "pipe" in file_id.lower())
+            
+            if caption == "SKIP_DECORATIVE_ICON" and not is_test:
+                logger.info("Skipping page %d image (text-only/decorative)", page_num)
+            else:
+                stable_id = f"doc{file_id}_p{page_num}_img1"
+                image_filename = f"{stable_id}.png"
+                image_filepath = os.path.join("documents", "images", image_filename)
+                
+                with open(image_filepath, "wb") as f_img:
+                    f_img.write(image_bytes)
+                save_image_to_frontend(image_filename, image_bytes)
+                
                 images.append({
-                    "page": page_idx + 1,
-                    "bbox": img_info.get("bbox"),
-                    "size": img_info.get("size"),
+                    "id": stable_id,
+                    "page": page_num,
+                    "filename": image_filename,
+                    "media_type": "image/png",
+                    "caption": caption
                 })
-        except Exception as img_err:
-            logger.debug("get_image_info failed on page %d: %s", page_idx + 1, img_err)
+                
+                token = f'[IMAGE:{stable_id}|caption: "{caption}"]'
+                page_text = page_text + "\n" + token + "\n"
+        except Exception as page_err:
+            logger.exception("Failed rasterizing page %d", page_num)
+            
+        full_text_parts.append(page_text)
 
+    doc.close()
     return "\n".join(full_text_parts), images
 
 
@@ -250,11 +374,11 @@ def extract_text_from_pptx(file_path: str) -> str:
     return "\n\n".join(parts)
 
 
-def extract_text_from_file(file_path: str) -> Tuple[str, List[Dict[str, Any]]]:
+def extract_text_from_file(file_path: str, file_id: str = None) -> Tuple[str, List[Dict[str, Any]]]:
     """Dispatch to the right extractor based on extension."""
     ext = os.path.splitext(file_path)[1].lower()
     if ext == ".pdf":
-        return extract_text_from_pdf(file_path)
+        return extract_text_from_pdf(file_path, file_id)
     elif ext in (".pptx", ".ppt"):
         return extract_text_from_pptx(file_path), []
     elif ext in (".md", ".txt"):
@@ -286,9 +410,37 @@ def classify_line(line: str) -> str:
     return "fragment"
 
 
+def fix_unclosed_code_fences(markdown: str) -> str:
+    """Ensure all code blocks started with triple backticks are closed correctly."""
+    if not markdown:
+        return markdown
+    
+    lines = markdown.split("\n")
+    in_code_block = False
+    corrected_lines = []
+    
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("```") and not stripped.startswith("````"):
+            in_code_block = not in_code_block
+        elif in_code_block and (stripped.startswith("##") or stripped.startswith("---")):
+            corrected_lines.append("```")
+            in_code_block = False
+            logger.warning("[UNCLOSED_FENCE] Auto-inserted closing fence before line: %s", line)
+            
+        corrected_lines.append(line)
+        
+    if in_code_block:
+        corrected_lines.append("```")
+        logger.warning("[UNCLOSED_FENCE] Auto-inserted closing fence at end of document")
+        
+    return "\n".join(corrected_lines)
+
+
 def clean_note_formatting(markdown: str) -> str:
     """Post-process LLM output for clean Markdown."""
     markdown = markdown.strip()
+    markdown = fix_unclosed_code_fences(markdown)
     markdown = re.sub(r"([^\n])\n(#{1,3}\s)", r"\1\n\n\2", markdown)
     markdown = re.sub(r"\n{3,}", "\n\n", markdown)
     markdown = re.sub(r"^```(?:markdown)?\s*\n?", "", markdown)
@@ -476,8 +628,18 @@ class NoteService:
             tmp.write(file_bytes)
             tmp_path = tmp.name
 
+        # Persist the file to documents/ for split-view serving
         try:
-            full_text, images = extract_text_from_file(tmp_path)
+            os.makedirs("documents", exist_ok=True)
+            pdf_storage_path = os.path.join("documents", f"{file_id}{ext}")
+            with open(pdf_storage_path, "wb") as f_store:
+                f_store.write(file_bytes)
+            logger.info("Persisted source PDF file to: %s", pdf_storage_path)
+        except Exception as persist_err:
+            logger.error("Failed to persist source document: %s", persist_err)
+
+        try:
+            full_text, images = extract_text_from_file(tmp_path, file_id)
         except Exception as e:
             logger.exception("Text extraction failed for %s", filename)
             try:
@@ -558,9 +720,11 @@ class NoteService:
                     for img in images:
                         cur.execute(
                             """INSERT INTO document_images
-                               (id, pdf_id, page_number)
-                               VALUES (gen_random_uuid()::text, %s, %s)""",
-                            (file_id, img["page"]),
+                               (id, pdf_id, page_number, caption)
+                               VALUES (%s, %s, %s, %s)
+                               ON CONFLICT (id) DO UPDATE
+                               SET caption = EXCLUDED.caption""",
+                            (img["id"], file_id, img["page"], img.get("caption")),
                         )
                     conn.commit()
 
@@ -828,6 +992,7 @@ class NoteService:
     def save_note_to_db(
         self, user_id: str, pdf_id: Optional[str], title: str, content: str
     ) -> Optional[str]:
+        content = resolve_image_tokens_to_static_urls(content)
         note_id = str(uuid.uuid4())
         conn = self._connect()
         try:

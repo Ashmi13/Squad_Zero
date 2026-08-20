@@ -126,3 +126,9 @@ __pycache__/
 
 # History files
 .history/
+
+# Temporary testing documents and generated assets
+documents/
+frontend/public/notes-assets/
+*.pdf
+backend/*.pdf

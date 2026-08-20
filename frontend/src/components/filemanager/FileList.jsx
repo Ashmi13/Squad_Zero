@@ -298,16 +298,20 @@ const FileList = ({ selectedFolder, files, onSelectFile, onFilesUpdate }) => {
 
     try {
       const targetFile = findFileInTreeById(folderFiles, fileId);
-      await workspaceApi.deleteFile(fileId);
-      await removeFileFromLocalFolder(
-        {
-          ...selectedFolder,
-          name: targetFile?.name,
-          originalFilename: targetFile?.originalFilename,
-          original_filename: targetFile?.originalFilename,
-        },
-        targetFile?.originalFilename || targetFile?.name,
-      );
+      if (targetFile?.is_note || targetFile?.type === 'NOTE') {
+        await workspaceApi.deleteNote(fileId);
+      } else {
+        await workspaceApi.deleteFile(fileId);
+        await removeFileFromLocalFolder(
+          {
+            ...selectedFolder,
+            name: targetFile?.name,
+            originalFilename: targetFile?.originalFilename,
+            original_filename: targetFile?.originalFilename,
+          },
+          targetFile?.originalFilename || targetFile?.name,
+        );
+      }
       await loadFiles();
       window.dispatchEvent(new Event('neuranote:files-updated'));
     } catch (err) {

@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import os
 import uuid
+import logging
 from datetime import datetime, timezone
 from io import BytesIO
 from typing import Any, Dict, List, Optional, Tuple
@@ -26,6 +27,8 @@ _COLUMNS_CACHE: Dict[str, Optional[bool]] = {}
 _PARENT_COLUMN_CACHE: Optional[str] = None
 _COLUMNS_DETECTED: bool = False
 _BUCKET_REGION_CACHE: Dict[str, str] = {}
+
+logger = logging.getLogger(__name__)
 
 
 class WorkspaceService:
@@ -764,17 +767,34 @@ class WorkspaceService:
 
     def get_storage_usage(self, user_id: str) -> Dict[str, Any]:
         """Return the authenticated user's plan and current file storage usage."""
-        free_limit_bytes = 209715200
         plan_code = "free"
         plan_name = "Free"
-        storage_limit_bytes = free_limit_bytes
+        storage_limit_bytes = 0
+        subscription = None
 
         try:
+            free_plan_response = (
+                self.supabase.table("plans")
+                .select("code,name,storage_limit_bytes")
+                .eq("code", "free")
+                .limit(1)
+                .execute()
+            )
+            free_plan = (free_plan_response.data or [None])[0]
+            if free_plan:
+                plan_code = free_plan.get("code") or plan_code
+                plan_name = free_plan.get("name") or plan_name
+                storage_limit_bytes = int(free_plan.get("storage_limit_bytes") or 0)
+
+            now = datetime.now(timezone.utc).isoformat()
             subscription_response = (
                 self.supabase.table("subscriptions")
-                .select("plan_id")
+                .select("plan_id,status,starts_at,expires_at,provider_reference")
                 .eq("user_id", user_id)
                 .eq("status", "active")
+                .lte("starts_at", now)
+                .gt("expires_at", now)
+                .order("expires_at", desc=True)
                 .limit(1)
                 .execute()
             )
@@ -792,23 +812,13 @@ class WorkspaceService:
                 if plan:
                     plan_code = plan.get("code") or plan_code
                     plan_name = plan.get("name") or plan_name
-                    storage_limit_bytes = int(plan.get("storage_limit_bytes") or free_limit_bytes)
-            else:
-                free_plan_response = (
-                    self.supabase.table("plans")
-                    .select("code,name,storage_limit_bytes")
-                    .eq("code", "free")
-                    .limit(1)
-                    .execute()
-                )
-                free_plan = (free_plan_response.data or [None])[0]
-                if free_plan:
-                    plan_code = free_plan.get("code") or plan_code
-                    plan_name = free_plan.get("name") or plan_name
-                    storage_limit_bytes = int(free_plan.get("storage_limit_bytes") or free_limit_bytes)
+                    storage_limit_bytes = int(plan.get("storage_limit_bytes") or storage_limit_bytes)
         except Exception:
-            # Plan lookup must not prevent a user from seeing Free-plan usage.
-            pass
+            # Plan lookup must not prevent a user from seeing Free-plan usage,
+            # but log it so missing plans/subscriptions tables are visible instead
+            # of silently degrading every user to Free (root cause of the
+            # "payment completes but plan stays free" bug).
+            logger.exception("[PLANS] Plan/subscription lookup failed; defaulting to Free plan")
 
         try:
             self._detect_files_columns()
@@ -833,11 +843,16 @@ class WorkspaceService:
         bytes_per_gb = 1024 * bytes_per_mb
 
         return {
+            "is_pro": plan_code.lower() == "pro",
             "plan_code": plan_code,
             "plan_name": plan_name,
             "storage_limit_bytes": storage_limit_bytes,
             "storage_used_bytes": storage_used_bytes,
             "storage_remaining_bytes": storage_remaining_bytes,
+            "subscription_status": "active" if subscription else "inactive",
+            "subscription_starts_at": subscription.get("starts_at") if subscription else None,
+            "subscription_expires_at": subscription.get("expires_at") if subscription else None,
+            "provider_reference": subscription.get("provider_reference") if subscription else None,
             "storage_limit_mb": round(storage_limit_bytes / bytes_per_mb, 2),
             "storage_limit_gb": round(storage_limit_bytes / bytes_per_gb, 2),
             "storage_used_mb": round(storage_used_bytes / bytes_per_mb, 2),

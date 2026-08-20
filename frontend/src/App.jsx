@@ -18,6 +18,7 @@ import ChangePassword from '@/pages/ChangePassword';
 import AccountVerification from '@/pages/AccountVerification';
 import OAuthCallback from '@/pages/OAuthCallback';
 import AdminDashboard from '@/pages/AdminDashboard';
+import PaymentResultPage from '@/pages/PaymentResultPage';
 
 // ===== MEMBER 2 (Ashmitha) - File Manager =====
 import FileManagerPage from '@/pages/FileManagerPage';
@@ -69,7 +70,7 @@ const PageLoader = () => (
   </div>
 );
 
-// Pages that should NOT show the Rail/FolderPanel (auth + landing flows)
+// Unified list of pages that should NOT show the Rail/FolderPanel
 const noRailPages = [
   '/',
   '/login',
@@ -81,6 +82,8 @@ const noRailPages = [
   '/account-verified',
   '/oauth/callback',
   '/account-suspended',
+  '/payment/success',
+  '/payment/cancel',
 ];
 
 const AppLayout = () => {
@@ -284,6 +287,8 @@ const AppLayout = () => {
             <Route path="/oauth/callback" element={<OAuthCallback />} />
             <Route path="/account-suspended" element={<AccountSuspendedPage />} />
             <Route path="/admin" element={<AdminDashboard />} />
+            <Route path="/payment/success" element={<PaymentResultPage />} />
+            <Route path="/payment/cancel" element={<PaymentResultPage cancelled />} />
 
             {/* Member 2 - File Manager */}
             <Route path="/dashboard" element={
@@ -308,7 +313,7 @@ const AppLayout = () => {
             <Route path="/pomodoro" element={<PomodoroPage />} />
             <Route path="/flashcards" element={<FlashcardsPage />} />
             <Route path="/second-brain" element={<SecondBrainPage />} />
-            <Route path="/mindmap"      element={<MindMapPage />} />
+            <Route path="/mindmap"       element={<MindMapPage />} />
 
             {/* Fallback */}
             <Route path="*" element={<Navigate to="/" replace />} />

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import uuid
+import logging
 from datetime import datetime, timezone
 from io import BytesIO
 from urllib.parse import quote, unquote, urlparse
@@ -22,6 +23,8 @@ _COLUMNS_CACHE: Dict[str, Optional[bool]] = {}
 _PARENT_COLUMN_CACHE: Optional[str] = None
 _COLUMNS_DETECTED: bool = False
 _BUCKET_REGION_CACHE: Dict[str, str] = {}
+
+logger = logging.getLogger(__name__)
 
 
 class WorkspaceService:
@@ -801,8 +804,11 @@ class WorkspaceService:
                     plan_name = plan.get("name") or plan_name
                     storage_limit_bytes = int(plan.get("storage_limit_bytes") or storage_limit_bytes)
         except Exception:
-            # Plan lookup must not prevent a user from seeing Free-plan usage.
-            pass
+            # Plan lookup must not prevent a user from seeing Free-plan usage,
+            # but log it so missing plans/subscriptions tables are visible instead
+            # of silently degrading every user to Free (root cause of the
+            # "payment completes but plan stays free" bug).
+            logger.exception("[PLANS] Plan/subscription lookup failed; defaulting to Free plan")
 
         try:
             self._detect_files_columns()

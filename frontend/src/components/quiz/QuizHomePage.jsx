@@ -220,13 +220,6 @@ const QuizHomePage = ({
         className="quiz-main-content"
         style={isGenerating ? { filter: 'blur(3px)', pointerEvents: 'none', userSelect: 'none' } : {}}
       >
-        {!isAuthenticated() && (
-          <div className="guest-banner">
-            <span>👋 You're using NeuraNote as a guest.</span>
-            <span>Your quiz history will be cleared when you close this tab.</span>
-            <a href="/login" className="guest-banner-link">Sign in to save your progress →</a>
-          </div>
-        )}
         <div className="upload-header">
           <div className="header-icon"><Sparkles size={28} /></div>
           <div>

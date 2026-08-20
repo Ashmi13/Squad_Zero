@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useTheme } from '../../context/ThemeContext';
 import { Box, Paper, CircularProgress, Typography, IconButton } from '@mui/material';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
@@ -9,6 +9,7 @@ import MiniCalendar from './MiniCalendar';
 import ExpandedCalendar from './ExpandedCalendar';
 import CategoryModal from './CategoryModal';
 import AddTaskModal from './AddTaskModal';
+import ConfirmDialog from '../common/ConfirmDialog';
 import axiosInstance from '@/lib/axios';
 import { TaskIcon } from './taskIcons';
 
@@ -33,6 +34,18 @@ export default function TaskDashboard() {
   const [editingCategory,  setEditingCategory]  = useState(null);
   const [taskModal,        setTaskModal]        = useState(false);
   const [editingTask,      setEditingTask]       = useState(null);
+
+  // ── confirm dialog state ──
+  const [confirm, setConfirm] = useState({
+    open: false,
+    type: 'danger',
+    title: '',
+    message: '',
+    confirmLabel: 'Delete',
+    onConfirm: () => {},
+  });
+  const closeConfirm = () => setConfirm(prev => ({ ...prev, open: false }));
+  const openConfirm = (opts) => setConfirm({ open: true, cancelLabel: 'Cancel', ...opts, onCancel: closeConfirm });
 
   useEffect(() => { init(); }, []);
 
@@ -129,7 +142,7 @@ export default function TaskDashboard() {
     } catch (e) { console.error(e); }
   };
 
-  const handleDeleteCategory = async (catId) => {
+  const doDeleteCategory = async (catId) => {
     try {
       await axiosInstance.delete(`/api/v1/tasks/categories/${catId}`);
       const remaining = categories.filter(c => c.id !== catId);
@@ -137,6 +150,17 @@ export default function TaskDashboard() {
       setTasksByCategory(prev => { const n = { ...prev }; delete n[catId]; return n; });
       setActiveCategory(remaining[0]?.id || null);
     } catch (e) { console.error(e); }
+  };
+
+  const handleDeleteCategory = (catId) => {
+    const cat = categories.find(c => c.id === catId);
+    openConfirm({
+      title: 'Delete list?',
+      message: `Are you sure you want to delete "${cat?.name || 'this list'}" and all its tasks?`,
+      type: 'danger',
+      confirmLabel: 'Delete List',
+      onConfirm: () => { closeConfirm(); doDeleteCategory(catId); },
+    });
   };
 
   // --- task handlers ---
@@ -178,7 +202,7 @@ export default function TaskDashboard() {
     } catch (e) { console.error(e); }
   };
 
-  const handleDeleteTask = async (taskId) => {
+  const doDeleteTask = async (taskId) => {
     try {
       await axiosInstance.delete(`/api/v1/tasks/${taskId}`);
       setTasksByCategory(prev => {
@@ -187,6 +211,23 @@ export default function TaskDashboard() {
         return n;
       });
     } catch (e) { console.error(e); }
+  };
+
+  // With confirmation dialog for task deletion
+  const handleDeleteTask = (taskId) => {
+    // find the task title for the confirm message
+    let taskTitle = 'this task';
+    for (const tasks of Object.values(tasksByCategory)) {
+      const found = tasks.find(t => t.id === taskId);
+      if (found) { taskTitle = found.title; break; }
+    }
+    openConfirm({
+      title: 'Delete task?',
+      message: `Are you sure you want to delete "${taskTitle}"? This cannot be undone.`,
+      type: 'danger',
+      confirmLabel: 'Delete Task',
+      onConfirm: () => { closeConfirm(); doDeleteTask(taskId); },
+    });
   };
 
   // --- calendar handlers ---
@@ -198,11 +239,22 @@ export default function TaskDashboard() {
     } catch (e) { console.error(e); }
   };
 
-  const handleDeleteEvent = async (eventId) => {
+  const doDeleteEvent = async (eventId) => {
     try {
       await axiosInstance.delete(`/api/v1/calendar/events/${eventId}`);
       setCalendarEvents(prev => prev.filter(e => e.id !== eventId));
     } catch (e) { console.error(e); }
+  };
+
+  const handleDeleteEvent = (eventId) => {
+    const event = calendarEvents.find(e => e.id === eventId);
+    openConfirm({
+      title: 'Delete event?',
+      message: `Are you sure you want to delete "${event?.title || 'this event'}"?`,
+      type: 'danger',
+      confirmLabel: 'Delete Event',
+      onConfirm: () => { closeConfirm(); doDeleteEvent(eventId); },
+    });
   };
 
   const handleUpdateEvent = async (eventId, eventData) => {
@@ -322,6 +374,18 @@ export default function TaskDashboard() {
         categories={categories}
         defaultCategory={activeCat}
         initial={editingTask}
+      />
+
+      {/* ── confirmation dialog ── */}
+      <ConfirmDialog
+        isOpen={confirm.open}
+        title={confirm.title}
+        message={confirm.message}
+        type={confirm.type}
+        confirmLabel={confirm.confirmLabel}
+        cancelLabel={confirm.cancelLabel}
+        onConfirm={confirm.onConfirm}
+        onCancel={confirm.onCancel}
       />
     </Box>
   );

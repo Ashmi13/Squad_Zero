@@ -1,6 +1,6 @@
 """Public announcement endpoints"""
-from fastapi import APIRouter, Depends, HTTPException
-from typing import List, Dict, Any
+from fastapi import APIRouter, Depends
+from typing import List
 from supabase import Client
 from app.api.deps import get_supabase_service_client, get_current_user_id
 from app.schemas.announcements import (
@@ -22,7 +22,8 @@ async def list_announcements(
         .order("created_at", desc=True)
         .execute()
     )
-
+    
+    # Normalize response shape to match schema
     data = []
     for row in (response.data or []):
         data.append({
@@ -32,7 +33,7 @@ async def list_announcements(
             "type": row.get("type", "info"),
             "created_at": row.get("created_at"),
             "updated_at": row.get("updated_at"),
-            "created_by": str(row.get("created_by", ""))
+            "created_by": str(row.get("created_by", "")),
         })
 
     return data
@@ -44,7 +45,9 @@ async def get_announcement_status(
     supabase_client: Client = Depends(get_supabase_service_client),
 ):
     """Get per-user read/unread announcement status."""
-    all_announcements = supabase_client.table("announcements").select("id").execute()
+    all_announcements = (
+        supabase_client.table("announcements").select("id").execute()
+    )
     total_announcements = len(all_announcements.data or [])
 
     read_rows = (
@@ -86,17 +89,15 @@ async def list_announcements_with_status(
 
     announcements = []
     for row in (announcements_response.data or []):
-        announcements.append(
-            {
-                "id": row.get("id"),
-                "title": row.get("title", ""),
-                "content": row.get("content", ""),
-                "type": row.get("type", "info"),
-                "created_at": row.get("created_at"),
-                "updated_at": row.get("updated_at"),
-                "created_by": str(row.get("created_by", "")),
-            }
-        )
+        announcements.append({
+            "id": row.get("id"),
+            "title": row.get("title", ""),
+            "content": row.get("content", ""),
+            "type": row.get("type", "info"),
+            "created_at": row.get("created_at"),
+            "updated_at": row.get("updated_at"),
+            "created_by": str(row.get("created_by", "")),
+        })
 
     read_rows = (
         supabase_client.table("user_announcement_status")

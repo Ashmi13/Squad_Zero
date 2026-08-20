@@ -1,7 +1,6 @@
 """FastAPI v1 API router"""
 from fastapi import APIRouter
-from app.api.v1.endpoints import auth
-from app.api.v1.endpoints import payments
+from app.api.v1.endpoints import auth, payments, user
 
 def _safe_import(module_path: str, label: str):
     """Import a route module without breaking unrelated routes on failure."""
@@ -12,7 +11,6 @@ def _safe_import(module_path: str, label: str):
     except Exception as e:
         print(f"[WARN] Skipped {label} routes: {e}")
         return None
-
 
 files = _safe_import("routes.files", "files")
 summary = _safe_import("routes.summary", "summary")
@@ -30,7 +28,7 @@ try:
     from app.api.v1.endpoints import tasks as tasks_endpoints
     _tasks_loaded = True
 except Exception as e:
-    print(f"[WARN] tasks endpoint skipped: {e}")
+    print(f"⚠️ tasks endpoint skipped: {e}")
 
 try:
     from app.api.v1.endpoints import calendar as calendar_endpoints
@@ -43,8 +41,10 @@ router = APIRouter()
 @router.get("/health")
 async def health_check():
     return {"status": "ok", "version": "1.0"}
+
 router.include_router(auth.router)
 router.include_router(payments.router)
+router.include_router(user.router)
 
 if _tasks_loaded:
     router.include_router(tasks_endpoints.router)
@@ -55,25 +55,25 @@ if _calendar_loaded:
     print("[OK] Calendar routes loaded")
 
 if files:
-    router.include_router(files.router,        prefix="/files",         tags=["files"])
+    router.include_router(files.router, prefix="/files", tags=["files"])
 
 if workspace:
-    router.include_router(workspace.router,    prefix="/workspace",     tags=["workspace"])
+    router.include_router(workspace.router, prefix="/workspace", tags=["workspace"])
 
 if summary:
-    router.include_router(summary.router,      prefix="/summary",       tags=["summary"])
+    router.include_router(summary.router, prefix="/summary", tags=["summary"])
 
 if highlights:
-    router.include_router(highlights.router,   prefix="/highlights",    tags=["highlights"])
+    router.include_router(highlights.router, prefix="/highlights", tags=["highlights"])
 
 if chat:
-    router.include_router(chat.router,         prefix="/chat",          tags=["chat"])
+    router.include_router(chat.router, prefix="/chat", tags=["chat"])
 
 if admin_alerts:
     router.include_router(admin_alerts.router, prefix="/notifications", tags=["notifications"])
 
 if productivity:
-    router.include_router(productivity.router, prefix="/productivity",  tags=["productivity"])
+    router.include_router(productivity.router, prefix="/productivity", tags=["productivity"])
 
 if pdf:
     router.include_router(pdf.router, prefix="/pdf", tags=["pdf"])
@@ -90,4 +90,4 @@ try:
     router.include_router(admin.router)
     print("[OK] Admin routes loaded")
 except Exception as e:
-    print(f"[WARN] Admin routes skipped: {e}")
+    print(f"⚠️ Admin routes skipped: {e}")

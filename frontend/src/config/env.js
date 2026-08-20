@@ -10,8 +10,10 @@ export const config = {
     register: '/api/v1/auth/signup',
     forgotPassword: '/api/v1/auth/request-password-reset',
     resetPassword: '/api/v1/auth/confirm-password-reset',
+    verificationStatus: '/api/v1/auth/verification-status',
     refreshToken: '/api/v1/auth/refresh-token',
     logout: '/api/v1/auth/logout',
     me: '/api/v1/users/me',
+    suspendedInfo: '/api/v1/auth/suspended-info',
   },
 };

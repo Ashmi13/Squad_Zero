@@ -14,7 +14,15 @@ async function request(path, options = {}) {
     } catch {
       // ignore json parsing errors
     }
-    throw new Error(detail);
+    const message = typeof detail === 'object'
+      ? detail.message || 'Request failed'
+      : detail;
+    const error = new Error(message);
+    if (typeof detail === 'object') {
+      error.code = detail.code;
+      error.expiresAt = detail.expires_at;
+    }
+    throw error;
   }
 
   return res.json();
@@ -54,6 +62,12 @@ export const workspaceApi = {
 
   getStorageUsage() {
     return request('/api/v1/workspace/storage-usage');
+  },
+
+  createPayHereCheckout() {
+    return request('/api/v1/payments/payhere/checkout', {
+      method: 'POST',
+    });
   },
 
   async getRecentFiles(limit = 5) {

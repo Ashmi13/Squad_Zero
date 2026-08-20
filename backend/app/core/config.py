@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     openai_api_key: str = Field(default="", env="OPENAI_API_KEY")
     openrouter_api_key: str = Field(default="", env="OPENROUTER_API_KEY")
 
+    # PayHere — credentials are used only by the backend payment service
+    payhere_merchant_id: Optional[str] = Field(default=None, env="PAYHERE_MERCHANT_ID")
+    payhere_merchant_secret: Optional[str] = Field(default=None, env="PAYHERE_MERCHANT_SECRET")
+    payhere_sandbox: bool = Field(default=True, env="PAYHERE_SANDBOX")
+
     # Cookie
     cookie_name: str = Field(default="session", env="COOKIE_NAME")
     cookie_secure: bool = Field(default=False, env="COOKIE_SECURE")  # False for local dev

@@ -1,6 +1,7 @@
 """FastAPI v1 API router"""
 from fastapi import APIRouter
 from app.api.v1.endpoints import auth
+from app.api.v1.endpoints import payments
 
 def _safe_import(module_path: str, label: str):
     """Import a route module without breaking unrelated routes on failure."""
@@ -43,6 +44,7 @@ router = APIRouter()
 async def health_check():
     return {"status": "ok", "version": "1.0"}
 router.include_router(auth.router)
+router.include_router(payments.router)
 
 if _tasks_loaded:
     router.include_router(tasks_endpoints.router)

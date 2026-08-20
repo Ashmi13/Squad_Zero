@@ -17,6 +17,7 @@ import ChangePassword from '@/pages/ChangePassword';
 import AccountVerification from '@/pages/AccountVerification';
 import OAuthCallback from '@/pages/OAuthCallback';
 import AdminDashboard from '@/pages/AdminDashboard';
+import PaymentResultPage from '@/pages/PaymentResultPage';
 
 // MEMBER 2 (Ashmitha) - File Manager
 import FileManagerPage from '@/pages/FileManagerPage';
@@ -65,7 +66,7 @@ const PageLoader = () => (
 );
 
 // Pages that should NOT show the Rail
-const noRailPages = ['/', '/login', '/signup', '/oauth/callback'];
+const noRailPages = ['/', '/login', '/signup', '/oauth/callback', '/payment/success', '/payment/cancel'];
 
 const AppLayout = () => {
   const location = useLocation();
@@ -211,6 +212,8 @@ const AppLayout = () => {
             <Route path="/account-verified" element={<AccountVerification />} />
             <Route path="/oauth/callback" element={<OAuthCallback />} />
             <Route path="/admin" element={<AdminDashboard />} />
+            <Route path="/payment/success" element={<PaymentResultPage />} />
+            <Route path="/payment/cancel" element={<PaymentResultPage cancelled />} />
 
             {/* Member 2 - File Manager */}
             <Route path="/dashboard" element={

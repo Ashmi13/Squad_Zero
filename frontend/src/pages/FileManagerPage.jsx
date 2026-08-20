@@ -83,7 +83,12 @@ const FileManagerPage = ({ activeView, setActiveView }) => {
   const [folders, setFolders] = useState([]);
 
   const handleSelectFile = (file) => {
-    if (file?.is_note || file?.type === 'NOTE') {
+    const noteTypes = ['NOTE', 'STRUCTURED', 'CHEATSHEET', 'DETAILED'];
+    const isNote = file?.is_note || 
+      noteTypes.includes(file?.type?.toUpperCase()) || 
+      noteTypes.includes(file?.file_type?.toUpperCase());
+
+    if (isNote) {
       navigate(`/notes/editor/${file.id}`);
     } else {
       setSelectedFile(file);

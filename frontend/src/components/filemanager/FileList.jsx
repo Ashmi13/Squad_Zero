@@ -158,6 +158,7 @@ const FileList = ({ selectedFolder, files, onSelectFile, onFilesUpdate }) => {
           mimeType: f.mime_type,
           isParentPDF: computedType === 'PDF',
           backendFile: true,
+          is_note: !!f.is_note,
           children: [],
         };
       });

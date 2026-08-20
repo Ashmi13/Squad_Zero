@@ -13,6 +13,7 @@
  *  - CSS Module classes preserved; new classes added at bottom
  */
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { useSupabaseUser } from '@/hooks/useSupabaseUser';
 import {
   CloudUpload, FolderOpen, Loader2, FileText, X,
   File, CheckCircle2, ChevronRight, ChevronDown,
@@ -113,6 +114,7 @@ function getNotebookNoteContent(note) {
 
 const UploadSection = ({ userId: userIdProp }) => {
   const navigate = useNavigate();
+  const { user, userScope } = useSupabaseUser();
 
   // ── State ──────────────────────────────────────────────────
   const [selectedFiles, setSelectedFiles]     = useState([]);   // Real File objects
@@ -137,6 +139,7 @@ const UploadSection = ({ userId: userIdProp }) => {
 
   // ── Resolve userId ─────────────────────────────────────────
   const userId = userIdProp
+    || userScope
     || localStorage.getItem('neuranote_user_id')
     || localStorage.getItem('user_id')
     || 'guest_user';

@@ -357,10 +357,16 @@ const UploadSection = ({ userId: userIdProp }) => {
       const allPdfIds = successfulUploads.map(f => f.pdf_id);
 
       // Step 3 — Start structured note background job
-      const inputItems = successfulUploads.map(f => ({
-        type: "pdf_id",
-        value: f.pdf_id
-      }));
+      const inputItems = [
+        ...successfulUploads.map(f => ({
+          type: "pdf_id",
+          value: f.pdf_id
+        })),
+        ...workspaceFiles.map(f => ({
+          type: "pdf_id",
+          value: f.id
+        }))
+      ];
 
       const { data: jobData } = await axios.post(`${API_BASE}/generate-structured-note`, {
         input_items: inputItems,

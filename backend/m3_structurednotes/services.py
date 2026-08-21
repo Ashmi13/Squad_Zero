@@ -1055,9 +1055,7 @@ class NoteService:
             tmp.write(file_bytes)
             tmp_path = tmp.name
 
-        try:
-            full_text, images = extract_text_from_file(tmp_path)
-
+        
         # Persist the file to documents/ for split-view serving
         try:
             os.makedirs("documents", exist_ok=True)
@@ -1349,7 +1347,7 @@ class NoteService:
             system=UNIFIED_CHEATSHEET_SYSTEM,
             temperature=0.1,   # very low — maximise factual adherence, minimise creativity
             max_tokens=65536,  # larger budget for full solved exercises + key takeaways
-            max_tokens=8192,   # standard Gemini output token limit for fast routing
+            # standard Gemini output token limit for fast routing
         )
 
         # 6) Clean and return

@@ -120,6 +120,7 @@ const UploadSection = ({ userId: userIdProp }) => {
   // ── State ──────────────────────────────────────────────────
   const [selectedFiles, setSelectedFiles]     = useState([]);   // Real File objects
   const [notebookNotes, setNotebookNotes]     = useState([]);   // { id, name, type, content }
+  const [workspaceFiles, setWorkspaceFiles]   = useState([]);   // { id, name, type }
   const [folders, setFolders]                 = useState([]);
   const [filesByFolder, setFilesByFolder]     = useState({});
   const [expandedFolders, setExpandedFolders] = useState({});
@@ -163,97 +164,91 @@ const UploadSection = ({ userId: userIdProp }) => {
   }, []);
 
   // ── Poll job status ─────────────────────────────────────────
-  const startPolling = useCallback((id, allFiles = []) => {
+  const startPolling = useCallback((id) => {
     const poll = async () => {
       try {
         const { data } = await axios.get(`${API_BASE}/job/${id}/status`);
         setJobStatus(data.status);
 
         if (data.status === 'done') {
-          const noteId = data.note_id
-          console.log('[Poll] Done! noteId:', noteId)
+          const noteId = data.note_id;
           
           if (!noteId || noteId === '...') {
-            console.error('[Poll] Missing note_id!')
-            setErrorMsg('Note generated but ID missing.')
-            setIsProcessing(false)
-            setJobStatus(null)
-            return
+            console.error('[Poll] Missing note_id!');
+            setErrorMsg('Note generated but ID missing.');
+            setIsProcessing(false);
+            setJobStatus(null);
+            return;
           }
           
-          // Store files before navigating
-          if (successfulUploadsRef && 
-              successfulUploadsRef.current) {
-            localStorage.setItem(
-              'currentNoteFiles',
-              JSON.stringify(successfulUploadsRef.current)
-            )
-          }
-          
-          // Navigate with real noteId
-          navigate('/notes/editor/' + noteId)
-          return
-        } else if (data.status === 'failed') {
-          setIsProcessing(false);
-          setErrorMsg(data.error || 'Generation failed. Please try again.');
-
-        } else {
-          // Still running — poll again
-          pollTimerRef.current = setTimeout(poll, POLL_INTERVAL_MS);
+          // Redirect to NoteEditor
+          setTimeout(() => {
+            navigate(`/notes/editor/${noteId}`);
+          }, 1000);
+          return;
         }
+
+        if (data.status === 'failed') {
+          setErrorMsg(data.error || 'Pipeline compilation failed.');
+          setIsProcessing(false);
+          setJobStatus(null);
+          return;
+        }
+
+        // Keep polling
+        pollTimerRef.current = setTimeout(poll, POLL_INTERVAL_MS);
       } catch (err) {
-        console.error('[poll]', err);
-        pollTimerRef.current = setTimeout(poll, POLL_INTERVAL_MS * 2);
+        console.error('[Poll] Error:', err);
+        setErrorMsg('Disconnected from generation pipeline. Retrying…');
+        pollTimerRef.current = setTimeout(poll, POLL_INTERVAL_MS);
       }
     };
+
     poll();
   }, [navigate]);
 
-  // ── File selection ──────────────────────────────────────────
-  const addLocalFiles = useCallback((files) => {
+  const addLocalFiles = (files) => {
     const valid = [];
     const errors = [];
 
-    Array.from(files).forEach(file => {
-      const ext = getFileExt(file.name);
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      const ext = getFileExt(f.name);
+
       if (!ALLOWED_EXTENSIONS.includes(ext)) {
-        errors.push(`${file.name}: unsupported type (${ext})`);
-        return;
+        errors.push(`${f.name}: Only PDF, PPTX, MD, and TXT are supported.`);
+        continue;
       }
-      if (file.size > MAX_SIZE_MB * 1024 * 1024) {
-        errors.push(`${file.name}: exceeds ${MAX_SIZE_MB}MB limit`);
-        return;
+
+      if (f.size > MAX_SIZE_MB * 1024 * 1024) {
+        errors.push(`${f.name}: Exceeds maximum size of ${MAX_SIZE_MB}MB.`);
+        continue;
       }
-      const alreadyAdded = selectedFiles.some(
-        f => f.name === file.name && f.size === file.size
-      );
-      if (!alreadyAdded) valid.push(file);
-    });
 
-    if (errors.length) setErrorMsg(errors.join('\n'));
-    if (valid.length)  setSelectedFiles(prev => [...prev, ...valid]);
-  }, [selectedFiles]);
+      valid.push(f);
+    }
 
-  const handleFileInputChange = (e) => {
-    addLocalFiles(e.target.files);
-    e.target.value = '';
+    if (errors.length) {
+      setErrorMsg(errors.join('\n'));
+    }
+
+    if (valid.length) {
+      setSelectedFiles(prev => [...prev, ...valid]);
+    }
   };
 
-  const removeLocalFile = (index) => {
-    setSelectedFiles(prev => prev.filter((_, i) => i !== index));
+  const removeLocalFile = (idx) => {
+    setSelectedFiles(prev => prev.filter((_, i) => i !== idx));
   };
 
-  const removeNotebookNote = (index) => {
-    setNotebookNotes(prev => prev.filter((_, i) => i !== index));
+  const addNotebookNote = (note) => {
+    if (notebookNotes.some(n => n.id === note.id)) return;
+    setNotebookNotes(prev => [...prev, note]);
   };
 
-  // ── Notebook note selection ─────────────────────────────────
-  const addNotebookNote = useCallback((note) => {
-    setNotebookNotes(prev => {
-      if (prev.some(n => n.id === note.id)) return prev;
-      return [...prev, { ...note, content: getNotebookNoteContent(note) }];
-    });
-  }, []);
+  const removeNotebookNote = (idx) => {
+    setNotebookNotes(prev => prev.filter((_, i) => i !== idx));
+  };
 
   // ── Drag and drop ────────────────────────────────────────────
   const handleDragStart = (e, note) => {
@@ -272,12 +267,26 @@ const UploadSection = ({ userId: userIdProp }) => {
     e.preventDefault();
     setDragOver(false);
 
-    const json = e.dataTransfer.getData('application/json');
+    const json = e.dataTransfer.getData('neuranote-quiz-file') || e.dataTransfer.getData('application/json');
     if (json) {
       try {
-        const note = JSON.parse(json);
-        addNotebookNote(note);
-      } catch {}
+        const dragData = JSON.parse(json);
+        if (dragData.fileId) {
+          if (!workspaceFiles.some(f => f.id === dragData.fileId)) {
+            setWorkspaceFiles(prev => [...prev, {
+              id: dragData.fileId,
+              name: dragData.fileName || dragData.name,
+              type: dragData.fileType || dragData.type
+            }]);
+          }
+        } else if (dragData.id) {
+          if (!notebookNotes.some(n => n.id === dragData.id)) {
+            setNotebookNotes(prev => [...prev, dragData]);
+          }
+        }
+      } catch (err) {
+        console.error('[Drop] Failed parsing drag data:', err);
+      }
     } else if (e.dataTransfer.files.length) {
       addLocalFiles(e.dataTransfer.files);
     }
@@ -292,12 +301,13 @@ const UploadSection = ({ userId: userIdProp }) => {
   const clearAll = () => {
     setSelectedFiles([]);
     setNotebookNotes([]);
+    setWorkspaceFiles([]);
     setErrorMsg('');
   };
 
   // ── MAIN: Upload + Generate ──────────────────────────────────
   const handleGenerate = async () => {
-    const totalItems = selectedFiles.length + notebookNotes.length;
+    const totalItems = selectedFiles.length + notebookNotes.length + workspaceFiles.length;
     if (totalItems === 0) return;
 
     setErrorMsg('');
@@ -309,24 +319,25 @@ const UploadSection = ({ userId: userIdProp }) => {
       const filesToUpload = [...selectedFiles];
 
       for (const note of notebookNotes) {
-        // FIX: use real content, not mock string
         const content = note.content || getNotebookNoteContent(note);
         const blob = new Blob([content], { type: 'text/markdown' });
         const virtualFile = new File([blob], `${note.name}.md`, { type: 'text/markdown' });
         filesToUpload.push(virtualFile);
       }
 
-      // Step 2 — Upload all files
-      setJobStatus('retrieving');
-      const uploadResult = await uploadPDF(filesToUpload);
-      const successfulUploads = uploadResult.uploaded_files?.filter(f => !f.error) || [];
+      let successfulUploads = [];
 
-      if (successfulUploads.length === 0) {
-        const errorDetails = uploadResult.uploaded_files?.map(f => `${f.filename}: ${f.error}`).join('\n');
-        throw new Error(`Upload Failed:\n${errorDetails || 'All files failed to upload.'}`);
-      }
+      if (filesToUpload.length > 0) {
+        // Step 2 — Upload all files
+        setJobStatus('retrieving');
+        const uploadResult = await uploadPDF(filesToUpload);
+        successfulUploads = uploadResult.uploaded_files?.filter(f => !f.error) || [];
 
-      if (successfulUploads.length > 0) {
+        if (successfulUploads.length === 0) {
+          const errorDetails = uploadResult.uploaded_files?.map(f => `${f.filename}: ${f.error}`).join('\n');
+          throw new Error(`Upload Failed:\n${errorDetails || 'All files failed to upload.'}`);
+        }
+
         localStorage.setItem(
           'currentPdfId',
           successfulUploads[0].pdf_id
@@ -488,6 +499,27 @@ const UploadSection = ({ userId: userIdProp }) => {
                         onClick={() => removeNotebookNote(i)}
                         disabled={isProcessing}
                         aria-label={`Remove ${note.name}`}
+                      >
+                        <X size={13} />
+                      </button>
+                    </div>
+                  ))}
+
+                  {/* Workspace files */}
+                  {workspaceFiles.map((file, i) => (
+                    <div key={`workspace-${i}`} className={`${styles.fileItem} ${styles.notebookItem}`}>
+                      <span className={styles.fileEmoji}>{getFileIcon(file.name)}</span>
+                      <div className={styles.fileDetails}>
+                        <span className={styles.fileName}>{file.name}</span>
+                        <span className={styles.fileMeta}>
+                          Workspace · {getFileExt(file.name).toUpperCase().slice(1)}
+                        </span>
+                      </div>
+                      <button
+                        className={styles.removeBtn}
+                        onClick={() => setWorkspaceFiles(prev => prev.filter((_, idx) => idx !== i))}
+                        disabled={isProcessing}
+                        aria-label={`Remove ${file.name}`}
                       >
                         <X size={13} />
                       </button>

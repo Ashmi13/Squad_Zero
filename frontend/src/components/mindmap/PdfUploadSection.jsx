@@ -50,11 +50,34 @@ const PdfUploadSection = ({ onMindmapCreated }) => {
     }));
   };
 
-  const handleDrop = (e) => {
+  const handleDrop = async (e) => {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+
+    const json = e.dataTransfer.getData('neuranote-quiz-file') || e.dataTransfer.getData('application/json');
+    if (json) {
+      try {
+        const dragData = JSON.parse(json);
+        if (dragData.fileUrl && dragData.fileName) {
+          setIsLoading(true);
+          setError(null);
+          try {
+            const response = await fetch(dragData.fileUrl);
+            const blob = await response.blob();
+            const fileObj = new File([blob], dragData.fileName, { type: 'application/pdf' });
+            handleFile(fileObj);
+          } catch (err) {
+            setError('Failed to load workspace file for mind map generation.');
+            console.error(err);
+          } finally {
+            setIsLoading(false);
+          }
+        }
+      } catch (err) {
+        console.error('[Drop] Failed parsing drag data:', err);
+      }
+    } else if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       handleFile(e.dataTransfer.files[0]);
     }
   };

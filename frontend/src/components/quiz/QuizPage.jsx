@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useAuth } from '@/hooks/useAuth.jsx';
 import { useNavigate } from 'react-router-dom';
-import { getAuthHeaders, isAuthenticated } from '@/utils/tokenStorage';
+import { useAuth } from '@/hooks/useAuth';
+import { getAccessToken } from '@/utils/tokenStorage';
 import { API } from '@/config/api';
 import { workspaceApi } from '@/services/workspaceApi';
 
@@ -11,7 +11,12 @@ import QuizResults  from './QuizResults';
 import QuizHistory  from './QuizHistory';
 import Toast        from './Toast';
 import ConfirmDialog from './ConfirmDialog';
-import './styles/QuizPage.css';
+import './QuizPage.css';
+
+const getAuthHeaders = () => {
+  const token = getAccessToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
 
 const MAX_FILES    = 20;
 const MAX_FILE_SIZE = 100 * 1024 * 1024;
@@ -141,29 +146,37 @@ const QuizPage = ({ noteId, onStepChange }) => {
     }
   };
 
-  // Fetch a file blob from the backend using getFilePreview.
+  // Fetch a file blob for the given workspace file, routed through the backend
+  // (same-origin, authenticated) rather than fetching the S3 signed URL directly
+  // from the browser — a direct S3 fetch fails with a generic "Failed to fetch"
+  // whenever the bucket's CORS policy doesn't allow the current origin.
   const fetchFileBlob = async (fileId, displayName) => {
     showToast(`Loading "${displayName}"…`, 'info', 2000);
-    const data       = await workspaceApi.getFilePreview(fileId);
-    // Support both { preview: { preview_url } } and { preview_url } shapes
-    const previewObj = data?.preview || data || {};
-    const signedUrl  = previewObj?.preview_url;
-    const inlineContent = previewObj?.content;
+    try {
+      return await workspaceApi.getFileContent(fileId);
+    } catch (err) {
+      // Fall back to the old preview-URL flow in case the content route is
+      // unavailable (e.g. an older deployed backend), so uploads still work.
+      const data          = await workspaceApi.getFilePreview(fileId);
+      const previewObj    = data?.preview || data || {};
+      const signedUrl     = previewObj?.preview_url;
+      const inlineContent = previewObj?.content;
 
-    if (signedUrl) {
-      const res = await fetch(signedUrl);
-      if (!res.ok) throw new Error(`Server returned ${res.status}`);
-      return res.blob();
+      if (signedUrl) {
+        const res = await fetch(signedUrl);
+        if (!res.ok) throw new Error(`Server returned ${res.status}`);
+        return res.blob();
+      }
+
+      if (inlineContent) {
+        const text = typeof inlineContent === 'string' && inlineContent.startsWith('data:')
+          ? atob(inlineContent.split(',')[1])
+          : inlineContent;
+        return new Blob([text], { type: 'text/plain' });
+      }
+
+      throw err;
     }
-
-    if (inlineContent) {
-      const text = typeof inlineContent === 'string' && inlineContent.startsWith('data:')
-        ? atob(inlineContent.split(',')[1])
-        : inlineContent;
-      return new Blob([text], { type: 'text/plain' });
-    }
-
-    throw new Error('File has no accessible content. Open it in your folder to sync it first.');
   };
 
   // Resolve a safe filename for a folder-tree file drop.

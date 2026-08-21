@@ -1,14 +1,46 @@
 """Dependency injection for authentication and authorization"""
 from typing import Optional, Dict, Any
-from fastapi import Cookie, Depends, HTTPException, Request
+from fastapi import Cookie, Depends, HTTPException, Request,Response
 from app.core.config import settings
 from app.db.supabase import get_supabase
 from supabase import Client
 import jwt
+from app.core.security import clear_session_cookie
+from middleware.error_handler import SuspendedAccountError
+
+
+async def get_supabase_client(
+    supabase_manager = Depends(get_supabase)
+) -> Client:
+    """Dependency to get anonymous Supabase client
+
+    Args:
+        supabase_manager: Supabase manager instance
+
+    Returns:
+        Supabase client
+    """
+    return supabase_manager.anon_client
+
+
+async def get_supabase_service_client(
+    supabase_manager = Depends(get_supabase)
+) -> Client:
+    """Dependency to get service-role Supabase client
+
+    Args:
+        supabase_manager: Supabase manager instance
+
+    Returns:
+        Service-role Supabase client
+    """
+    return supabase_manager.service_client
 
 
 async def get_current_user(
     request: Request,
+    response: Response,
+    supabase_client: Client = Depends(get_supabase_service_client),
 ) -> Dict[str, Any]:
     """Dependency to get current user from session cookie or Authorization header
 
@@ -19,11 +51,10 @@ async def get_current_user(
         User claims dictionary
 
     Raises:
-        HTTPException: If not authenticated
+        HTTPException: If not authenticated or if the account is suspended
     """
     token = None
 
-    # Try cookie first
     token = request.cookies.get(settings.cookie_name)
 
     # Fall back to Authorization header (Bearer token)
@@ -34,27 +65,38 @@ async def get_current_user(
 
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
-
-    # First try our own secret key (tokens we created)
+    
+    payload = None
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
-        return payload
     except jwt.InvalidTokenError:
+        payload = None
+
+    if payload is None:
+        try:
+            payload = jwt.decode(
+                token,
+                options={"verify_signature": False},
+                algorithms=["HS256", "RS256"]
+            )
+        except jwt.InvalidTokenError:
+            raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    if not payload.get("sub"):
+        raise HTTPException(status_code=401, detail="Invalid token: missing sub")
+
+    user_id = payload.get("sub")
+    try:
+        user_response = supabase_client.table("users").select("id,is_suspended").eq("id", user_id).single().execute()
+        user_data = user_response.data or {}
+        if user_data.get("is_suspended") is True:
+            raise HTTPException(status_code=403, detail="Your account has been suspended. Please contact support.")
+    except HTTPException:
+        raise
+    except Exception:
         pass
 
-    # Fall back: decode Supabase JWT without signature verification
-    # Supabase tokens are trusted since they come from Supabase Auth
-    try:
-        payload = jwt.decode(
-            token,
-            options={"verify_signature": False},
-            algorithms=["HS256", "RS256"]
-        )
-        if not payload.get("sub"):
-            raise HTTPException(status_code=401, detail="Invalid token: missing sub")
-        return payload
-    except jwt.InvalidTokenError:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    return payload
 
 
 async def get_current_user_id(
@@ -95,31 +137,3 @@ async def get_current_user_email(
     if not email:
         raise HTTPException(status_code=401, detail="Invalid token: missing email")
     return email
-
-
-async def get_supabase_client(
-    supabase_manager = Depends(get_supabase)
-) -> Client:
-    """Dependency to get anonymous Supabase client
-
-    Args:
-        supabase_manager: Supabase manager instance
-
-    Returns:
-        Supabase client
-    """
-    return supabase_manager.anon_client
-
-
-async def get_supabase_service_client(
-    supabase_manager = Depends(get_supabase)
-) -> Client:
-    """Dependency to get service-role Supabase client
-
-    Args:
-        supabase_manager: Supabase manager instance
-
-    Returns:
-        Service-role Supabase client
-    """
-    return supabase_manager.service_client

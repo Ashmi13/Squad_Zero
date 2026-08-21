@@ -18,6 +18,8 @@ backend/seed_*.py
 backend/dump.sql
 
 __pycache__/
+*.pyc
+__pycache__/
 *.py[cod]
 *.pyc
 *.pyo
@@ -122,5 +124,19 @@ __pycache__/
 *.pyc
 *.pyo
 
+
 # History files
 .history/
+
+ backend/model_cache/
+ backend/__pycache__/
+ *.pyc
+
+ # Python bytecode cache
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Machine Learning Models & Cache
+backend/model_cache/

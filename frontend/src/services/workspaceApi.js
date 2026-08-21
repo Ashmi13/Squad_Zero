@@ -2,6 +2,43 @@ import { config } from '@/config/env';
 import { authFetch, getValidAccessToken, clearAuthAndRedirect } from '@/utils/authSession';
 
 const API_BASE = config.apiBaseUrl || '';
+const ROUTE_LIKE_LABEL = /^\/[a-z0-9][a-z0-9\-_/]*$/i;
+const BLOCKED_ENDPOINT_LABELS = new Set([
+  'verify-email',
+  '/verify-email',
+  'login',
+  '/login',
+  'signup',
+  '/signup',
+  'forgot-password',
+  '/forgot-password',
+  'reset-password',
+  '/reset-password',
+  'change-password',
+  '/change-password',
+  'account-verified',
+  '/account-verified',
+  'oauth/callback',
+  '/oauth/callback',
+  'account-suspended',
+  '/account-suspended',
+]);
+
+function shouldHideEndpointLikeLabel(label) {
+  const normalized = String(label || '').trim().toLowerCase();
+  if (!normalized) return true;
+  if (ROUTE_LIKE_LABEL.test(normalized)) return true;
+  return BLOCKED_ENDPOINT_LABELS.has(normalized);
+}
+
+function filterFolderTree(nodes = []) {
+  return (nodes || [])
+    .filter((node) => !shouldHideEndpointLikeLabel(node?.name))
+    .map((node) => ({
+      ...node,
+      children: filterFolderTree(node.children || []),
+    }));
+}
 
 async function request(path, options = {}) {
   const res = await authFetch(path, options);
@@ -14,7 +51,15 @@ async function request(path, options = {}) {
     } catch {
       // ignore json parsing errors
     }
-    throw new Error(detail);
+    const message = typeof detail === 'object'
+      ? detail.message || 'Request failed'
+      : detail;
+    const error = new Error(message);
+    if (typeof detail === 'object') {
+      error.code = detail.code;
+      error.expiresAt = detail.expires_at;
+    }
+    throw error;
   }
 
   return res.json();
@@ -52,66 +97,41 @@ export const workspaceApi = {
     return request(`/api/v1/workspace/files${query}`);
   },
 
+  getStorageUsage() {
+    return request('/api/v1/workspace/storage-usage');
+  },
+
+  createPayHereCheckout() {
+    return request('/api/v1/payments/payhere/checkout', {
+      method: 'POST',
+    });
+  },
+
   async getRecentFiles(limit = 5) {
     try {
-      const [filesRes, foldersRes] = await Promise.all([
-        request('/api/v1/workspace/files'),
-        request('/api/v1/workspace/folders')
-      ]);
-
+      const res = await request(`/api/v1/workspace/files/recent?limit=${encodeURIComponent(limit)}`);
+      
+      // Optionally sync with local history for immediate client-side feedback
       const historyJson = localStorage.getItem('neuranote_file_history');
-      const localHistory = historyJson ? JSON.parse(historyJson) : {};
-
-      const folders = foldersRes?.folders || [];
-      const folderMap = {};
-      folders.forEach(f => folderMap[f.id] = f);
-
-      const buildFolderPath = (folderId) => {
-        const parts = [];
-        let curr = folderMap[folderId];
-        while (curr) {
-          if (curr.name) parts.push(curr.name);
-          curr = folderMap[curr.parent_folder_id || curr.parent_id];
-        }
-        return parts.length ? parts.reverse().join(' → ') : null;
-      };
-
-      let files = filesRes?.files || [];
-
-      files = files.map(f => {
-        const localTime = localHistory[f.id];
-        const recentTime = localTime || f.created_at || new Date().toISOString();
-        
-        let folderName = null;
-        let folderPath = null;
-        let parentFolderPath = null;
-
-        if (f.folder_id && folderMap[f.folder_id]) {
-          const folder = folderMap[f.folder_id];
-          folderName = folder.name;
-          folderPath = buildFolderPath(f.folder_id);
-          const parentId = folder.parent_folder_id || folder.parent_id;
-          if (parentId) {
-            parentFolderPath = buildFolderPath(parentId);
+      if (historyJson && res && res.files) {
+        const localHistory = JSON.parse(historyJson);
+        res.files = res.files.map(f => {
+          if (localHistory[f.id]) {
+             // Use local timestamp if it's newer
+             const localTime = new Date(localHistory[f.id]);
+             const serverTime = new Date(f.recent_timestamp || f.created_at);
+             if (localTime > serverTime) {
+                return { ...f, recent_timestamp: localHistory[f.id] };
+             }
           }
-        }
-
-        return {
-          ...f,
-          recent_timestamp: recentTime,
-          folder_name: folderName,
-          folder_path: folderPath,
-          parent_folder_path: parentFolderPath,
-          preview_available: Boolean(f.file_url || f.storage_url || f.storage_path || f.file_content || f.summary)
-        };
-      });
-
-      files.sort((a, b) => new Date(b.recent_timestamp) - new Date(a.recent_timestamp));
-
-      return { files: files.slice(0, limit) };
+          return f;
+        });
+        res.files.sort((a, b) => new Date(b.recent_timestamp || b.created_at) - new Date(a.recent_timestamp || a.created_at));
+      }
+      return res;
     } catch (err) {
-      console.warn("Failed to sort recent files locally, falling back to backend", err);
-      return request(`/api/v1/workspace/files/recent?limit=${encodeURIComponent(limit)}`);
+      console.error("Failed to fetch recent files", err);
+      throw err;
     }
   },
 
@@ -132,6 +152,25 @@ export const workspaceApi = {
 
   getFilePreview(fileId, expiresIn = 3600) {
     return request(`/api/v1/workspace/files/${fileId}/preview?expires_in=${encodeURIComponent(expiresIn)}`);
+  },
+
+  // Fetches the raw file bytes through the backend (same-origin, authenticated)
+  // instead of hitting the S3 presigned URL directly from the browser. Direct S3
+  // fetches fail with a generic "Failed to fetch" whenever the bucket's CORS
+  // policy doesn't list the current origin, so this route avoids CORS entirely.
+  async getFileContent(fileId) {
+    const res = await authFetch(`/api/v1/workspace/files/${fileId}/content`);
+    if (!res.ok) {
+      let detail = `Server returned ${res.status}`;
+      try {
+        const data = await res.json();
+        detail = data?.detail || detail;
+      } catch {
+        // ignore json parsing errors, body wasn't JSON
+      }
+      throw new Error(detail);
+    }
+    return res.blob();
   },
 
   uploadFile(folderId, file, onProgress) {
@@ -195,6 +234,14 @@ export const workspaceApi = {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ folder_id: folderId }),
+    });
+  },
+
+  renameFile(fileId, name) {
+    return request(`/api/v1/workspace/files/${fileId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
     });
   },
 

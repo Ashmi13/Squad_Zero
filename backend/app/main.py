@@ -68,7 +68,6 @@ app.add_middleware(
         "Accept",
         "Origin",
         "User-Agent",
-        "X-Guest-Session-ID",
     ],
     expose_headers=["Content-Disposition"],  # needed for PDF downloads
     max_age=600,                             # cache preflight for 10 minutes
@@ -95,10 +94,13 @@ try:
         validation_exception_handler,
         database_exception_handler,
         general_exception_handler,
+        suspended_account_exception_handler,
+        SuspendedAccountError,
     )
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
     app.add_exception_handler(SQLAlchemyError, database_exception_handler)
     app.add_exception_handler(Exception, general_exception_handler)
+    app.add_exception_handler(SuspendedAccountError, suspended_account_exception_handler)
 except Exception as e:
     print(f"[WARN] Custom error handlers skipped: {e}")
 
@@ -113,6 +115,17 @@ except ImportError as e:
 except Exception as e:
     print(f"[WARN] Auth/user routes skipped: {e}")
 
+
+# Mind Map routes (M3)
+try:
+    from routes.mindmap_routes import router as mindmap_router
+    app.include_router(mindmap_router, tags=["mindmaps"])
+    print("Mind map routes loaded (OpenAI GPT integration)")
+except ImportError as e:
+    print(f"Mind map routes skipped: {e}")
+
+
+
 # Quiz routes (M4)
 try:
     from routes.quiz_routes import router as quiz_router
@@ -126,7 +139,7 @@ except ImportError as e:
     missing = str(e).replace("No module named ", "").strip("'")
     print(f"[WARN] Quiz routes skipped (missing: {missing}). Run: pip install -r requirements-m4quiz.txt")
 except Exception as e:
-    print(f"[WARN] Quiz routes skipped: {e}")
+    print(f"[WARN] Quiz routes skipped: {e}")   
 
     # Flashcards routes
 try:
@@ -153,6 +166,7 @@ _optional_routes = [
     ("routes.calendar",      "router", "/api/v1/calendar",      ["calendar"]),
     ("routes.notifications", "router", "/api/v1/notifications", ["notifications"]),
     ("routes.task_list",     "router", "/api/v1/task-list",     ["task-list"]),
+    ("routes.mindmap_routes", "router", "",                      []),
 ]
 
 for _module, _attr, _prefix, _tags in _optional_routes:
@@ -161,7 +175,16 @@ for _module, _attr, _prefix, _tags in _optional_routes:
         app.include_router(getattr(_mod, _attr), prefix=_prefix, tags=_tags)
     except Exception as e:
         print(f"[WARN] {_module} skipped: {e}")
-
+# Second Brain routes (M5)
+try:
+    from second_brain.router import router as second_brain_router
+    app.include_router(second_brain_router)
+    print("[OK] Second Brain routes loaded")
+except ImportError as e:
+    missing = str(e).replace("No module named ", "").strip("'")
+    print(f"[WARN] Second Brain routes skipped (missing: {missing})")
+except Exception as e:
+    print(f"[WARN] Second Brain routes skipped: {e}")
 @app.get("/")
 async def root():
     return {
@@ -178,7 +201,7 @@ async def startup_event():
     try:
         from app.db.supabase import get_supabase as _get_supabase
         from app.services.workspace_service import WorkspaceService
-        _sb = _get_supabase()
+        _sb = _get_supabase().service_client
         _svc = WorkspaceService(_sb)
         _svc._detect_files_columns()
         print("[STARTUP] WorkspaceService column cache warmed up")

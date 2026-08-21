@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     openai_api_key: str = Field(default="", env="OPENAI_API_KEY")
     openrouter_api_key: str = Field(default="", env="OPENROUTER_API_KEY")
 
+    # PayHere — credentials are used only by the backend payment service
+    payhere_merchant_id: Optional[str] = Field(default=None, env="PAYHERE_MERCHANT_ID")
+    payhere_merchant_secret: Optional[str] = Field(default=None, env="PAYHERE_MERCHANT_SECRET")
+    payhere_sandbox: bool = Field(default=True, env="PAYHERE_SANDBOX")
+
     # Cookie
     cookie_name: str = Field(default="session", env="COOKIE_NAME")
     cookie_secure: bool = Field(default=False, env="COOKIE_SECURE")  # False for local dev
@@ -51,6 +56,8 @@ class Settings(BaseSettings):
     # Admin
     admin_email: str = Field(default="admin@university.com", env="ADMIN_EMAIL")
     super_admin_id: str = Field(default="b422ac95-a9dd-4aa0-ab5c-54c09fa58267", env="SUPER_ADMIN_ID")
+    support_contact_name: str = Field(default="NeuroNote Support", env="SUPPORT_CONTACT_NAME")
+    support_contact_email: str = Field(default="nihaajahamed@gmail.com", env="SUPPORT_CONTACT_EMAIL")
 
     # Google OAuth
     google_client_id: Optional[str] = Field(default=None, env="GOOGLE_CLIENT_ID")

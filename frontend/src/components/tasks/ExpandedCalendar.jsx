@@ -9,19 +9,32 @@ import ChevronRightIcon  from '@mui/icons-material/ChevronRight';
 import AddIcon           from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import EditOutlinedIcon  from '@mui/icons-material/EditOutlined';
+import { useTheme } from '../../context/ThemeContext';
 
 const MONTHS   = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const DAYS     = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 const COLORS   = ['#6366f1','#ec4899','#10b981','#f59e0b','#ef4444','#3b82f6','#8b5cf6','#f97316'];
 
-const FIELD_SX = {
-  '& .MuiOutlinedInput-root': { color: '#f3f4f6', '& fieldset': { borderColor: 'rgba(255,255,255,0.12)' },
-    '&:hover fieldset': { borderColor: '#6366f1' }, '&.Mui-focused fieldset': { borderColor: '#6366f1' } },
-  '& .MuiInputLabel-root': { color: '#9ca3af' },
-  '& .MuiInputLabel-root.Mui-focused': { color: '#6366f1' },
-};
-
 export default function ExpandedCalendar({ tasks, events, onClose, onAddEvent, onDeleteEvent, onUpdateEvent }) {
+  const { isDark = true } = useTheme();
+  const theme = isDark
+    ? {
+        colors: {
+          text: { primary: '#f3f4f6', tertiary: '#9ca3af', muted: '#6b7280' },
+          bg: { secondary: '#111827' },
+          ui: { border: 'rgba(255,255,255,0.07)' },
+          accent: '#6366f1', accentDark: '#4f46e5',
+        },
+      }
+    : {
+        colors: {
+          text: { primary: '#1a202c', tertiary: '#718096', muted: '#64748b' },
+          bg: { secondary: '#ffffff' },
+          ui: { border: '#e2e8f0' },
+          accent: '#6366f1', accentDark: '#4f46e5',
+        },
+      };
+
   const today = new Date();
   const [year,        setYear]        = useState(today.getFullYear());
   const [month,       setMonth]       = useState(today.getMonth());
@@ -29,10 +42,7 @@ export default function ExpandedCalendar({ tasks, events, onClose, onAddEvent, o
   const [addOpen,     setAddOpen]     = useState(false);
   const [editOpen,    setEditOpen]    = useState(false);
 
-  // form state for adding a new event
-  const [ev, setEv] = useState({ title: '', description: '', start: '', end: '', color: '#6366f1' });
-
-  // form state for editing an existing event
+  const [ev, setEv]     = useState({ title: '', description: '', start: '', end: '', color: '#6366f1' });
   const [editEv, setEditEv] = useState({ id: '', title: '', description: '', start: '', end: '', color: '#6366f1' });
 
   const prev = () => month === 0  ? (setMonth(11), setYear(y => y - 1)) : setMonth(m => m - 1);
@@ -42,7 +52,6 @@ export default function ExpandedCalendar({ tasks, events, onClose, onAddEvent, o
   const firstDay    = new Date(year, month, 1).getDay();
   const isToday     = d => d === today.getDate() && month === today.getMonth() && year === today.getFullYear();
 
-  // build a map of day -> list of tasks and events for that day
   const dayMap = {};
   const push   = (day, item) => { if (!dayMap[day]) dayMap[day] = []; dayMap[day].push(item); };
 
@@ -62,7 +71,6 @@ export default function ExpandedCalendar({ tasks, events, onClose, onAddEvent, o
   const cells        = [...Array(firstDay).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)];
   const selectedItems = selectedDay ? (dayMap[selectedDay] || []) : [];
 
-  // save a new event
   const handleAdd = async () => {
     if (!ev.title.trim() || !ev.start) return;
     await onAddEvent({
@@ -75,7 +83,6 @@ export default function ExpandedCalendar({ tasks, events, onClose, onAddEvent, o
     setEv({ title: '', description: '', start: '', end: '', color: '#6366f1' });
   };
 
-  // save edits to an existing event
   const handleEdit = async () => {
     if (!editEv.title.trim() || !editEv.start) return;
     await onUpdateEvent(editEv.id, {
@@ -87,29 +94,49 @@ export default function ExpandedCalendar({ tasks, events, onClose, onAddEvent, o
     setEditOpen(false);
   };
 
+  const fieldSx = {
+    '& .MuiOutlinedInput-root': {
+      color: theme.colors.text.primary,
+      '& fieldset': { borderColor: theme.colors.ui.border },
+      '&:hover fieldset': { borderColor: theme.colors.accent },
+      '&.Mui-focused fieldset': { borderColor: theme.colors.accent },
+    },
+    '& .MuiInputLabel-root': { color: theme.colors.text.tertiary },
+    '& .MuiInputLabel-root.Mui-focused': { color: theme.colors.accent },
+  };
+
+  const dialogPaperSx = {
+    bgcolor: theme.colors.bg.secondary,
+    color: theme.colors.text.primary,
+    border: `1px solid ${theme.colors.ui.border}`,
+    borderRadius: 3,
+  };
+
   return (
     <Box className="exp-cal-overlay">
 
-      {/* top bar with month nav and add button */}
       <Box className="exp-cal-header">
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-          <IconButton onClick={prev} sx={{ color: '#9ca3af' }}><ChevronLeftIcon /></IconButton>
-          <Typography sx={{ color: '#f3f4f6', fontWeight: 700, fontSize: 18, minWidth: 180 }}>
+          <IconButton onClick={prev} sx={{ color: theme.colors.text.tertiary }}>
+            <ChevronLeftIcon />
+          </IconButton>
+          <Typography sx={{ color: theme.colors.text.primary, fontWeight: 700, fontSize: 20, minWidth: 180 }}>
             {MONTHS[month]} {year}
           </Typography>
-          <IconButton onClick={next} sx={{ color: '#9ca3af' }}><ChevronRightIcon /></IconButton>
+          <IconButton onClick={next} sx={{ color: theme.colors.text.tertiary }}>
+            <ChevronRightIcon />
+          </IconButton>
           <Button startIcon={<AddIcon />} variant="contained" size="small"
             onClick={() => setAddOpen(true)}
-            sx={{ bgcolor: '#6366f1', '&:hover': { bgcolor: '#4f46e5' }, ml: 1, textTransform: 'none' }}>
+            sx={{ bgcolor: theme.colors.accent, '&:hover': { bgcolor: theme.colors.accentDark }, ml: 1, textTransform: 'none', fontSize: '0.85rem' }}>
             Add Event
           </Button>
         </Box>
-        <IconButton onClick={onClose} sx={{ color: '#6b7280', '&:hover': { color: '#ef4444' } }}>
+        <IconButton onClick={onClose} sx={{ color: theme.colors.text.muted, '&:hover': { color: '#ef4444' } }}>
           <CloseIcon />
         </IconButton>
       </Box>
 
-      {/* main area: calendar grid on the left, day detail panel on the right */}
       <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 270px', flex: 1, overflow: 'hidden' }}>
 
         <Box sx={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', p: 2 }}>
@@ -126,14 +153,14 @@ export default function ExpandedCalendar({ tasks, events, onClose, onAddEvent, o
                     {(dayMap[day] || []).slice(0, 3).map((item, j) => (
                       <Box key={j} className="exp-item-pill"
                         style={{ background: item._color + '28', borderLeft: `3px solid ${item._color}` }}>
-                        <Typography sx={{ fontSize: 10, color: item._color, fontWeight: 500,
+                        <Typography sx={{ fontSize: 12, color: item._color, fontWeight: 500,
                                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {item._type === 'task' ? 'T' : 'E'} {item.title}
                         </Typography>
                       </Box>
                     ))}
                     {(dayMap[day] || []).length > 3 && (
-                      <Typography sx={{ fontSize: 10, color: '#6b7280', pl: 0.5 }}>
+                      <Typography sx={{ fontSize: 12, color: theme.colors.text.muted, pl: 0.5 }}>
                         +{(dayMap[day] || []).length - 3} more
                       </Typography>
                     )}
@@ -144,26 +171,25 @@ export default function ExpandedCalendar({ tasks, events, onClose, onAddEvent, o
           </Box>
         </Box>
 
-        {/* right panel: details of whatever day is selected */}
         <Box className="exp-detail-panel">
-          <Typography sx={{ color: '#6b7280', fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
+          <Typography sx={{ color: theme.colors.text.muted, fontSize: 13, fontWeight: 700, textTransform: 'uppercase',
                             letterSpacing: '0.08em', mb: 2 }}>
             {selectedDay ? `${MONTHS[month]} ${selectedDay}` : 'Click a day'}
           </Typography>
 
           {selectedDay && selectedItems.length === 0 && (
-            <Typography sx={{ color: '#374151', fontSize: 13 }}>Nothing scheduled</Typography>
+            <Typography sx={{ color: theme.colors.text.muted, fontSize: 14 }}>Nothing scheduled</Typography>
           )}
 
           {selectedItems.map((item, i) => (
             <Box key={i} className="exp-detail-item" style={{ borderLeftColor: item._color }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <Box sx={{ flex: 1, minWidth: 0 }}>
-                  <Typography sx={{ color: '#e5e7eb', fontWeight: 600, fontSize: 13 }}>{item.title}</Typography>
+                  <Typography sx={{ color: theme.colors.text.primary, fontWeight: 600, fontSize: 15 }}>{item.title}</Typography>
                   {item.description && (
-                    <Typography sx={{ color: '#6b7280', fontSize: 11, mt: 0.5 }}>{item.description}</Typography>
+                    <Typography sx={{ color: theme.colors.text.tertiary, fontSize: 13, mt: 0.5 }}>{item.description}</Typography>
                   )}
-                  <Typography sx={{ color: '#4b5563', fontSize: 11, mt: 0.5 }}>
+                  <Typography sx={{ color: theme.colors.text.tertiary, fontSize: 13, mt: 0.5 }}>
                     {item._type === 'task'
                       ? `${item.priority} priority · ${item.status}`
                       : `${new Date(item.start_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })} – ${new Date(item.end_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`
@@ -171,7 +197,6 @@ export default function ExpandedCalendar({ tasks, events, onClose, onAddEvent, o
                   </Typography>
                 </Box>
 
-                {/* edit and delete only shown for calendar events, not tasks */}
                 {item._type === 'event' && (
                   <Box sx={{ display: 'flex', flexShrink: 0 }}>
                     <IconButton size="small"
@@ -181,11 +206,11 @@ export default function ExpandedCalendar({ tasks, events, onClose, onAddEvent, o
                                     start: pad(item.start_time), end: pad(item.end_time), color: item._color });
                         setEditOpen(true);
                       }}
-                      sx={{ color: '#4b5563', '&:hover': { color: '#6366f1' } }}>
+                      sx={{ color: theme.colors.text.muted, '&:hover': { color: theme.colors.accent } }}>
                       <EditOutlinedIcon fontSize="small" />
                     </IconButton>
                     <IconButton size="small" onClick={() => onDeleteEvent(item.id)}
-                      sx={{ color: '#4b5563', '&:hover': { color: '#ef4444' } }}>
+                      sx={{ color: theme.colors.text.muted, '&:hover': { color: '#ef4444' } }}>
                       <DeleteOutlineIcon fontSize="small" />
                     </IconButton>
                   </Box>
@@ -197,18 +222,19 @@ export default function ExpandedCalendar({ tasks, events, onClose, onAddEvent, o
       </Box>
 
       {/* edit event dialog */}
-      <Dialog open={editOpen} onClose={() => setEditOpen(false)} maxWidth="sm" fullWidth
-        PaperProps={{ sx: { bgcolor: '#1a1f2e', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 3 } }}>
-        <DialogTitle sx={{ color: '#f3f4f6', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>Edit Event</DialogTitle>
+      <Dialog open={editOpen} onClose={() => setEditOpen(false)} maxWidth="sm" fullWidth PaperProps={{ sx: dialogPaperSx }}>
+        <DialogTitle sx={{ color: theme.colors.text.primary, borderBottom: `1px solid ${theme.colors.ui.border}` }}>
+          Edit Event
+        </DialogTitle>
         <DialogContent sx={{ pt: 3, display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-          <TextField label="Title *" value={editEv.title} onChange={e => setEditEv(p => ({ ...p, title: e.target.value }))} fullWidth sx={FIELD_SX} />
-          <TextField label="Description" value={editEv.description} onChange={e => setEditEv(p => ({ ...p, description: e.target.value }))} fullWidth multiline rows={2} sx={FIELD_SX} />
+          <TextField label="Title *" value={editEv.title} onChange={e => setEditEv(p => ({ ...p, title: e.target.value }))} fullWidth sx={fieldSx} />
+          <TextField label="Description" value={editEv.description} onChange={e => setEditEv(p => ({ ...p, description: e.target.value }))} fullWidth multiline rows={2} sx={fieldSx} />
           <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
-            <TextField label="Start *" type="datetime-local" value={editEv.start} onChange={e => setEditEv(p => ({ ...p, start: e.target.value }))} InputLabelProps={{ shrink: true }} sx={FIELD_SX} inputProps={{ style: { colorScheme: 'dark' } }} />
-            <TextField label="End" type="datetime-local" value={editEv.end} onChange={e => setEditEv(p => ({ ...p, end: e.target.value }))} InputLabelProps={{ shrink: true }} sx={FIELD_SX} inputProps={{ style: { colorScheme: 'dark' } }} />
+            <TextField label="Start *" type="datetime-local" value={editEv.start} onChange={e => setEditEv(p => ({ ...p, start: e.target.value }))} InputLabelProps={{ shrink: true }} sx={fieldSx} inputProps={{ style: { colorScheme: isDark ? 'dark' : 'light' } }} />
+            <TextField label="End" type="datetime-local" value={editEv.end} onChange={e => setEditEv(p => ({ ...p, end: e.target.value }))} InputLabelProps={{ shrink: true }} sx={fieldSx} inputProps={{ style: { colorScheme: isDark ? 'dark' : 'light' } }} />
           </Box>
           <Box>
-            <Typography sx={{ color: '#9ca3af', fontSize: 11, mb: 1, fontWeight: 700, letterSpacing: '0.08em' }}>COLOR</Typography>
+            <Typography sx={{ color: theme.colors.text.tertiary, fontSize: 13, mb: 1, fontWeight: 700, letterSpacing: '0.08em' }}>COLOR</Typography>
             <Box sx={{ display: 'flex', gap: 1 }}>
               {COLORS.map(c => (
                 <Box key={c} onClick={() => setEditEv(p => ({ ...p, color: c }))}
@@ -219,25 +245,26 @@ export default function ExpandedCalendar({ tasks, events, onClose, onAddEvent, o
             </Box>
           </Box>
         </DialogContent>
-        <DialogActions sx={{ borderTop: '1px solid rgba(255,255,255,0.08)', px: 3, py: 2 }}>
-          <Button onClick={() => setEditOpen(false)} sx={{ color: '#9ca3af' }}>Cancel</Button>
-          <Button onClick={handleEdit} variant="contained" sx={{ bgcolor: '#6366f1', '&:hover': { bgcolor: '#4f46e5' } }}>Save Changes</Button>
+        <DialogActions sx={{ borderTop: `1px solid ${theme.colors.ui.border}`, px: 3, py: 2 }}>
+          <Button onClick={() => setEditOpen(false)} sx={{ color: theme.colors.text.tertiary }}>Cancel</Button>
+          <Button onClick={handleEdit} variant="contained" sx={{ bgcolor: theme.colors.accent, '&:hover': { bgcolor: theme.colors.accentDark } }}>Save Changes</Button>
         </DialogActions>
       </Dialog>
 
       {/* add event dialog */}
-      <Dialog open={addOpen} onClose={() => setAddOpen(false)} maxWidth="sm" fullWidth
-        PaperProps={{ sx: { bgcolor: '#1a1f2e', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 3 } }}>
-        <DialogTitle sx={{ color: '#f3f4f6', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>Add Event</DialogTitle>
+      <Dialog open={addOpen} onClose={() => setAddOpen(false)} maxWidth="sm" fullWidth PaperProps={{ sx: dialogPaperSx }}>
+        <DialogTitle sx={{ color: theme.colors.text.primary, borderBottom: `1px solid ${theme.colors.ui.border}` }}>
+          Add Event
+        </DialogTitle>
         <DialogContent sx={{ pt: 3, display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-          <TextField label="Title *" value={ev.title} onChange={e => setEv(p => ({ ...p, title: e.target.value }))} fullWidth sx={FIELD_SX} />
-          <TextField label="Description" value={ev.description} onChange={e => setEv(p => ({ ...p, description: e.target.value }))} fullWidth multiline rows={2} sx={FIELD_SX} />
+          <TextField label="Title *" value={ev.title} onChange={e => setEv(p => ({ ...p, title: e.target.value }))} fullWidth sx={fieldSx} />
+          <TextField label="Description" value={ev.description} onChange={e => setEv(p => ({ ...p, description: e.target.value }))} fullWidth multiline rows={2} sx={fieldSx} />
           <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
-            <TextField label="Start *" type="datetime-local" value={ev.start} onChange={e => setEv(p => ({ ...p, start: e.target.value }))} InputLabelProps={{ shrink: true }} sx={FIELD_SX} inputProps={{ style: { colorScheme: 'dark' } }} />
-            <TextField label="End" type="datetime-local" value={ev.end} onChange={e => setEv(p => ({ ...p, end: e.target.value }))} InputLabelProps={{ shrink: true }} sx={FIELD_SX} inputProps={{ style: { colorScheme: 'dark' } }} />
+            <TextField label="Start *" type="datetime-local" value={ev.start} onChange={e => setEv(p => ({ ...p, start: e.target.value }))} InputLabelProps={{ shrink: true }} sx={fieldSx} inputProps={{ style: { colorScheme: isDark ? 'dark' : 'light' } }} />
+            <TextField label="End" type="datetime-local" value={ev.end} onChange={e => setEv(p => ({ ...p, end: e.target.value }))} InputLabelProps={{ shrink: true }} sx={fieldSx} inputProps={{ style: { colorScheme: isDark ? 'dark' : 'light' } }} />
           </Box>
           <Box>
-            <Typography sx={{ color: '#9ca3af', fontSize: 11, mb: 1, fontWeight: 700, letterSpacing: '0.08em' }}>COLOR</Typography>
+            <Typography sx={{ color: theme.colors.text.tertiary, fontSize: 13, mb: 1, fontWeight: 700, letterSpacing: '0.08em' }}>COLOR</Typography>
             <Box sx={{ display: 'flex', gap: 1 }}>
               {COLORS.map(c => (
                 <Box key={c} onClick={() => setEv(p => ({ ...p, color: c }))}
@@ -248,9 +275,9 @@ export default function ExpandedCalendar({ tasks, events, onClose, onAddEvent, o
             </Box>
           </Box>
         </DialogContent>
-        <DialogActions sx={{ borderTop: '1px solid rgba(255,255,255,0.08)', px: 3, py: 2 }}>
-          <Button onClick={() => setAddOpen(false)} sx={{ color: '#9ca3af' }}>Cancel</Button>
-          <Button onClick={handleAdd} variant="contained" sx={{ bgcolor: '#6366f1', '&:hover': { bgcolor: '#4f46e5' } }}>Add Event</Button>
+        <DialogActions sx={{ borderTop: `1px solid ${theme.colors.ui.border}`, px: 3, py: 2 }}>
+          <Button onClick={() => setAddOpen(false)} sx={{ color: theme.colors.text.tertiary }}>Cancel</Button>
+          <Button onClick={handleAdd} variant="contained" sx={{ bgcolor: theme.colors.accent, '&:hover': { bgcolor: theme.colors.accentDark } }}>Add Event</Button>
         </DialogActions>
       </Dialog>
 

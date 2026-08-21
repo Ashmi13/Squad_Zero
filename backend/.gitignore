@@ -1,0 +1,12 @@
+
+# Module 3 (structured notes) — generated outputs, do not commit
+assets/
+images/
+model_cache/
+
+# Python compiled cache
+__pycache__/
+*.pyc
+
+# Personal scratch / one-off scripts
+scratch_*.py

@@ -1,5 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { Search, ZoomIn, ZoomOut, RefreshCw, Hash, Link2, FileText, X, Info } from 'lucide-react';
+import { Search, ZoomIn, ZoomOut, RefreshCw, Hash, Link2, FileText, X, Info, Upload } from 'lucide-react';
+import { secondBrainApi, ensureSecondBrainFolder } from '@/services/secondBrainApi';
+import { workspaceApi } from '@/services/workspaceApi';
+import ConfirmDialog from '../components/common/ConfirmDialog';
 
 // demo notes used until the real notes API is connected after M3 merges
 // replace this with: GET /api/v1/notes/ -> { id, title, content, folder, updated_at }
@@ -46,16 +49,39 @@ const DEMO_NOTES = [
   },
 ];
 
-// color per folder — used for node color and edge gradients
-const FOLDER_COLORS = {
-  'Computer Science': '#6366f1',
-  'Mathematics':      '#10b981',
-  'Programming':      '#f59e0b',
-  'Science':          '#06b6d4',
-  'General':          '#8b5cf6',
-};
+const FALLBACK_DEMO_NOTES = DEMO_NOTES.slice(0, 2);
+
+function apiNoteToGraphNote(n) {
+  const tagLine = n.tags?.length
+    ? n.tags.map(t => `#${t}`).join(' ')
+    : '';
+
+  const linkLine = n.outgoing_links?.length
+    ? n.outgoing_links.map(l => `[[${l.to_title}]]`).join(' ')
+    : '';
+
+  const cleanContent = (n.content || '')
+    .replace(/\[\[[^\]]+\]\]/g, '')
+    .trim();
+
+  return {
+    id: n.id,
+    title: n.title,
+    color: n.color || DEFAULT_COLOR,
+    folder: 'Second Brain',
+    updatedAt: (n.updated_at || '').slice(0, 10),
+    content: [cleanContent, tagLine, linkLine]
+      .filter(Boolean)
+      .join('\n'),
+  };
+}
+// color per note — used for node color and edge gradients
+const NOTE_COLORS = [
+  '#6366f1', '#10b981', '#f59e0b', '#ef4444', '#06b6d4',
+  '#ec4899', '#8b5cf6', '#14b8a6', '#f97316', '#84cc16',
+];
 const DEFAULT_COLOR = '#6366f1';
-const getColor = (folder) => FOLDER_COLORS[folder] || DEFAULT_COLOR;
+const getColor = (node) => node?.color || DEFAULT_COLOR;
 
 // parse notes into graph nodes and edges
 // extracts #tags and [[backlinks]] from note content
@@ -76,7 +102,7 @@ function parseGraph(notes) {
     const angle = (i / parsed.length) * Math.PI * 2;
     const r     = 200;
     return {
-      id: note.id, title: note.title, folder: note.folder,
+      id: note.id, title: note.title, color: note.color, folder: note.folder,
       updatedAt: note.updatedAt, tags: note.tags,
       backlinks: note.backlinks, content: note.content,
       x: Math.cos(angle) * r, y: Math.sin(angle) * r,
@@ -176,10 +202,17 @@ const S = {
     transition: 'all 0.15s', margin: '0 3px 5px 0',
   }),
   rightPanel: {
-    width: 260, flexShrink: 0, padding: 16,
-    borderLeft: '1px solid rgba(255,255,255,0.06)',
-    background: '#0d1117', overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 14,
-  },
+  width: 280,
+  boxSizing: 'border-box',
+  flexShrink: 0,
+  padding: 16,
+  borderLeft: '1px solid rgba(255,255,255,0.06)',
+  background: '#0d1117',
+  overflow: 'auto',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 14,
+},
   infoRow:   { display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 8 },
   infoLabel: { fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#4b5563', minWidth: 60 },
   infoVal:   { fontSize: 12, color: '#9ca3af', lineHeight: 1.5 },
@@ -190,6 +223,196 @@ const S = {
     display: 'flex', gap: 16, backdropFilter: 'blur(8px)', pointerEvents: 'none', whiteSpace: 'nowrap',
   },
 };
+
+function NoteDropZone({ onNoteAdded }) {
+  const [isOver, setIsOver] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState('');
+
+  const handleFile = async (file, sourceFileId) => {
+    setBusy(true);
+    setStatus(`Adding "${file.name}"...`);
+    try {
+      await secondBrainApi.createNoteFromUpload(file, { title: file.name, sourceFileId });
+
+      if (!sourceFileId) {
+        try {
+          const folderId = await ensureSecondBrainFolder();
+          await workspaceApi.uploadFile(folderId, file);
+        } catch (workspaceErr) {
+          console.warn('Workspace save skipped (note was still created):', workspaceErr);
+          setStatus(`"${file.name}" added. (Workspace save skipped.)`);
+          setTimeout(() => setStatus(''), 4000);
+          await onNoteAdded();
+          setBusy(false);
+          return;
+        }
+      }
+
+      setStatus(`"${file.name}" added.`);
+      setTimeout(() => setStatus(''), 3000);
+      await onNoteAdded();
+    } catch (err) {
+      setStatus(`Failed: ${err.message}`);
+      setTimeout(() => setStatus(''), 4000);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onDrop = async (e) => {
+    e.preventDefault();
+    setIsOver(false);
+
+    const treeData = e.dataTransfer.getData('application/json');
+    if (treeData) {
+      try {
+        const { fileId, fileName } = JSON.parse(treeData);
+        setStatus('Fetching file from workspace...');
+        const { preview } = await workspaceApi.getFilePreview(fileId);
+        const url = preview?.url;
+        if (!url) throw new Error('No preview URL — file may not exist in workspace yet.');
+        const resp = await fetch(url);
+        const blob = await resp.blob();
+        const file = new File([blob], fileName, { type: blob.type });
+        await handleFile(file, fileId);
+      } catch (err) {
+        setStatus(`Failed: ${err.message}`);
+        setTimeout(() => setStatus(''), 4000);
+      }
+      return;
+    }
+
+    if (e.dataTransfer.files?.length) {
+      for (const file of e.dataTransfer.files) {
+        const ext = file.name.split('.').pop().toLowerCase();
+        if (!['pdf', 'txt', 'md'].includes(ext)) continue;
+        await handleFile(file, null);
+      }
+    }
+  };
+
+  return (
+    <div
+      onDragOver={(e) => { e.preventDefault(); setIsOver(true); }}
+      onDragLeave={() => setIsOver(false)}
+      onDrop={onDrop}
+      style={{
+        margin: '0 14px 10px', padding: '14px 10px', borderRadius: 10,
+        border: `1.5px dashed ${isOver ? '#818cf8' : 'rgba(255,255,255,0.15)'}`,
+        background: isOver ? 'rgba(99,102,241,0.08)' : 'rgba(255,255,255,0.02)',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+        color: '#6b7280', fontSize: 11.5, textAlign: 'center', transition: 'all 0.15s',
+      }}
+    >
+      <Upload size={16} color={isOver ? '#818cf8' : '#4b5563'} />
+      <span>{busy ? status || 'Working...' : 'Drop PDF/TXT/MD here'}</span>
+      {!busy && status && (
+        <span style={{ color: status.startsWith('Failed') ? '#f87171' : '#34d399' }}>{status}</span>
+      )}
+    </div>
+  );
+}
+
+function ManualTagBacklinkForm({ note, allNotes, onUpdated }) {
+  const [tagInput, setTagInput] = useState('');
+  const [linkTarget, setLinkTarget] = useState('');
+
+  const submitTag = async () => {
+    if (!tagInput.trim()) return;
+    await secondBrainApi.addTags(note.id, tagInput.split(',').map(t => t.trim()).filter(Boolean));
+    setTagInput('');
+    onUpdated();
+  };
+
+  const submitLink = async () => {
+    if (!linkTarget) return;
+    await secondBrainApi.addBacklink(note.id, linkTarget);
+    setLinkTarget('');
+    onUpdated();
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <span style={S.sidebarLabel}>Add tag / backlink</span>
+      <div style={{ display: 'flex', gap: 4 }}>
+        <input
+          value={tagInput}
+          onChange={(e) => setTagInput(e.target.value)}
+          placeholder="tag1, tag2"
+          style={{ flex: 1, fontSize: 11, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, padding: '4px 6px', color: '#e5e7eb' }}
+        />
+        <button onClick={submitTag} style={{ fontSize: 11, padding: '4px 8px', borderRadius: 6, border: 'none', background: '#6366f1', color: '#fff', cursor: 'pointer' }}>Add</button>
+      </div>
+     <div
+  style={{
+    display: 'grid',
+    gridTemplateColumns: 'minmax(0, 1fr) 44px',
+    gap: 4,
+    width: '100%',
+  }}
+>
+  <select
+    value={linkTarget}
+    onChange={(e) => setLinkTarget(e.target.value)}
+    style={{
+      width: '100%',
+      minWidth: 0,
+      boxSizing: 'border-box',
+      fontSize: 11,
+      background: 'rgba(255,255,255,0.05)',
+      border: '1px solid rgba(255,255,255,0.1)',
+      borderRadius: 6,
+      color: '#e5e7eb',
+      padding: '4px 6px',
+    }}
+  >
+   <option
+  value=""
+  style={{
+    background: '#111827',
+    color: '#e5e7eb',
+  }}
+>
+  Link to note...
+</option>
+
+    {allNotes
+      .filter(n => n.id !== note.id)
+      .map(n => (
+        <option
+  key={n.id}
+  value={n.id}
+  style={{
+    background: '#111827',
+    color: '#e5e7eb',
+  }}
+>
+  {n.title}
+</option>
+      ))}
+  </select>
+
+  <button
+    onClick={submitLink}
+    style={{
+      width: 44,
+      minWidth: 44,
+      padding: '4px 0',
+      borderRadius: 6,
+      border: 'none',
+      background: '#6366f1',
+      color: '#fff',
+      cursor: 'pointer',
+      fontSize: 11,
+    }}
+  >
+    Link
+  </button>
+</div>
+    </div>
+  );
+}
 
 export default function SecondBrainPage() {
   const canvasRef = useRef(null);
@@ -212,13 +435,46 @@ export default function SecondBrainPage() {
   const [searchQuery,  setSearchQuery]  = useState('');
   const [zoomDisplay,  setZoomDisplay]  = useState(100);
 
-  // parse the demo notes into nodes and edges on first render
-  useEffect(() => {
-    const g = parseGraph(DEMO_NOTES);
+  // ── confirm dialog for tag/backlink removal ──
+  const [confirm, setConfirm] = useState({
+    open: false,
+    type: 'danger',
+    title: '',
+    message: '',
+    confirmLabel: 'Remove',
+    onConfirm: () => {},
+  });
+  const closeConfirm = () => setConfirm(prev => ({ ...prev, open: false }));
+  const openConfirm = (opts) => setConfirm({ open: true, cancelLabel: 'Cancel', ...opts, onCancel: closeConfirm });
+
+  const loadGraphFrom = (notesArray) => {
+    const g = parseGraph(notesArray);
     g.idMap = {};
     g.nodes.forEach(n => { g.idMap[n.id] = n; });
     simRef.current = g;
     setGraphData(g);
+  };
+
+  const refetchNotes = async () => {
+    try {
+      const apiNotes = await secondBrainApi.listNotes();
+      loadGraphFrom(apiNotes?.length ? apiNotes.map(apiNoteToGraphNote) : FALLBACK_DEMO_NOTES);
+    } catch (err) {
+      console.warn('Second Brain notes fetch failed:', err);
+    }
+  };
+
+  // fetch real notes on first render, falling back to 2 demo notes if empty/failed
+  useEffect(() => {
+    (async () => {
+      try {
+        const apiNotes = await secondBrainApi.listNotes();
+        loadGraphFrom(apiNotes?.length ? apiNotes.map(apiNoteToGraphNote) : FALLBACK_DEMO_NOTES);
+      } catch (err) {
+        console.warn('Second Brain notes fetch failed, using demo notes:', err);
+        loadGraphFrom(FALLBACK_DEMO_NOTES);
+      }
+    })();
   }, []);
 
   // main physics + render loop — runs once graphData is ready
@@ -295,41 +551,25 @@ export default function SecondBrainPage() {
 
       // integrate forces into velocity and position
       nodes.forEach(n => {
-        if (n.pinned) return;
-        n.vx = (n.vx + n.fx) * DAMPING;
-        n.vy = (n.vy + n.fy) * DAMPING;
-        n.x += n.vx;
-        n.y += n.vy;
+        if (n.pinned) { n.vx = 0; n.vy = 0; return; }
+        n.vx += n.fx; n.vy += n.fy;
+        n.vx *= DAMPING; n.vy *= DAMPING;
+        n.x   += n.vx;   n.y   += n.vy;
       });
     };
 
-    // draw one frame onto the canvas
     const draw = () => {
+      const ctx2 = ctx;
       const { zoom, panX, panY, hoveredId, selectedId, filterTag, searchQuery: sq } = stateRef.current;
       const { nodes, edges } = simRef.current;
-      const W = canvas.width, H = canvas.height;
 
-      ctx.clearRect(0, 0, W, H);
+      // clear canvas
+      ctx2.setTransform(1, 0, 0, 1, 0, 0);
+      ctx2.clearRect(0, 0, canvas.width, canvas.height);
+      ctx2.translate(panX, panY);
+      ctx2.scale(zoom, zoom);
 
-      // dark background
-      ctx.fillStyle = '#0b0f19';
-      ctx.fillRect(0, 0, W, H);
-
-      // subtle dot grid that moves with pan/zoom
-      ctx.fillStyle = 'rgba(255,255,255,0.022)';
-      const gSize = 36 * zoom;
-      const offX  = ((panX % gSize) + gSize) % gSize;
-      const offY  = ((panY % gSize) + gSize) % gSize;
-      for (let x = offX; x < W; x += gSize)
-        for (let y = offY; y < H; y += gSize) {
-          ctx.beginPath(); ctx.arc(x, y, 1, 0, Math.PI * 2); ctx.fill();
-        }
-
-      ctx.save();
-      ctx.translate(panX, panY);
-      ctx.scale(zoom, zoom);
-
-      // figure out which nodes are dimmed by the current filter/search
+      // dimmed ids — nodes not matching the active filter/search
       const dimmedIds = new Set();
       if (filterTag || sq) {
         nodes.forEach(n => {
@@ -348,71 +588,69 @@ export default function SecondBrainPage() {
         const highlighted = selectedId && (src.id === selectedId || tgt.id === selectedId);
         if ((isDimmed(src.id) || isDimmed(tgt.id)) && !highlighted) return;
 
-        const sc    = getColor(src.folder);
-        const tc    = getColor(tgt.folder);
+        const sc    = getColor(src);
+        const tc    = getColor(tgt);
         const alpha = highlighted ? 'cc' : e.type === 'backlink' ? '50' : '28';
-        const grad  = ctx.createLinearGradient(src.x, src.y, tgt.x, tgt.y);
+        const grad  = ctx2.createLinearGradient(src.x, src.y, tgt.x, tgt.y);
         grad.addColorStop(0, sc + alpha);
         grad.addColorStop(1, tc + alpha);
 
-        ctx.beginPath();
-        ctx.moveTo(src.x, src.y);
-        ctx.lineTo(tgt.x, tgt.y);
-        ctx.strokeStyle = grad;
-        ctx.lineWidth   = (highlighted ? 2.5 : e.type === 'backlink' ? 1.5 : 1) / zoom;
-        if (highlighted) { ctx.shadowBlur = 10 / zoom; ctx.shadowColor = sc; }
-        ctx.stroke();
-        ctx.shadowBlur = 0;
+        ctx2.beginPath();
+        ctx2.moveTo(src.x, src.y);
+        ctx2.lineTo(tgt.x, tgt.y);
+        ctx2.strokeStyle = grad;
+        ctx2.lineWidth   = (highlighted ? 2.5 : e.type === 'backlink' ? 1.5 : 1) / zoom;
+        if (highlighted) { ctx2.shadowBlur = 10 / zoom; ctx2.shadowColor = sc; }
+        ctx2.stroke();
+        ctx2.shadowBlur = 0;
       });
 
       // draw nodes
       nodes.forEach(n => {
-        const color      = getColor(n.folder);
+        const color      = getColor(n);
         const isSelected = n.id === selectedId;
         const isHovered  = n.id === hoveredId;
         const dimmed     = isDimmed(n.id) && !isSelected;
         const r          = n.radius * (isSelected ? 1.35 : isHovered ? 1.18 : 1);
 
-        ctx.globalAlpha = dimmed ? 0.2 : 1;
+        ctx2.globalAlpha = dimmed ? 0.2 : 1;
 
         // glow ring around selected or hovered nodes
         if (isSelected || isHovered) {
           const glowR = r * 3;
-          const grd   = ctx.createRadialGradient(n.x, n.y, r * 0.5, n.x, n.y, glowR);
+          const grd   = ctx2.createRadialGradient(n.x, n.y, r * 0.5, n.x, n.y, glowR);
           grd.addColorStop(0, color + (isSelected ? '55' : '30'));
           grd.addColorStop(1, color + '00');
-          ctx.beginPath(); ctx.arc(n.x, n.y, glowR, 0, Math.PI * 2);
-          ctx.fillStyle = grd; ctx.fill();
+          ctx2.beginPath(); ctx2.arc(n.x, n.y, glowR, 0, Math.PI * 2);
+          ctx2.fillStyle = grd; ctx2.fill();
         }
 
         // node circle with radial gradient for a 3D look
-        const nodeGrd = ctx.createRadialGradient(n.x - r * 0.3, n.y - r * 0.35, 0, n.x, n.y, r);
+        const nodeGrd = ctx2.createRadialGradient(n.x - r * 0.3, n.y - r * 0.35, 0, n.x, n.y, r);
         nodeGrd.addColorStop(0, color + 'ff');
         nodeGrd.addColorStop(1, color + '88');
-        ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
-        ctx.fillStyle  = nodeGrd;
-        ctx.shadowBlur = isSelected ? 22 / zoom : isHovered ? 12 / zoom : 6 / zoom;
-        ctx.shadowColor = color;
-        ctx.fill();
-        ctx.shadowBlur = 0;
+        ctx2.beginPath(); ctx2.arc(n.x, n.y, r, 0, Math.PI * 2);
+        ctx2.fillStyle  = nodeGrd;
+        ctx2.shadowBlur = isSelected ? 22 / zoom : isHovered ? 12 / zoom : 6 / zoom;
+        ctx2.shadowColor = color;
+        ctx2.fill();
+        ctx2.shadowBlur = 0;
 
         // border ring
-        ctx.strokeStyle = isSelected ? '#ffffff' : color + '70';
-        ctx.lineWidth   = (isSelected ? 2 : 1) / zoom;
-        ctx.stroke();
+        ctx2.strokeStyle = isSelected ? '#ffffff' : color + '70';
+        ctx2.lineWidth   = (isSelected ? 2 : 1) / zoom;
+        ctx2.stroke();
 
         // label below node
         const fs  = Math.max(8.5, 11 / zoom);
-        ctx.font      = `${isSelected ? 600 : 400} ${fs}px system-ui, sans-serif`;
-        ctx.fillStyle = dimmed ? '#2d3748' : isSelected ? '#f9fafb' : '#64748b';
-        ctx.textAlign = 'center';
-        const label = n.title.length > 20 ? n.title.slice(0, 18) + '…' : n.title;
-        ctx.fillText(label, n.x, n.y + r + 13 / zoom);
+        ctx2.font      = `${isSelected ? 600 : 400} ${fs}px system-ui, sans-serif`;
+        ctx2.fillStyle = dimmed ? '#2d3748' : isSelected ? '#f9fafb' : '#64748b';
+        ctx2.textAlign = 'center';
+        const label = n.title.length > 20 ? n.title.slice(0, 18) + '\u2026' : n.title;
+        ctx2.fillText(label, n.x, n.y + r + 13 / zoom);
 
-        ctx.globalAlpha = 1;
+        ctx2.globalAlpha = 1;
       });
-
-      ctx.restore();
     };
 
     // run physics for first 320 frames to let layout settle, then only on drag
@@ -639,6 +877,8 @@ export default function SecondBrainPage() {
             </div>
           </div>
 
+          <NoteDropZone onNoteAdded={refetchNotes} />
+
           <div style={{ ...S.sidebarSection, flex: 1, overflowY: 'auto', paddingBottom: 14 }}>
             <span style={{ ...S.sidebarLabel, marginTop: 12, display: 'block' }}>
               Notes ({filteredNotes.length})
@@ -646,7 +886,7 @@ export default function SecondBrainPage() {
             {filteredNotes.map(n => (
               <div key={n.id} style={S.noteItem(selectedNode?.id === n.id)} onClick={() => focusNode(n)}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ width: 7, height: 7, borderRadius: '50%', background: getColor(n.folder), flexShrink: 0 }} />
+                  <span style={{ width: 7, height: 7, borderRadius: '50%', background: getColor(n), flexShrink: 0 }} />
                   <div style={S.noteTitle}>{n.title}</div>
                 </div>
                 <div style={{ ...S.noteFolder, paddingLeft: 13 }}>
@@ -659,15 +899,14 @@ export default function SecondBrainPage() {
             )}
           </div>
 
-          {/* folder color legend */}
+          {/* note color palette — available colors */}
           <div style={{ padding: '10px 14px', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
-            <span style={S.sidebarLabel}>Folders</span>
-            {Object.entries(FOLDER_COLORS).map(([folder, color]) => (
-              <div key={folder} style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 5 }}>
-                <span style={{ width: 8, height: 8, borderRadius: '50%', background: color, boxShadow: `0 0 6px ${color}` }} />
-                <span style={{ fontSize: 11, color: '#4b5563' }}>{folder}</span>
-              </div>
-            ))}
+            <span style={S.sidebarLabel}>Note Colors</span>
+            <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 4 }}>
+              {NOTE_COLORS.map(c => (
+                <span key={c} style={{ width: 10, height: 10, borderRadius: '50%', background: c, boxShadow: `0 0 4px ${c}` }} />
+              ))}
+            </div>
           </div>
         </div>
 
@@ -690,49 +929,279 @@ export default function SecondBrainPage() {
                 <span style={{ color: '#e5e7eb', fontWeight: 700, fontSize: 14, lineHeight: 1.4, flex: 1 }}>
                   {selectedNode.title}
                 </span>
-                <X size={14} color="#4b5563" style={{ cursor: 'pointer', flexShrink: 0, marginTop: 2 }}
-                  onClick={() => { stateRef.current.selectedId = null; setSelectedNode(null); }} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+  <button
+    type="button"
+    title="Delete note"
+    onClick={(e) => {
+      e.stopPropagation();
+
+      openConfirm({
+        title: `Delete "${selectedNode.title}"?`,
+        message: `Are you sure you want to permanently delete this note?`,
+        type: 'danger',
+        confirmLabel: 'Delete Note',
+        onConfirm: async () => {
+          closeConfirm();
+
+          try {
+            await secondBrainApi.deleteNote(selectedNode.id);
+
+            stateRef.current.selectedId = null;
+            setSelectedNode(null);
+
+            await refetchNotes();
+          } catch (err) {
+            console.error('Failed to delete note:', err);
+          }
+        },
+      });
+    }}
+    style={{
+      width: 28,
+      height: 28,
+      border: '1px solid rgba(248,113,113,0.2)',
+      background: 'rgba(248,113,113,0.06)',
+      color: '#f87171',
+      borderRadius: 6,
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+    }}
+  >
+    🗑
+  </button>
+
+  <X
+    size={14}
+    color="#4b5563"
+    style={{ cursor: 'pointer', flexShrink: 0, marginTop: 2 }}
+    onClick={() => {
+      stateRef.current.selectedId = null;
+      setSelectedNode(null);
+    }}
+  />
+</div>
               </div>
               <div style={S.infoRow}>
                 <span style={S.infoLabel}>Folder</span>
-                <span style={{ ...S.infoVal, color: getColor(selectedNode.folder) }}>{selectedNode.folder}</span>
+                <span style={{ ...S.infoVal, color: getColor(selectedNode) }}>{selectedNode.folder}</span>
               </div>
               <div style={S.infoRow}>
                 <span style={S.infoLabel}>Updated</span>
                 <span style={S.infoVal}>{selectedNode.updatedAt}</span>
               </div>
-            </div>
 
-            {/* tags on the selected note */}
-            {selectedNode.tags.length > 0 && (
+              {/* ── note color picker ── */}
               <div>
-                <span style={S.sidebarLabel}>Tags</span>
-                <div style={{ display: 'flex', flexWrap: 'wrap' }}>
-                  {selectedNode.tags.map(t => (
-                    <span key={t} style={{ ...S.tagChip(false), margin: '0 4px 4px 0' }}>#{t}</span>
+                <span style={S.sidebarLabel}>Note Color</span>
+                <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 4 }}>
+                  {NOTE_COLORS.map(c => (
+                    <button
+                      key={c}
+                      type="button"
+                      title={c}
+                      onClick={async () => {
+                        try {
+                          await secondBrainApi.updateNote(selectedNode.id, { color: c });
+                          // Update local graph node color
+                          const g = simRef.current;
+                          if (g?.idMap?.[selectedNode.id]) {
+                            g.idMap[selectedNode.id].color = c;
+                          }
+                          // Update sidebar node color in graphData
+                          setGraphData(prev => {
+                            if (!prev) return prev;
+                            return {
+                              ...prev,
+                              nodes: prev.nodes.map(n =>
+                                n.id === selectedNode.id ? { ...n, color: c } : n
+                              ),
+                            };
+                          });
+                          setSelectedNode(prev => ({ ...prev, color: c }));
+                        } catch (err) {
+                          console.error('Failed to update color:', err);
+                        }
+                      }}
+                      style={{
+                        width: 22,
+                        height: 22,
+                        borderRadius: '50%',
+                        border: `2px solid ${getColor(selectedNode) === c ? '#fff' : 'transparent'}`,
+                        background: c,
+                        cursor: 'pointer',
+                        transition: 'all 0.15s',
+                        outline: 'none',
+                        boxShadow: getColor(selectedNode) === c ? `0 0 8px ${c}` : 'none',
+                      }}
+                    />
                   ))}
                 </div>
               </div>
-            )}
+            </div>
+
+            {/* tags on the selected note */}
+           {selectedNode.tags.length > 0 && (
+  <div>
+    <span style={S.sidebarLabel}>Tags</span>
+
+    <div style={{ display: 'flex', flexWrap: 'wrap' }}>
+      {selectedNode.tags.map(t => (
+        <span
+          key={t}
+          style={{
+            ...S.tagChip(false),
+            margin: '0 4px 4px 0',
+            cursor: 'default',
+            paddingRight: 5,
+          }}
+        >
+          #{t}
+
+          <button
+            type="button"
+            title={`Remove #${t}`}
+            onClick={async (e) => {
+              e.stopPropagation();
+
+              openConfirm({
+                title: `Remove tag #${t}?`,
+                message: `Are you sure you want to remove #${t} from "${selectedNode.title}"?`,
+                type: 'warning',
+                confirmLabel: 'Remove Tag',
+                onConfirm: async () => {
+                  closeConfirm();
+                  try {
+                    await secondBrainApi.removeTag(selectedNode.id, t);
+                    await refetchNotes();
+                  } catch (err) {
+                    console.error('Failed to remove tag:', err);
+                  }
+                },
+              });
+            }}
+            style={{
+              border: 'none',
+              background: 'transparent',
+              color: '#6b7280',
+              cursor: 'pointer',
+              padding: 0,
+              marginLeft: 3,
+              fontSize: 13,
+              lineHeight: 1,
+            }}
+          >
+            ×
+          </button>
+        </span>
+      ))}
+    </div>
+  </div>
+)}
 
             {/* notes this one links to */}
-            {selectedNode.backlinks.length > 0 && (
-              <div>
-                <span style={S.sidebarLabel}>Links to</span>
-                {selectedNode.backlinks.map(link => (
-                  <div key={link} style={{ color: '#6366f1', fontSize: 12, marginBottom: 4, cursor: 'pointer' }}
-                    onClick={() => {
-                      const target = graphData?.nodes.find(n => n.title.toLowerCase() === link.toLowerCase());
-                      if (target) focusNode(target);
-                    }}>
-                    {link}
-                  </div>
-                ))}
-              </div>
-            )}
+           {selectedNode.backlinks.length > 0 && (
+  <div>
+    <span style={S.sidebarLabel}>Links to</span>
+
+    {selectedNode.backlinks.map(link => {
+      const target = graphData?.nodes.find(
+        n => n.title.toLowerCase() === link.toLowerCase()
+      );
+
+      return (
+        <div
+          key={link}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            width: '100%',
+            marginBottom: 6,
+            minWidth: 0,
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => {
+              if (target) focusNode(target);
+            }}
+            title={`Open ${link}`}
+            style={{
+              flex: 1,
+              minWidth: 0,
+              border: 'none',
+              background: 'transparent',
+              color: '#6366f1',
+              fontSize: 12,
+              textAlign: 'left',
+              padding: 0,
+              cursor: target ? 'pointer' : 'default',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {link}
+          </button>
+
+          <button
+            type="button"
+            title={`Unlink ${link}`}
+            onClick={async (e) => {
+              e.stopPropagation();
+
+              if (!target) return;
+
+              openConfirm({
+                title: `Remove link to "${link}"?`,
+                message: `Are you sure you want to remove the link from "${selectedNode.title}" to "${link}"?`,
+                type: 'warning',
+                confirmLabel: 'Remove Link',
+                onConfirm: async () => {
+                  closeConfirm();
+                  try {
+                    await secondBrainApi.removeBacklink(
+                      selectedNode.id,
+                      target.id
+                    );
+                    await refetchNotes();
+                  } catch (err) {
+                    console.error('Failed to unlink note:', err);
+                  }
+                },
+              });
+            }}
+            style={{
+              flexShrink: 0,
+              width: 24,
+              height: 24,
+              border: '1px solid rgba(248,113,113,0.2)',
+              background: 'rgba(248,113,113,0.06)',
+              color: '#f87171',
+              borderRadius: 5,
+              cursor: 'pointer',
+              fontSize: 13,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            ×
+          </button>
+        </div>
+      );
+    })}
+  </div>
+)}
+
+            <ManualTagBacklinkForm note={selectedNode} allNotes={graphData?.nodes || []} onUpdated={refetchNotes} />
 
             {/* note content preview */}
             <div>
+              <span style={S.sidebarLabel}>Content</span>
               <span style={S.sidebarLabel}>Content</span>
               <p style={{ ...S.infoVal, fontSize: 11, lineHeight: 1.6 }}>
                 {selectedNode.content.replace(/\[\[.*?\]\]/g, '').replace(/#\w+/g, '').trim().slice(0, 200)}
@@ -751,6 +1220,18 @@ export default function SecondBrainPage() {
         )}
 
       </div>
+
+      {/* ── confirmation dialog ── */}
+      <ConfirmDialog
+        isOpen={confirm.open}
+        title={confirm.title}
+        message={confirm.message}
+        type={confirm.type}
+        confirmLabel={confirm.confirmLabel}
+        cancelLabel={confirm.cancelLabel}
+        onConfirm={confirm.onConfirm}
+        onCancel={confirm.onCancel}
+      />
     </div>
   );
 }

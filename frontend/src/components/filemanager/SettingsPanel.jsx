@@ -1,22 +1,37 @@
 import React, { useEffect, useState } from 'react';
-import { X, User, Palette, Bot, Lock, Upload, HardDrive, CreditCard} from 'lucide-react';
+import { X, User, Palette, Upload, HardDrive } from 'lucide-react';
 import { useTheme } from '@/context/ThemeContext';
 import { config } from '@/config/env';
 import { getAccessToken, clearTokens } from '@/utils/tokenStorage';
+import { workspaceApi } from '@/services/workspaceApi';
+
+const BYTES_PER_MB = 1024 * 1024;
+const BYTES_PER_GB = 1024 * BYTES_PER_MB;
+
+const formatStorageValue = (bytes) => {
+  const value = Number(bytes) || 0;
+  if (value >= BYTES_PER_GB) {
+    return `${Math.round((value / BYTES_PER_GB) * 100) / 100} GB`;
+  }
+  return `${Math.round((value / BYTES_PER_MB) * 100) / 100} MB`;
+};
 
 const SettingsPanel = ({ onClose }) => {
   const { isDark, toggleTheme, theme, fontSize, setFontSize } = useTheme();
   const [activeSection, setActiveSection] = useState('profile');
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
-  const [responseStyle, setResponseStyle] = useState('Simple');
-  const [tone, setTone] = useState('Friendly');
   const [reminder, setReminder] = useState(false);
   const [reminderTime, setReminderTime] = useState('09:00');
-  const [saveChatHistory, setSaveChatHistory] = useState(true);
   const [profilePic, setProfilePic] = useState(null);
   const [savingProfile, setSavingProfile] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
   const [profileError, setProfileError] = useState('');
+  const [storageUsage, setStorageUsage] = useState(null);
+  const [storageLoading, setStorageLoading] = useState(false);
+  const [storageError, setStorageError] = useState('');
+  const [payhereLoading, setPayhereLoading] = useState(false);
+  const [payhereError, setPayhereError] = useState('');
 
   const request = async (path, options = {}) => {
     const token = getAccessToken();
@@ -78,6 +93,72 @@ const SettingsPanel = ({ onClose }) => {
     loadProfile();
   }, []);
 
+  useEffect(() => {
+    if (activeSection !== 'storage') return undefined;
+
+    let isMounted = true;
+    const loadStorageUsage = () => {
+      setStorageLoading(true);
+      setStorageError('');
+      workspaceApi.getStorageUsage()
+        .then((usage) => {
+          if (isMounted) setStorageUsage(usage);
+        })
+        .catch((err) => {
+          if (isMounted) setStorageError(err.message || 'Failed to load storage usage');
+        })
+        .finally(() => {
+          if (isMounted) setStorageLoading(false);
+        });
+    };
+
+    loadStorageUsage();
+    window.addEventListener('neuranote:payment-status-updated', loadStorageUsage);
+    window.addEventListener('focus', loadStorageUsage);
+
+    return () => {
+      isMounted = false;
+      window.removeEventListener('neuranote:payment-status-updated', loadStorageUsage);
+      window.removeEventListener('focus', loadStorageUsage);
+    };
+  }, [activeSection]);
+
+  const handleProUpgrade = async () => {
+    setPayhereLoading(true);
+    setPayhereError('');
+
+    try {
+      const checkout = await workspaceApi.createPayHereCheckout();
+      if (!checkout?.checkout_url || !checkout?.fields) {
+        throw new Error('The payment checkout could not be prepared. Please try again.');
+      }
+
+      const form = document.createElement('form');
+      form.method = 'POST';
+      form.action = checkout.checkout_url;
+      form.style.display = 'none';
+
+      Object.entries(checkout.fields).forEach(([name, value]) => {
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = name;
+        input.value = String(value ?? '');
+        form.appendChild(input);
+      });
+
+      document.body.appendChild(form);
+      form.submit();
+    } catch (err) {
+      if (err.code === 'active_pro_subscription') {
+        const expiry = err.expiresAt ? new Date(err.expiresAt).toLocaleDateString() : 'the current expiry date';
+        setPayhereError(`You already have an active Pro account. Your Pro plan is valid until ${expiry}.`);
+      } else {
+        setPayhereError(err.message || 'Unable to start checkout. Please try again.');
+      }
+      setPayhereLoading(false);
+    }
+  };
+
   const handleProfileSave = async () => {
     setSavingProfile(true);
     setProfileError('');
@@ -102,7 +183,19 @@ const SettingsPanel = ({ onClose }) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
+    if (file.type && !file.type.startsWith('image/')) {
+      setProfileError('Please select a valid image file (JPG, PNG, WebP, etc.)');
+      return;
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      setProfileError('Image file size must be under 10MB');
+      return;
+    }
+
     setProfileError('');
+    setUploadingImage(true);
+    const previousPic = profilePic;
     const localPreview = URL.createObjectURL(file);
     setProfilePic(localPreview);
 
@@ -113,25 +206,24 @@ const SettingsPanel = ({ onClose }) => {
         method: 'POST',
         body: formData,
       });
-      setProfilePic(updated.avatar_url || localPreview);
-      setDisplayName(updated.full_name || displayName);
-      setEmail(updated.email || email);
+      const newAvatar = updated?.avatar_url || localPreview;
+      setProfilePic(newAvatar);
+      setDisplayName(updated?.full_name || displayName);
+      setEmail(updated?.email || email);
       syncUserToLocalStorage(updated);
     } catch (err) {
+      setProfilePic(previousPic);
       setProfileError(err.message || 'Failed to upload profile image');
     } finally {
+      setUploadingImage(false);
       event.target.value = '';
-      URL.revokeObjectURL(localPreview);
     }
   };
 
   const sections = [
     { id: 'profile', label: 'Profile', icon: User },
     { id: 'appearance', label: 'Appearance', icon: Palette },
-    { id: 'ai', label: 'AI Preferences', icon: Bot },
-     { id: 'storage', label: 'Storage', icon: HardDrive },
-  { id: 'payment', label: 'Payment', icon: CreditCard },
-    { id: 'privacy', label: 'Privacy', icon: Lock },
+    { id: 'storage', label: 'Storage', icon: HardDrive },
   ];
 
   const Toggle = ({ value, onChange }) => (
@@ -158,7 +250,7 @@ const SettingsPanel = ({ onClose }) => {
     </div>
   );
 
-  const SectionButton = ({ id, label, icon: Icon }) => (
+  const SectionButton = ({ id, label, icon }) => (
     <div
       onClick={() => setActiveSection(id)}
       style={{
@@ -170,7 +262,7 @@ const SettingsPanel = ({ onClose }) => {
         fontSize: '14px',
       }}
     >
-      <Icon size={18} />
+      {React.createElement(icon, { size: 18 })}
       {label}
     </div>
   );
@@ -202,10 +294,18 @@ const SettingsPanel = ({ onClose }) => {
                 display: 'flex', alignItems: 'center', gap: '6px',
                 backgroundColor: '#f0eeff', color: '#6C5DD3',
                 padding: '8px 14px', borderRadius: '10px',
-                cursor: 'pointer', fontSize: '13px', fontWeight: '600'
+                cursor: uploadingImage ? 'not-allowed' : 'pointer',
+                fontSize: '13px', fontWeight: '600',
+                opacity: uploadingImage ? 0.7 : 1,
               }}>
-                <Upload size={14} /> Upload Photo
-                <input type="file" hidden accept="image/*" onChange={handleImageUpload} />
+                <Upload size={14} /> {uploadingImage ? 'Uploading...' : 'Upload Photo'}
+                <input
+                  type="file"
+                  hidden
+                  accept="image/png,image/jpeg,image/jpg,image/webp,image/*"
+                  disabled={uploadingImage}
+                  onChange={handleImageUpload}
+                />
               </label>
             </div>
 
@@ -305,55 +405,6 @@ const SettingsPanel = ({ onClose }) => {
           </div>
         );
 
-      case 'ai':
-        return (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '700', color: theme.colors.text.primary }}>🤖 AI Preferences</h3>
-
-            {/* Response style */}
-            <div>
-              <p style={{ margin: '0 0 10px', fontSize: '14px', fontWeight: '600', color: theme.colors.text.primary }}>Response Style</p>
-              <div style={{ display: 'flex', gap: '10px' }}>
-                {['Simple', 'Detailed'].map(style => (
-                  <button
-                    key={style}
-                    onClick={() => setResponseStyle(style)}
-                    style={{
-                      padding: '8px 18px', borderRadius: '10px', cursor: 'pointer',
-                      border: '1px solid #eee', fontSize: '13px', fontWeight: '600',
-                      backgroundColor: responseStyle === style ? '#6C5DD3' : 'white',
-                      color: responseStyle === style ? 'white' : '#555',
-                    }}
-                  >
-                    {style}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Tone */}
-            <div>
-              <p style={{ margin: '0 0 10px', fontSize: '14px', fontWeight: '600', color: theme.colors.text.primary }}>Tone</p>
-              <div style={{ display: 'flex', gap: '10px' }}>
-                {['Friendly', 'Formal'].map(t => (
-                  <button
-                    key={t}
-                    onClick={() => setTone(t)}
-                    style={{
-                      padding: '8px 18px', borderRadius: '10px', cursor: 'pointer',
-                      border: '1px solid #eee', fontSize: '13px', fontWeight: '600',
-                      backgroundColor: tone === t ? '#6C5DD3' : 'white',
-                      color: tone === t ? 'white' : '#555',
-                    }}
-                  >
-                    {t}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        );
-
       case 'notifications':
         return (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -386,39 +437,21 @@ const SettingsPanel = ({ onClose }) => {
           </div>
         );
 
-      case 'privacy':
-        return (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '700', color: theme.colors.text.primary }}>🔒 Privacy</h3>
-
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <p style={{ margin: 0, fontSize: '14px', fontWeight: '600', color: theme.colors.text.primary }}>Save Chat History</p>
-                <p style={{ margin: 0, fontSize: '12px', color: theme.colors.text.secondary }}>Store your conversations</p>
-              </div>
-              <Toggle value={saveChatHistory} onChange={setSaveChatHistory} />
-            </div>
-
-            <div>
-              <p style={{ margin: '0 0 10px', fontSize: '14px', fontWeight: '600', color: theme.colors.text.primary }}>Delete All Chat History</p>
-              <button
-                onClick={() => confirm('Are you sure? This cannot be undone.') && alert('Chat history deleted!')}
-                style={{
-                  backgroundColor: theme.isDark ? 'rgba(231, 76, 60, 0.1)' : '#fff0f0', color: '#e74c3c',
-                  border: `1px solid ${theme.isDark ? 'rgba(231, 76, 60, 0.3)' : '#ffd0d0'}`, borderRadius: '10px',
-                  padding: '12px 20px', cursor: 'pointer',
-                  fontSize: '14px', fontWeight: '600',
-                  transition: 'all 0.3s ease',
-                }}
-              >
-                🗑 Delete All History
-              </button>
-            </div>
-          </div>
-        );
-
         case 'storage':
-  return (
+  {
+    const storageLimitBytes = Number(storageUsage?.storage_limit_bytes) || 0;
+    const storageUsedBytes = Number(storageUsage?.storage_used_bytes) || 0;
+    const storageRemainingBytes = Math.max(
+      Number(storageUsage?.storage_remaining_bytes) || storageLimitBytes - storageUsedBytes,
+      0,
+    );
+    const storagePercentage = storageLimitBytes > 0
+      ? Math.min(100, Math.round((storageUsedBytes / storageLimitBytes) * 100))
+      : 0;
+    const planName = storageUsage?.plan_name || 'Loading...';
+    const isPro = (storageUsage?.plan_code || '').toLowerCase() === 'pro';
+
+    return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
       <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '700', color: theme.colors.text.primary }}>🗄️ Storage</h3>
 
@@ -428,29 +461,38 @@ const SettingsPanel = ({ onClose }) => {
         display: 'flex', justifyContent: 'space-between', alignItems: 'center', transition: 'background-color 0.3s', border: `1px solid ${theme.colors.accent}20`,
       }}>
         <div>
-          <p style={{ margin: 0, fontWeight: '700', color: theme.colors.accent, fontSize: '16px' }}>Free Plan</p>
-          <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: theme.colors.text.secondary }}>500 MB storage on AWS</p>
+          <p style={{ margin: 0, fontWeight: '700', color: theme.colors.accent, fontSize: '16px' }}>{isPro ? 'Pro Account' : `${planName} Plan`}</p>
+          <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: theme.colors.text.secondary }}>{storageUsage ? `${formatStorageValue(storageLimitBytes)} storage on AWS` : 'Loading storage plan...'}</p>
+          {isPro && storageUsage?.subscription_expires_at && (
+            <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: theme.colors.text.secondary }}>
+              Active until {new Date(storageUsage.subscription_expires_at).toLocaleDateString()}
+            </p>
+          )}
         </div>
         <span style={{
           backgroundColor: theme.colors.accent, color: 'white',
           padding: '6px 14px', borderRadius: '20px', fontSize: '12px', fontWeight: '600'
-        }}>FREE</span>
+        }}>{storageUsage ? (storageUsage.plan_code || '').toUpperCase() : '...'}</span>
       </div>
 
       {/* Storage bar */}
       <div>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
           <span style={{ fontSize: '13px', fontWeight: '600', color: '#1a1a2e' }}>Storage Used</span>
-          <span style={{ fontSize: '13px', color: '#888' }}>120 MB / 500 MB</span>
+          <span style={{ fontSize: '13px', color: '#888' }}>
+            {storageLoading ? 'Loading...' : `${formatStorageValue(storageUsedBytes)} / ${formatStorageValue(storageLimitBytes)}`}
+          </span>
         </div>
         <div style={{ backgroundColor: theme.colors.ui.border, borderRadius: '10px', height: '12px', overflow: 'hidden' }}>
           <div style={{
-            width: '24%', height: '100%',
+            width: `${storagePercentage}%`, height: '100%',
             backgroundColor: theme.colors.accent, borderRadius: '10px',
             transition: 'width 0.3s ease'
           }} />
         </div>
-        <p style={{ fontSize: '12px', color: theme.colors.text.tertiary, marginTop: '8px', fontWeight: '500' }}>24% used — 380 MB remaining</p>
+        <p style={{ fontSize: '12px', color: theme.colors.text.tertiary, marginTop: '8px', fontWeight: '500' }}>
+          {storageError || `${storagePercentage}% used — ${formatStorageValue(storageRemainingBytes)} remaining`}
+        </p>
       </div>
 
       {/* Upgrade prompt */}
@@ -458,110 +500,31 @@ const SettingsPanel = ({ onClose }) => {
         border: `1.5px solid ${theme.colors.ui.border}`, borderRadius: '12px', padding: '20px',
         backgroundColor: theme.colors.bg.secondary, transition: 'all 0.3s'
       }}>
-        <p style={{ margin: '0 0 6px', fontWeight: '600', fontSize: '15px', color: theme.colors.text.primary }}>Need more storage?</p>
-        <p style={{ margin: '0 0 14px', fontSize: '13px', color: theme.colors.text.secondary, fontWeight: '500' }}>Upgrade to Pro for 10 GB on AWS Cloud</p>
-        <button style={{
+        <p style={{ margin: '0 0 6px', fontWeight: '600', fontSize: '15px', color: theme.colors.text.primary }}>{isPro ? 'Pro subscription active' : 'Need more storage?'}</p>
+        <p style={{ margin: '0 0 14px', fontSize: '13px', color: theme.colors.text.secondary, fontWeight: '500' }}>
+          {isPro ? `You already have an active Pro subscription until ${new Date(storageUsage.subscription_expires_at).toLocaleDateString()}.` : 'Upgrade to Pro for more storage'}
+        </p>
+        {payhereError && (
+          <p style={{ margin: '0 0 12px', color: '#d14343', fontSize: '12px' }}>{payhereError}</p>
+        )}
+        {!isPro && <button style={{
           backgroundColor: theme.colors.accent, color: 'white', border: 'none',
           borderRadius: '10px', padding: '12px 20px',
-          cursor: 'pointer', fontSize: '14px', fontWeight: '600',
+          cursor: payhereLoading ? 'not-allowed' : 'pointer', fontSize: '14px', fontWeight: '600',
+          opacity: payhereLoading ? 0.7 : 1,
           transition: 'all 0.3s ease'
         }}
+        disabled={payhereLoading}
         onMouseEnter={(e) => e.target.style.backgroundColor = theme.colors.accentLight}
         onMouseLeave={(e) => e.target.style.backgroundColor = theme.colors.accent}
+        onClick={handleProUpgrade}
         >
-          Upgrade to Pro ✨
-        </button>
+          {payhereLoading ? 'Preparing checkout...' : 'Upgrade to Pro ✨'}
+        </button>}
       </div>
     </div>
-  );
-
-case 'payment':
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-      <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '700', color: '#1a1a2e' }}>💳 Payment</h3>
-
-      {/* Current plan */}
-      <div style={{
-        backgroundColor: '#f9f9f9', borderRadius: '12px', padding: '16px',
-        border: '1px solid #eee'
-      }}>
-        <p style={{ margin: '0 0 4px', fontWeight: '700', color: '#1a1a2e' }}>Current Plan: Free</p>
-        <p style={{ margin: 0, fontSize: '12px', color: '#aaa' }}>500 MB storage · Basic features</p>
-      </div>
-
-      {/* Plans */}
-      <p style={{ margin: 0, fontSize: '13px', fontWeight: '600', color: '#888' }}>UPGRADE YOUR PLAN</p>
-
-      {[
-        { name: 'Pro', price: '$5/month', storage: '10 GB', features: 'All features + Priority support' },
-        { name: 'Premium', price: '$12/month', storage: '50 GB', features: 'All Pro + AI features + Team access' },
-      ].map(plan => (
-        <div key={plan.name} style={{
-          border: `1px solid ${theme.colors.ui.border}`, borderRadius: '12px', padding: '18px',
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: theme.colors.bg.secondary,
-          transition: 'all 0.3s'
-        }}>
-          <div>
-            <p style={{ margin: '0 0 6px', fontWeight: '700', color: theme.colors.text.primary, fontSize: '15px' }}>
-              {plan.name} — {plan.price}
-            </p>
-            <p style={{ margin: '0 0 3px', fontSize: '13px', color: theme.colors.text.secondary, fontWeight: '500' }}>{plan.storage} AWS Cloud Storage</p>
-            <p style={{ margin: 0, fontSize: '12px', color: theme.colors.text.tertiary }}>{plan.features}</p>
-          </div>
-          <button style={{
-            backgroundColor: theme.colors.accent, color: 'white', border: 'none',
-            borderRadius: '10px', padding: '10px 18px',
-            cursor: 'pointer', fontSize: '13px', fontWeight: '600',
-            whiteSpace: 'nowrap',
-            transition: 'all 0.3s ease'
-          }}
-          onMouseEnter={(e) => e.target.style.backgroundColor = theme.colors.accentLight}
-          onMouseLeave={(e) => e.target.style.backgroundColor = theme.colors.accent}
-          >
-            Choose {plan.name}
-          </button>
-        </div>
-      ))}
-
-      {/* Payment method */}
-      <p style={{ margin: '12px 0 8px 0', fontSize: '12px', fontWeight: '700', color: theme.colors.text.secondary, letterSpacing: '0.5px' }}>PAYMENT METHOD</p>
-      <div style={{
-        border: `1px solid ${theme.colors.ui.border}`, borderRadius: '12px', padding: '18px',
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between', backgroundColor: theme.colors.bg.secondary,
-        transition: 'all 0.3s'
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <div style={{
-            width: '40px', height: '26px', backgroundColor: theme.colors.accent,
-            borderRadius: '6px', display: 'flex', alignItems: 'center',
-            justifyContent: 'center', color: 'white', fontSize: '10px', fontWeight: '700'
-          }}>VISA</div>
-          <div>
-            <p style={{ margin: 0, fontSize: '13px', fontWeight: '600', color: theme.colors.text.primary }}>No card added</p>
-            <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: theme.colors.text.secondary }}>Add a payment method to upgrade</p>
-          </div>
-        </div>
-        <button style={{
-          backgroundColor: 'transparent', color: theme.colors.accent,
-          border: `1.5px solid ${theme.colors.accent}`, borderRadius: '10px',
-          padding: '10px 16px', cursor: 'pointer',
-          fontSize: '13px', fontWeight: '600',
-          transition: 'all 0.3s ease'
-        }}
-        onMouseEnter={(e) => {
-          e.target.style.backgroundColor = theme.colors.accent;
-          e.target.style.color = 'white';
-        }}
-        onMouseLeave={(e) => {
-          e.target.style.backgroundColor = 'transparent';
-          e.target.style.color = theme.colors.accent;
-        }}
-        >
-          + Add Card
-        </button>
-      </div>
-    </div>
-  );
+    );
+  }
 
       default:
         return null;

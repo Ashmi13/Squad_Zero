@@ -3,22 +3,23 @@ Flashcard Routes - AI-powered flashcard generation from PDF text.
 Falls back to a local NLP-style extractor when the AI API is unavailable.
 """
 
-from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Form
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 import logging
 import json
 import re
 import os
 
 from app.services.pdf_reader import extract_text_from_pdf, validate_pdf
-from app.api.deps import get_current_user_id
+from app.api.deps import get_current_user_id, get_supabase_service_client
+from app.services.workspace_service import WorkspaceService
+from supabase import Client
 
 router = APIRouter(tags=["flashcards"])
 logger = logging.getLogger(__name__)
 
-OPENROUTER_PRIMARY_MODEL = "mistralai/mistral-7b-instruct:free"
-OPENROUTER_FALLBACK_MODEL = "google/gemma-3-4b-it:free"
+from app.services.openai_service import OPENROUTER_PRIMARY_MODEL, OPENROUTER_FALLBACK_MODEL
 
 
 # ──────────────────────────────────────────────
@@ -44,14 +45,7 @@ def _clean_sentence(s: str) -> str:
 
 
 def _generate_local_flashcards(text: str, target: int = 12) -> List[Flashcard]:
-    """
-    Generate flashcards from text without AI using heuristic extraction.
-    Looks for:
-    1. Definition patterns  (X is/are Y, X refers to Y, X means Y)
-    2. Key-term bold/caps phrases with explanatory sentences
-    3. Numbered or bulleted list items
-    4. Important factual sentences
-    """
+    
     cards: List[Flashcard] = []
     seen_questions: set = set()
 
@@ -166,26 +160,37 @@ def _generate_local_flashcards(text: str, target: int = 12) -> List[Flashcard]:
 
 def _parse_flashcards(raw: str) -> List[Flashcard]:
     """Parse AI response into flashcard list."""
-    try:
-        clean = raw.strip()
-        clean = re.sub(r"^```(?:json)?\s*", "", clean)
-        clean = re.sub(r"\s*```$", "", clean)
-        data = json.loads(clean)
-        if isinstance(data, list):
-            return [Flashcard(question=item["question"], answer=item["answer"]) for item in data]
-    except Exception:
-        pass
+    # 1. Try to extract JSON array
+    json_match = re.search(r'\[\s*\{.*?\}\s*\]', raw, re.DOTALL)
+    if json_match:
+        try:
+            data = json.loads(json_match.group(0))
+            if isinstance(data, list):
+                parsed = [Flashcard(question=item.get("question", ""), answer=item.get("answer", "")) for item in data if isinstance(item, dict) and "question" in item and "answer" in item]
+                if parsed:
+                    return parsed
+        except Exception:
+            pass
 
+    # 2. Try to parse as Q: A: format if JSON fails
     cards = []
     blocks = re.split(r"\n\s*\n", raw.strip())
     for block in blocks:
-        q_match = re.search(r"(?:Q:|Question:)\s*(.+)", block, re.IGNORECASE)
-        a_match = re.search(r"(?:A:|Answer:)\s*(.+)", block, re.IGNORECASE | re.DOTALL)
+        q_match = re.search(r"(?:Q:|Question:|Q\s*\d*\.?)\s*(.+?)(?=\n(?:A:|Answer:|A\s*\d*\.?)|$)", block, re.IGNORECASE | re.DOTALL)
+        a_match = re.search(r"(?:A:|Answer:|A\s*\d*\.?)\s*(.+)", block, re.IGNORECASE | re.DOTALL)
         if q_match and a_match:
             cards.append(Flashcard(
                 question=q_match.group(1).strip(),
                 answer=a_match.group(1).strip(),
             ))
+            
+    # 3. Last resort fallback
+    if not cards:
+        lines = [line.strip() for line in raw.split('\n') if line.strip() and not line.startswith('```') and not line.startswith('{') and not line.startswith('[') and not line.startswith('}') and not line.startswith(']')]
+        for i in range(0, len(lines)-1):
+            if lines[i].endswith('?') or lines[i].startswith('Q:'):
+                cards.append(Flashcard(question=re.sub(r'^Q:\s*', '', lines[i]), answer=re.sub(r'^A:\s*', '', lines[i+1])))
+                
     return cards
 
 
@@ -231,17 +236,42 @@ def _try_ai_flashcards(text_input: str) -> List[Flashcard]:
 
 @router.post("/generate", response_model=FlashcardsResponse)
 async def generate_flashcards(
-    file: UploadFile = File(...),
+    file: Optional[UploadFile] = File(None),
+    workspace_file_id: Optional[str] = Form(None),
     user_id: str = Depends(get_current_user_id),
+    supabase: Client = Depends(get_supabase_service_client),
 ):
-    """
-    Generate flashcards from an uploaded PDF file.
-    Tries AI generation first; falls back to local extraction if AI is unavailable.
-    """
+
     try:
-        filename = file.filename or ""
-        content_type = file.content_type or ""
-        
+        file_bytes = None
+        filename = ""
+        content_type = ""
+
+        if workspace_file_id:
+            service = WorkspaceService(supabase)
+            # Retrieve file metadata to determine filename and content_type
+            query = supabase.table("files").select("*").eq("id", workspace_file_id).limit(1)
+            if service._files_has_user_id:
+                query = query.eq("user_id", user_id)
+            existing = query.execute()
+            if not existing.data:
+                raise HTTPException(status_code=404, detail="File not found")
+            file_meta = existing.data[0]
+            filename = file_meta.get("original_filename") or file_meta.get("name") or ""
+            content_type = file_meta.get("mime_type") or ""
+
+            # Download file bytes from S3
+            file_bytes = service.get_file_object_bytes(user_id=user_id, file_id=workspace_file_id)
+        elif file is not None and getattr(file, "filename", None):
+            filename = file.filename or ""
+            content_type = file.content_type or ""
+            file_bytes = await file.read()
+        else:
+            raise HTTPException(status_code=400, detail="Either file or workspace_file_id must be provided")
+
+        if not file_bytes:
+            raise HTTPException(status_code=400, detail="File content is empty")
+
         # We accept PDF and plain text (or octet stream which could be either)
         is_pdf = (
             content_type == "application/pdf"
@@ -255,8 +285,6 @@ async def generate_flashcards(
 
         if not (is_pdf or is_text or is_generic):
             raise HTTPException(status_code=400, detail="Only PDF or Text files are supported")
-
-        file_bytes = await file.read()
         
         # Try to parse as PDF first
         extracted_text = ""
@@ -275,15 +303,29 @@ async def generate_flashcards(
         flashcards: List[Flashcard] = []
         source = "ai"
 
-        # Try AI first, fall back to local on any failure
         try:
             flashcards = _try_ai_flashcards(text_input)
             if not flashcards:
-                raise ValueError("AI returned empty flashcard list")
+                raise ValueError("AI returned empty flashcard list after parsing")
         except Exception as ai_exc:
             logger.warning(f"AI flashcard generation failed ({type(ai_exc).__name__}): {ai_exc}. Using local fallback.")
             flashcards = _generate_local_flashcards(extracted_text)
             source = "local"
+            
+        # If local fallback also fails (0 cards), create a generic flashcard so the UI doesn't crash with 500
+        if not flashcards:
+            logger.warning("Local flashcard generation also yielded 0 cards. Creating generic fallback cards.")
+            flashcards = [
+                Flashcard(
+                    question="What is the main topic of this document?",
+                    answer="Please review the document to identify its core themes and subjects, as the automated extractor could not confidently determine specific facts."
+                ),
+                Flashcard(
+                    question="How can I get better flashcards?",
+                    answer="Try uploading a document with clear definitions, headings, and bullet points. Our AI works best with structured study material."
+                )
+            ]
+            source = "fallback_generic"
 
         if not flashcards:
             raise HTTPException(status_code=500, detail="Could not generate flashcards from this document")

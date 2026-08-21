@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback } from 'react';
-import { getValidAccessToken } from '@/utils/authSession';
+import { getValidAccessToken, authFetch } from '@/utils/authSession';
 import { workspaceApi } from '@/services/workspaceApi';
 
 const API_BASE = 'http://localhost:8000/api/v1';
@@ -17,13 +17,14 @@ const FlashcardsPage = () => {
 
 
   const processFile = useCallback(async (file) => {
-    // Accept both .pdf extension and application/pdf content type
-    const isPdfFile =
+    // Accept both .pdf and .txt extensions, plus their mime types
+    const isPdfOrText =
       file.name.toLowerCase().endsWith('.pdf') ||
-      (file.type && file.type === 'application/pdf');
+      file.name.toLowerCase().endsWith('.txt') ||
+      (file.type && (file.type === 'application/pdf' || file.type.startsWith('text/')));
 
-    if (!file || !isPdfFile) {
-      setError('Please upload a PDF file.');
+    if (!file || !isPdfOrText) {
+      setError('Please upload a PDF or Text file.');
       return;
     }
 
@@ -85,65 +86,16 @@ const FlashcardsPage = () => {
           // The backend supports both PDF parsing and plain text parsing.
           // Extracted text files may not have explicit metadata in the DB, so we let the backend validate.
 
-          // Get signed URL or raw content from backend
-          const previewData = await workspaceApi.getFilePreview(fileId);
-          const previewObj = previewData?.preview;
-          const fileUrl =
-            previewObj?.preview_url ||
-            previewObj?.content ||
-            (typeof previewObj === 'string' ? previewObj : null) ||
-            fileMeta.storage_url ||
-            fileMeta.file_content ||
-            fileMeta.storage_path ||
-            fileMeta.raw_text ||
-            fileMeta.summary;
-
-          if (!fileUrl) {
-            throw new Error('Could not retrieve file URL. Please re-upload the file.');
-          }
-
-          // Convert to blob
-          let blob;
-          let blobType = 'application/octet-stream';
-          if (typeof fileUrl === 'string' && fileUrl.startsWith('data:')) {
-            const parts = fileUrl.split(',');
-            blobType = parts[0].split(':')[1].split(';')[0];
-            const bytes = atob(parts[1]);
-            const buf = new Uint8Array(bytes.length);
-            for (let i = 0; i < bytes.length; i++) buf[i] = bytes.charCodeAt(i);
-            blob = new Blob([buf], { type: blobType });
-          } else if (typeof fileUrl === 'string' && !fileUrl.startsWith('http')) {
-            // It's raw text content
-            blob = new Blob([fileUrl], { type: 'text/plain' });
-            blobType = 'text/plain';
-          } else {
-            const res = await fetch(fileUrl);
-            if (!res.ok) throw new Error('File URL expired. Please re-open the file first.');
-            blob = await res.blob();
-            blobType = res.headers.get('content-type') || 'application/octet-stream';
-          }
-
-          // Determine extension based on blob type or original
-          const isPdfMime = blobType.includes('pdf') || String(fileType).toUpperCase() === 'PDF';
-          const ext = isPdfMime ? '.pdf' : '.txt';
-          
-          const baseName = dragFileName || fileMeta.original_filename || 'workspace-file';
-          const safeName = (baseName.toLowerCase().endsWith('.pdf') || baseName.toLowerCase().endsWith('.txt')) 
-            ? baseName 
-            : `${baseName}${ext}`;
-
-          // Build FormData and call backend directly
+          // Build FormData and call backend directly with workspace_file_id
           setFlashcards([]);
           setFlipped(false);
           setCurrentIndex(0);
 
           const formData = new FormData();
-          formData.append('file', new File([blob], safeName, { type: blobType }));
+          formData.append('workspace_file_id', fileId);
 
-          const token = await getValidAccessToken();
-          const response = await fetch(`${API_BASE}/flashcards/generate`, {
+          const response = await authFetch('/api/v1/flashcards/generate', {
             method: 'POST',
-            headers: token ? { Authorization: `Bearer ${token}` } : {},
             body: formData,
           });
 
@@ -176,7 +128,10 @@ const FlashcardsPage = () => {
   };
   const handleDragLeave = (e) => {
     e.preventDefault();
-    setDragOver(false);
+    // Only reset when cursor truly leaves the drop zone, not when moving to a child element.
+    if (!e.currentTarget.contains(e.relatedTarget)) {
+      setDragOver(false);
+    }
   };
   const handleFileInput = (e) => { if (e.target.files[0]) processFile(e.target.files[0]); };
 
@@ -206,11 +161,11 @@ const FlashcardsPage = () => {
       <div style={styles.header}>
         <div>
           <h2 style={styles.title}>Flashcards</h2>
-          <p style={styles.subtitle}>Drop a PDF to generate AI-powered flashcards</p>
+          <p style={styles.subtitle}>Drop a PDF or Text file to generate AI-powered flashcards</p>
         </div>
         {flashcards.length > 0 && (
           <button onClick={resetAll} style={styles.resetBtn}>
-            ↩ New PDF
+            ↩ New File
           </button>
         )}
       </div>
@@ -229,12 +184,12 @@ const FlashcardsPage = () => {
           onClick={() => !loading && fileInputRef.current?.click()}
         >
           <div style={styles.dropIcon}>📄</div>
-          <p style={styles.dropText}>Drag & drop a PDF here</p>
+          <p style={styles.dropText}>Drag & drop a PDF or Text file here</p>
           <p style={styles.dropSub}>or click to browse</p>
           <input
             ref={fileInputRef}
             type="file"
-            accept=".pdf"
+            accept=".pdf,.txt"
             style={{ display: 'none' }}
             onChange={handleFileInput}
           />

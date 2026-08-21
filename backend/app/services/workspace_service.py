@@ -1,15 +1,22 @@
-"""Workspace service for persistent folder hierarchy and Supabase-backed files."""
+"""Workspace service for persistent folder hierarchy and AWS S3-backed files."""
 
 from __future__ import annotations
 
+import base64
 import os
 import uuid
-import base64
+import logging
 from datetime import datetime, timezone
-from urllib.parse import unquote, urlparse
+from io import BytesIO
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import quote, unquote, urlparse
 
+import boto3
+from botocore.exceptions import ClientError
 from fastapi import HTTPException, UploadFile
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 from supabase import Client
 
 from app.core.config import settings
@@ -19,10 +26,13 @@ from app.core.config import settings
 _COLUMNS_CACHE: Dict[str, Optional[bool]] = {}
 _PARENT_COLUMN_CACHE: Optional[str] = None
 _COLUMNS_DETECTED: bool = False
+_BUCKET_REGION_CACHE: Dict[str, str] = {}
+
+logger = logging.getLogger(__name__)
 
 
 class WorkspaceService:
-    """Handles folder and file operations using Supabase database + storage."""
+    """Handles folder and file operations using Supabase database + AWS S3 storage."""
 
     def __init__(self, supabase: Client):
         self.supabase = supabase
@@ -41,7 +51,13 @@ class WorkspaceService:
             return False
 
     def _detect_files_columns(self) -> None:
-        """Populate the module-level column cache (runs exactly once per process)."""
+        """Populate the module-level column cache (runs exactly once per process).
+
+        A sample row can be older and omit newer optional columns such as
+        parent_file_id even when the live files table supports them. We therefore
+        treat the first row as a hint only and still probe each column directly before
+        finalizing the capability cache.
+        """
         global _COLUMNS_DETECTED, _COLUMNS_CACHE
         if _COLUMNS_DETECTED:
             return
@@ -52,10 +68,27 @@ class WorkspaceService:
             "parent_file_id", "file_content", "raw_text", "summary",
             "content", "text", "last_accessed", "updated_at",
         ]
-        for col in columns:
-            _COLUMNS_CACHE[col] = self._column_exists("files", col)
 
-        _COLUMNS_DETECTED = True
+        row_keys: Optional[set[str]] = None
+        try:
+            res = self.supabase.table("files").select("*").limit(1).execute()
+            if res.data:
+                row_keys = set(res.data[0].keys())
+        except Exception:
+            row_keys = None
+
+        def check_col(col: str) -> Tuple[str, bool]:
+            if row_keys is not None and col in row_keys:
+                return col, True
+            return col, self._column_exists("files", col)
+
+        # Execute sequentially to avoid concurrent HTTP client errors with Supabase
+        for col in columns:
+            _, exists = check_col(col)
+            _COLUMNS_CACHE[col] = exists
+
+        if any(_COLUMNS_CACHE.values()):
+            _COLUMNS_DETECTED = True
 
     # Convenience properties that read from the module-level cache.
     @property
@@ -104,6 +137,19 @@ class WorkspaceService:
     def _extract_bucket_and_key_from_url(value: str) -> Tuple[Optional[str], Optional[str]]:
         parsed = urlparse(str(value))
         path = parsed.path or ""
+
+        host = (parsed.netloc or "").split(":", 1)[0].lower()
+        if host.endswith("amazonaws.com"):
+            if ".s3." in host:
+                bucket = host.split(".s3.", 1)[0]
+                object_key = unquote(path.lstrip("/"))
+                if bucket and object_key:
+                    return bucket, object_key
+            if host.startswith("s3.") or host == "s3.amazonaws.com":
+                parts = unquote(path.lstrip("/")).split("/", 1)
+                if len(parts) == 2 and parts[0] and parts[1]:
+                    return parts[0], parts[1]
+
         for marker in (
             "/storage/v1/object/public/",
             "/storage/v1/object/sign/",
@@ -124,6 +170,12 @@ class WorkspaceService:
 
         if normalized.startswith("data:"):
             return None, normalized
+
+        if normalized.startswith("s3://"):
+            remainder = normalized[5:]
+            parts = remainder.split("/", 1)
+            if len(parts) == 2 and parts[0] and parts[1]:
+                return parts[0], parts[1]
 
         if normalized.startswith("http://") or normalized.startswith("https://"):
             bucket, object_key = self._extract_bucket_and_key_from_url(normalized)
@@ -159,7 +211,7 @@ class WorkspaceService:
 
     def _extract_storage_location(self, file_row: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
         """Derive (bucket, object_key) from common metadata patterns."""
-        for key_field in ("storage_path", "s3_key", "object_key", "path"):
+        for key_field in ("storage_path", "file_url", "storage_url", "s3_key", "object_key", "path"):
             value = file_row.get(key_field)
             if not value:
                 continue
@@ -181,9 +233,6 @@ class WorkspaceService:
         for candidate in (
             parsed_bucket,
             self._workspace_bucket_name(),
-            str(settings.supabase_storage_bucket or "").strip() or None,
-            "workspace-files",
-            "files",
         ):
             if candidate and candidate not in buckets:
                 buckets.append(candidate)
@@ -201,65 +250,161 @@ class WorkspaceService:
         return False
 
     def _workspace_bucket_name(self) -> str:
-        return str(settings.supabase_storage_bucket or "workspace-files").strip() or "workspace-files"
+        bucket = str(settings.aws_s3_bucket or "").strip()
+        if not bucket:
+            raise HTTPException(status_code=500, detail="AWS S3 bucket is not configured")
+        return bucket
 
-    def _create_workspace_bucket_if_missing(self, bucket: str) -> None:
-        try:
-            self.supabase.storage.create_bucket(bucket, options={"public": True})
-        except Exception as exc:
-            details = str(exc).lower()
-            if "already" in details and "exist" in details:
-                return
-            raise
+    def _aws_storage_configured(self) -> bool:
+        return bool(settings.aws_access_key_id and settings.aws_secret_access_key and settings.aws_s3_bucket)
 
-    def _upload_to_supabase_storage(self, bucket: str, object_key: str, content: bytes, mime_type: str) -> str:
+    def _get_bucket_region(self, bucket: str) -> str:
+        if bucket in _BUCKET_REGION_CACHE:
+            return _BUCKET_REGION_CACHE[bucket]
+        default_region = settings.aws_region or "eu-north-1"
         try:
-            self.supabase.storage.from_(bucket).upload(
-                path=object_key,
-                file=content,
-                file_options={"content-type": mime_type, "upsert": "false"},
+            client = boto3.client(
+                "s3",
+                aws_access_key_id=settings.aws_access_key_id,
+                aws_secret_access_key=settings.aws_secret_access_key,
+                region_name=default_region,
             )
-        except Exception as exc:
-            details = str(exc).lower()
-            if "bucket" in details and "not found" in details:
-                self._create_workspace_bucket_if_missing(bucket)
-                self.supabase.storage.from_(bucket).upload(
-                    path=object_key,
-                    file=content,
-                    file_options={"content-type": mime_type, "upsert": "false"},
-                )
-            else:
-                raise
+            response = client.get_bucket_location(Bucket=bucket)
+            location = response.get("LocationConstraint")
+            region = location if location else "us-east-1"
+            _BUCKET_REGION_CACHE[bucket] = region
+            return region
+        except Exception:
+            return default_region
 
-        return self.supabase.storage.from_(bucket).get_public_url(object_key)
+    def _s3_client(self, bucket: Optional[str] = None):
+        if not self._aws_storage_configured():
+            raise HTTPException(status_code=500, detail="AWS S3 credentials are not configured")
 
-    def _delete_from_supabase_storage(self, bucket: str, object_key: Optional[str]) -> None:
-        if not object_key:
-            return
-        if isinstance(object_key, str) and object_key.startswith("data:"):
+        region = settings.aws_region
+        if bucket:
+            region = self._get_bucket_region(bucket)
+
+        return boto3.client(
+            "s3",
+            aws_access_key_id=settings.aws_access_key_id,
+            aws_secret_access_key=settings.aws_secret_access_key,
+            region_name=region,
+        )
+
+    @staticmethod
+    def _s3_object_url(bucket: str, object_key: str) -> str:
+        encoded_key = quote(str(object_key).lstrip("/"), safe="/")
+        return f"https://{bucket}.s3.{settings.aws_region}.amazonaws.com/{encoded_key}"
+
+    def _upload_to_s3(self, bucket: str, object_key: str, content: bytes, mime_type: str) -> str:
+        try:
+            self._s3_client(bucket).put_object(
+                Bucket=bucket,
+                Key=object_key,
+                Body=content,
+                ContentType=mime_type,
+            )
+        except ClientError as exc:
+            raise HTTPException(status_code=500, detail=f"Failed to upload file to S3: {exc}") from exc
+        return self._s3_object_url(bucket, object_key)
+
+    def _delete_from_s3(self, bucket: str, object_key: Optional[str]) -> None:
+        if not object_key or (isinstance(object_key, str) and object_key.startswith("data:")):
             return
         try:
-            self.supabase.storage.from_(bucket).remove([object_key])
-        except Exception:
-            # Continue DB cleanup even when storage object is already gone.
+            self._s3_client(bucket).delete_object(Bucket=bucket, Key=str(object_key).lstrip("/"))
+        except ClientError:
+            # Continue DB cleanup even when the storage object is already gone.
             pass
 
-    def _signed_url_from_supabase_storage(self, bucket: str, object_key: str, expires_in: int) -> Optional[str]:
+    def _move_s3_object(self, bucket: str, source_key: str, destination_key: str) -> None:
+        source_key = str(source_key or "").lstrip("/")
+        destination_key = str(destination_key or "").lstrip("/")
+        if not source_key or not destination_key or source_key == destination_key:
+            return
+
+        client = self._s3_client(bucket)
+        client.copy_object(
+            Bucket=bucket,
+            CopySource={"Bucket": bucket, "Key": source_key},
+            Key=destination_key,
+            MetadataDirective="COPY",
+        )
+        client.delete_object(Bucket=bucket, Key=source_key)
+
+    def _signed_url_from_s3(self, bucket: str, object_key: str, expires_in: int) -> Optional[str]:
         try:
             normalized_key = str(object_key or "").strip().lstrip("/")
             if not normalized_key:
                 return None
 
-            signed = self.supabase.storage.from_(bucket).create_signed_url(normalized_key, expires_in)
-            if isinstance(signed, dict):
-                signed_url = signed.get("signedURL") or signed.get("signedUrl") or signed.get("signed_url")
-                if signed_url:
-                    return signed_url
-            if isinstance(signed, str) and signed:
-                return signed
+            return self._s3_client(bucket).generate_presigned_url(
+                ClientMethod="get_object",
+                Params={"Bucket": bucket, "Key": normalized_key},
+                ExpiresIn=expires_in,
+            )
+        except ClientError:
+            return None
         except Exception:
             return None
-        return None
+
+    def get_file_object_bytes(self, user_id: str, file_id: str) -> bytes:
+        """Fetch the original file payload from S3 or the database fallback if present."""
+        self._detect_files_columns()
+
+        query = self.supabase.table("files").select("*").eq("id", file_id).limit(1)
+        if self._files_has_user_id:
+            query = query.eq("user_id", user_id)
+        existing = query.execute()
+        if not existing.data:
+            raise HTTPException(status_code=404, detail="File not found")
+
+        row = existing.data[0]
+        for key in ("file_content", "raw_text", "summary", "content", "text"):
+            value = row.get(key)
+            if isinstance(value, str):
+                return value.encode("utf-8")
+            if isinstance(value, bytes):
+                return value
+
+        storage_bucket, storage_key = self._extract_storage_location(row)
+        if storage_key and not str(storage_key).startswith("data:"):
+            for candidate_bucket in self._candidate_buckets(storage_bucket):
+                try:
+                    obj = self._s3_client(candidate_bucket).get_object(Bucket=candidate_bucket, Key=str(storage_key).lstrip("/"))
+                    body = obj.get("Body")
+                    if body is not None:
+                        return body.read()
+                except ClientError:
+                    continue
+                except Exception:
+                    continue
+
+        raise HTTPException(status_code=404, detail="File bytes could not be resolved from storage or database content")
+
+    def get_file_content(self, user_id: str, file_id: str) -> Dict[str, Any]:
+        """Fetch raw file bytes plus filename/mime metadata, proxied through the backend.
+
+        This exists so the frontend never has to hit S3 directly from the browser
+        (which requires the bucket to have CORS configured for every deployment
+        origin, and breaks with a generic "Failed to fetch" when it isn't). Instead
+        the browser calls this same-origin, authenticated endpoint and the backend
+        does the S3 (or DB-fallback) read itself.
+        """
+        content = self.get_file_object_bytes(user_id=user_id, file_id=file_id)
+
+        self._detect_files_columns()
+        file_query = self.supabase.table("files").select("*").eq("id", file_id).limit(1)
+        if self._files_has_user_id:
+            file_query = file_query.eq("user_id", user_id)
+        existing = file_query.execute()
+        row = existing.data[0] if existing.data else {}
+
+        filename = row.get("name") or row.get("original_filename") or file_id
+        mime_type = row.get("mime_type") or "application/octet-stream"
+
+        return {"content": content, "filename": filename, "mime_type": mime_type}
 
     @staticmethod
     def _build_tree(flat_folders: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -289,6 +434,21 @@ class WorkspaceService:
         global _PARENT_COLUMN_CACHE
         if _PARENT_COLUMN_CACHE is not None:
             return _PARENT_COLUMN_CACHE if _PARENT_COLUMN_CACHE != "__none__" else None
+
+        try:
+            res = self.supabase.table("folders").select("*").limit(1).execute()
+            if res.data:
+                keys = set(res.data[0].keys())
+                if "parent_folder_id" in keys:
+                    _PARENT_COLUMN_CACHE = "parent_folder_id"
+                    return _PARENT_COLUMN_CACHE
+                if "parent_id" in keys:
+                    _PARENT_COLUMN_CACHE = "parent_id"
+                    return _PARENT_COLUMN_CACHE
+                _PARENT_COLUMN_CACHE = "__none__"
+                return None
+        except Exception:
+            pass
 
         try:
             self.supabase.table("folders").select("id,parent_folder_id").limit(1).execute()
@@ -427,7 +587,7 @@ class WorkspaceService:
             for file_row in files:
                 parsed_bucket, storage_key = self._extract_storage_location(file_row)
                 for candidate_bucket in self._candidate_buckets(parsed_bucket):
-                    self._delete_from_supabase_storage(candidate_bucket, storage_key)
+                    self._delete_from_s3(candidate_bucket, storage_key)
 
             # Never run an unscoped DELETE; delete by explicit IDs if available.
             file_ids_to_delete = [str(row.get("id")) for row in files if row.get("id")]
@@ -460,6 +620,34 @@ class WorkspaceService:
             if not folder.data:
                 raise HTTPException(status_code=404, detail="Folder not found")
 
+            uploaded_file_size = getattr(file, "size", None)
+            if uploaded_file_size is None:
+                try:
+                    current_position = file.file.tell()
+                    file.file.seek(0, os.SEEK_END)
+                    uploaded_file_size = file.file.tell()
+                    file.file.seek(current_position)
+                except (AttributeError, OSError):
+                    uploaded_file_size = None
+
+            if uploaded_file_size is not None:
+                storage_usage = self.get_storage_usage(user_id)
+                storage_limit_bytes = int(storage_usage["storage_limit_bytes"])
+                storage_used_bytes = int(storage_usage["storage_used_bytes"])
+                uploaded_file_size = int(uploaded_file_size)
+
+                if storage_used_bytes + uploaded_file_size > storage_limit_bytes:
+                    plan_name = storage_usage.get("plan_name") or storage_usage.get("plan_code", "Free")
+                    limit_mb = storage_usage.get("storage_limit_mb")
+                    used_mb = storage_usage.get("storage_used_mb")
+                    raise HTTPException(
+                        status_code=413,
+                        detail=(
+                            f"Storage limit exceeded. Your {plan_name} plan allows "
+                            f"{limit_mb:g} MB of total storage. You currently use {used_mb:g} MB."
+                        ),
+                    )
+
             content = await file.read()
             if not content:
                 raise HTTPException(status_code=400, detail="Uploaded file is empty")
@@ -468,18 +656,15 @@ class WorkspaceService:
             file_key = f"workspace/{user_id}/{folder_id}/{uuid.uuid4().hex}{ext}"
             mime_type = file.content_type or "application/octet-stream"
             bucket = self._workspace_bucket_name()
-            storage_url: Optional[str] = None
-            storage_upload_error: Optional[str] = None
-
             try:
-                storage_url = self._upload_to_supabase_storage(
+                self._upload_to_s3(
                     bucket=bucket,
                     object_key=file_key,
                     content=content,
                     mime_type=mime_type,
                 )
-            except Exception as exc:
-                storage_upload_error = str(exc)
+            except HTTPException:
+                raise
 
             self._detect_files_columns()
 
@@ -502,63 +687,64 @@ class WorkspaceService:
                 metadata["file_type"] = ext.replace(".", "").upper() if ext else "FILE"
             if self._files_has_storage_path:
                 metadata["storage_path"] = file_key
+            if self._files_has_file_url:
+                metadata["file_url"] = file_key
+            if self._files_has_storage_url:
+                metadata["storage_url"] = file_key
             now_iso = datetime.now(timezone.utc).isoformat()
             if self._files_has_last_accessed:
                 metadata["last_accessed"] = now_iso
             if self._files_has_updated_at:
                 metadata["updated_at"] = now_iso
-            if storage_url:
-                if self._files_has_storage_url:
-                    metadata["storage_url"] = storage_url
-                elif self._files_has_file_url:
-                    metadata["file_url"] = storage_url
-            if self._files_has_file_content and file.content_type and file.content_type.startswith("text/"):
-                metadata["file_content"] = content.decode("utf-8", errors="ignore")
-            elif self._files_has_file_content and ext in {".txt", ".md", ".csv", ".json", ".log"}:
-                metadata["file_content"] = content.decode("utf-8", errors="ignore")
-            elif self._files_has_file_content and not storage_url:
-                mime_type = file.content_type or "application/octet-stream"
-                encoded = base64.b64encode(content).decode("ascii")
-                metadata["file_content"] = f"data:{mime_type};base64,{encoded}"
-
-            # Storage fallback: ensure at least one previewable payload exists in DB metadata.
-            if not storage_url:
-                mime_type = file.content_type or "application/octet-stream"
-                encoded = base64.b64encode(content).decode("ascii")
-                data_url = f"data:{mime_type};base64,{encoded}"
-
-                if "file_content" not in metadata and self._files_has_file_content:
-                    metadata["file_content"] = data_url
-                elif self._files_has_storage_url and not metadata.get("storage_url"):
-                    metadata["storage_url"] = data_url
-                elif self._files_has_storage_path and not self._files_has_storage_url and not self._files_has_file_content:
-                    # Some schemas only expose storage_path. Persist a data URL there in no-AWS mode
-                    # so preview remains available until cloud storage is configured.
-                    metadata["storage_path"] = data_url
-                elif self._files_has_storage_path and not metadata.get("storage_path"):
-                    # Final fallback for schemas without file_content/storage_url columns.
-                    metadata["storage_path"] = data_url
 
             if not metadata:
                 metadata["name"] = os.path.splitext(file.filename)[0]
 
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"[FILES] Inserting file: {metadata.get('name')}")
+            logger.info(f"[FILES] file_url: {metadata.get('file_url')}")
+
             saved = self.supabase.table("files").insert(metadata).execute()
             if not saved.data:
+                self._delete_from_s3(bucket, file_key)
                 raise HTTPException(status_code=500, detail="File metadata insert failed")
             inserted = saved.data[0]
-
-            # Surface storage failures explicitly in response without breaking core upload.
-            if storage_upload_error:
-                inserted = {
-                    **inserted,
-                    "storage_warning": f"Supabase Storage upload fallback used: {storage_upload_error}",
-                }
+            logger.info(f"[FILES] Created file id: {inserted.get('id')}")
 
             return inserted
         except HTTPException:
             raise
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"File upload failed: {exc}") from exc
+
+    def delete_file(self, user_id: str, file_id: str) -> Dict[str, Any]:
+        try:
+            self._detect_files_columns()
+            
+            file_query = self.supabase.table("files").select("*").eq("id", file_id).limit(1)
+            if self._files_has_user_id:
+                file_query = file_query.eq("user_id", user_id)
+            existing = file_query.execute()
+            if not existing.data:
+                raise HTTPException(status_code=404, detail="File not found")
+                
+            file_row = existing.data[0]
+            
+            bucket, storage_key = self._extract_storage_location(file_row)
+            if bucket and storage_key:
+                self._delete_from_s3(bucket, storage_key)
+                
+            delete_query = self.supabase.table("files").delete().eq("id", file_id)
+            if self._files_has_user_id:
+                delete_query = delete_query.eq("user_id", user_id)
+            delete_query.execute()
+            
+            return {"file_id": file_id}
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Failed to delete file: {exc}") from exc
 
     def list_files(self, user_id: str, folder_id: Optional[str] = None) -> Dict[str, Any]:
         try:
@@ -570,9 +756,20 @@ class WorkspaceService:
             elif self._files_has_updated_at:
                 sort_column = "updated_at"
 
+            columns_to_select = []
+            skip_columns = {"file_content", "raw_text", "summary", "content", "text"}
+            for col, exists in _COLUMNS_CACHE.items():
+                if exists and col not in skip_columns:
+                    columns_to_select.append(col)
+            
+            if "id" not in columns_to_select: columns_to_select.append("id")
+            if "created_at" not in columns_to_select: columns_to_select.append("created_at")
+
+            select_str = ",".join(set(columns_to_select))
+
             query = (
                 self.supabase.table("files")
-                .select("*")
+                .select(select_str)
                 .order(sort_column, desc=True)
             )
             if self._files_has_user_id:
@@ -590,6 +787,102 @@ class WorkspaceService:
             return {"files": rows}
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"Failed to fetch files: {exc}") from exc
+
+    def get_storage_usage(self, user_id: str) -> Dict[str, Any]:
+        """Return the authenticated user's plan and current file storage usage."""
+        plan_code = "free"
+        plan_name = "Free"
+        storage_limit_bytes = 0
+        subscription = None
+
+        try:
+            free_plan_response = (
+                self.supabase.table("plans")
+                .select("code,name,storage_limit_bytes")
+                .eq("code", "free")
+                .limit(1)
+                .execute()
+            )
+            free_plan = (free_plan_response.data or [None])[0]
+            if free_plan:
+                plan_code = free_plan.get("code") or plan_code
+                plan_name = free_plan.get("name") or plan_name
+                storage_limit_bytes = int(free_plan.get("storage_limit_bytes") or 0)
+
+            now = datetime.now(timezone.utc).isoformat()
+            subscription_response = (
+                self.supabase.table("subscriptions")
+                .select("plan_id,status,starts_at,expires_at,provider_reference")
+                .eq("user_id", user_id)
+                .eq("status", "active")
+                .lte("starts_at", now)
+                .gt("expires_at", now)
+                .order("expires_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            subscription = (subscription_response.data or [None])[0]
+
+            if subscription and subscription.get("plan_id"):
+                plan_response = (
+                    self.supabase.table("plans")
+                    .select("code,name,storage_limit_bytes")
+                    .eq("id", subscription["plan_id"])
+                    .limit(1)
+                    .execute()
+                )
+                plan = (plan_response.data or [None])[0]
+                if plan:
+                    plan_code = plan.get("code") or plan_code
+                    plan_name = plan.get("name") or plan_name
+                    storage_limit_bytes = int(plan.get("storage_limit_bytes") or storage_limit_bytes)
+        except Exception:
+            # Plan lookup must not prevent a user from seeing Free-plan usage,
+            # but log it so missing plans/subscriptions tables are visible instead
+            # of silently degrading every user to Free (root cause of the
+            # "payment completes but plan stays free" bug).
+            logger.exception("[PLANS] Plan/subscription lookup failed; defaulting to Free plan")
+
+        try:
+            self._detect_files_columns()
+            if not self._files_has_size_bytes:
+                storage_used_bytes = 0
+            else:
+                files_response = (
+                    self.supabase.table("files")
+                    .select("size_bytes")
+                    .eq("user_id", user_id)
+                    .execute()
+                )
+                storage_used_bytes = sum(
+                    int(file_row.get("size_bytes") or 0)
+                    for file_row in (files_response.data or [])
+                )
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Failed to calculate storage usage: {exc}") from exc
+
+        storage_remaining_bytes = max(storage_limit_bytes - storage_used_bytes, 0)
+        bytes_per_mb = 1024 * 1024
+        bytes_per_gb = 1024 * bytes_per_mb
+
+        return {
+            "is_pro": plan_code.lower() == "pro",
+            "plan_code": plan_code,
+            "plan_name": plan_name,
+            "storage_limit_bytes": storage_limit_bytes,
+            "storage_used_bytes": storage_used_bytes,
+            "storage_remaining_bytes": storage_remaining_bytes,
+            "subscription_status": "active" if subscription else "inactive",
+            "subscription_starts_at": subscription.get("starts_at") if subscription else None,
+            "subscription_expires_at": subscription.get("expires_at") if subscription else None,
+            "provider_reference": subscription.get("provider_reference") if subscription else None,
+            "storage_limit_mb": round(storage_limit_bytes / bytes_per_mb, 2),
+            "storage_limit_gb": round(storage_limit_bytes / bytes_per_gb, 2),
+            "storage_used_mb": round(storage_used_bytes / bytes_per_mb, 2),
+            "storage_used_gb": round(storage_used_bytes / bytes_per_gb, 2),
+            "storage_remaining_mb": round(storage_remaining_bytes / bytes_per_mb, 2),
+            "storage_remaining_gb": round(storage_remaining_bytes / bytes_per_gb, 2),
+        }
 
     def update_file_access(self, user_id: str, file_id: str) -> Dict[str, Any]:
         try:
@@ -666,7 +959,32 @@ class WorkspaceService:
         try:
             self._detect_files_columns()
 
-            files_query = self.supabase.table("files").select("*")
+            columns_to_select = []
+            skip_columns = {"file_content", "raw_text", "summary", "content", "text"}
+            for col, exists in _COLUMNS_CACHE.items():
+                if exists and col not in skip_columns:
+                    columns_to_select.append(col)
+            
+            if "id" not in columns_to_select: columns_to_select.append("id")
+            if "created_at" not in columns_to_select: columns_to_select.append("created_at")
+
+            select_str = ",".join(set(columns_to_select))
+
+            sort_column = "created_at"
+            if self._files_has_last_accessed:
+                sort_column = "last_accessed"
+            elif self._files_has_updated_at:
+                sort_column = "updated_at"
+
+            safe_limit = max(1, min(int(limit or 5), 50))
+            
+            files_query = (
+                self.supabase.table("files")
+                .select(select_str)
+                .order(sort_column, desc=True)
+                .limit(safe_limit)
+            )
+            
             if self._files_has_user_id:
                 files_query = files_query.eq("user_id", user_id)
             files = files_query.execute().data or []
@@ -676,7 +994,8 @@ class WorkspaceService:
             folder_lookup = {str(folder["id"]): folder for folder in folders if folder.get("id")}
             bucket = self._workspace_bucket_name()
 
-            limited = sorted(files, key=self._row_recent_timestamp, reverse=True)[: max(1, min(int(limit or 5), 50))]
+            # Since we sorted in DB, we can just use the results directly, but we sort locally again just in case the DB sort column didn't exactly match _row_recent_timestamp
+            limited = sorted(files, key=self._row_recent_timestamp, reverse=True)
             recent_files = []
             for row in limited:
                 folder_id = row.get("folder_id")
@@ -684,10 +1003,11 @@ class WorkspaceService:
                 parent_id = folder.get("parent_folder_id") if folder else None
                 _, storage_key = self._extract_storage_location(row)
                 preview_available = bool(
-                    row.get("file_content")
-                    or row.get("storage_url")
+                    row.get("storage_url")
+                    or row.get("file_url")
                     or (isinstance(row.get("storage_path"), str) and str(row.get("storage_path")).startswith("data:"))
                     or storage_key
+                    or self._files_has_file_content
                 )
                 recent_files.append({
                     **row,
@@ -726,6 +1046,63 @@ class WorkspaceService:
                         return value
                 return None
 
+            parsed_bucket, storage_key = self._extract_storage_location(row)
+            if storage_key and isinstance(storage_key, str) and storage_key.startswith("data:"):
+                return {
+                    "file_id": file_id,
+                    "preview_url": storage_key,
+                    "content": None,
+                    "mime_type": row.get("mime_type"),
+                    "source": "storage_path_data_url",
+                }
+
+            if storage_key:
+                safe_expiry = max(60, min(int(expires_in or 3600), 86400))
+                for candidate_bucket in self._candidate_buckets(parsed_bucket):
+                    preview_url = self._signed_url_from_s3(candidate_bucket, storage_key, safe_expiry)
+                    if not preview_url:
+                        preview_url = self._s3_object_url(candidate_bucket, storage_key)
+
+                    if preview_url:
+                        import logging
+                        logger = logging.getLogger(__name__)
+                        logger.info(f"[PREVIEW] file_url: {storage_key}")
+                        logger.info(f"[PREVIEW] Generated signed URL: {preview_url}")
+                        return {
+                            "file_id": file_id,
+                            "preview_url": preview_url,
+                            "content": None,
+                            "mime_type": row.get("mime_type"),
+                            "source": "aws_s3",
+                        }
+
+            storage_url = _first_non_empty("storage_url", "file_url", "url", "public_url")
+            if storage_url:
+                if isinstance(storage_url, str) and (storage_url.startswith("http://") or storage_url.startswith("https://") or storage_url.startswith("data:")):
+                    return {
+                        "file_id": file_id,
+                        "preview_url": storage_url,
+                        "content": None,
+                        "mime_type": row.get("mime_type"),
+                        "source": "storage_url",
+                    }
+                # If storage_url is a relative S3 key (e.g. "workspace/..."), generate a presigned S3 URL
+                safe_expiry = max(60, min(int(expires_in or 3600), 86400))
+                for candidate_bucket in self._candidate_buckets(None):
+                    presigned = self._signed_url_from_s3(candidate_bucket, storage_url, safe_expiry)
+                    if presigned:
+                        import logging
+                        logger = logging.getLogger(__name__)
+                        logger.info(f"[PREVIEW] file_url: {storage_url}")
+                        logger.info(f"[PREVIEW] Generated signed URL: {presigned}")
+                        return {
+                            "file_id": file_id,
+                            "preview_url": presigned,
+                            "content": None,
+                            "mime_type": row.get("mime_type"),
+                            "source": "aws_s3",
+                        }
+
             text_content = _first_non_empty("file_content", "raw_text", "summary", "content", "text")
             if text_content is not None:
                 content = text_content
@@ -745,45 +1122,6 @@ class WorkspaceService:
                     "source": "database",
                 }
 
-            parsed_bucket, storage_key = self._extract_storage_location(row)
-            if storage_key and isinstance(storage_key, str) and storage_key.startswith("data:"):
-                return {
-                    "file_id": file_id,
-                    "preview_url": storage_key,
-                    "content": None,
-                    "mime_type": row.get("mime_type"),
-                    "source": "storage_path_data_url",
-                }
-
-            if storage_key:
-                safe_expiry = max(60, min(int(expires_in or 3600), 86400))
-                for candidate_bucket in self._candidate_buckets(parsed_bucket):
-                    preview_url = self._signed_url_from_supabase_storage(candidate_bucket, storage_key, safe_expiry)
-                    if not preview_url:
-                        try:
-                            preview_url = self.supabase.storage.from_(candidate_bucket).get_public_url(storage_key)
-                        except Exception:
-                            preview_url = None
-
-                    if preview_url:
-                        return {
-                            "file_id": file_id,
-                            "preview_url": preview_url,
-                            "content": None,
-                            "mime_type": row.get("mime_type"),
-                            "source": "supabase_storage",
-                        }
-
-            storage_url = _first_non_empty("storage_url", "file_url", "url", "public_url")
-            if storage_url:
-                return {
-                    "file_id": file_id,
-                    "preview_url": storage_url,
-                    "content": None,
-                    "mime_type": row.get("mime_type"),
-                    "source": "storage_url",
-                }
-
             # DEBUG LOGGING to diagnose why file has no content
             import logging
             logger = logging.getLogger(__name__)
@@ -793,7 +1131,7 @@ class WorkspaceService:
 
             raise HTTPException(
                 status_code=404,
-                detail="Preview not available: file has no readable content or storage URL.",
+                detail="Preview not available: file has no readable content or storage reference.",
             )
         except HTTPException:
             raise
@@ -821,10 +1159,28 @@ class WorkspaceService:
                     detail="This database schema does not support moving files between folders (missing files.folder_id).",
                 )
 
+            existing_query = self.supabase.table("files").select("*").eq("id", file_id)
+            if self._files_has_user_id:
+                existing_query = existing_query.eq("user_id", user_id)
+            existing = existing_query.limit(1).execute()
+            if not existing.data:
+                raise HTTPException(status_code=404, detail="File not found")
+
+            update_payload: Dict[str, Any] = {"folder_id": folder_id}
+            storage_bucket, storage_key = self._extract_storage_location(existing.data[0])
+            if storage_key and not str(storage_key).startswith("data:"):
+                bucket = self._workspace_bucket_name()
+                current_name = os.path.basename(str(storage_key).rstrip("/")) or f"{file_id}"
+                new_storage_key = f"workspace/{user_id}/{folder_id}/{current_name}"
+                if new_storage_key != storage_key:
+                    self._move_s3_object(storage_bucket or bucket, storage_key, new_storage_key)
+                    if self._files_has_storage_path:
+                        update_payload["storage_path"] = new_storage_key
+
             if self._files_has_user_id:
                 updated = (
                     self.supabase.table("files")
-                    .update({"folder_id": folder_id})
+                    .update(update_payload)
                     .eq("id", file_id)
                     .eq("user_id", user_id)
                     .execute()
@@ -832,7 +1188,7 @@ class WorkspaceService:
             else:
                 updated = (
                     self.supabase.table("files")
-                    .update({"folder_id": folder_id})
+                    .update(update_payload)
                     .eq("id", file_id)
                     .execute()
                 )
@@ -889,7 +1245,7 @@ class WorkspaceService:
 
             parsed_bucket, storage_key = self._extract_storage_location(existing.data[0])
             for candidate_bucket in self._candidate_buckets(parsed_bucket):
-                self._delete_from_supabase_storage(candidate_bucket, storage_key)
+                self._delete_from_s3(candidate_bucket, storage_key)
 
             delete_query = self.supabase.table("files").delete().in_("id", to_delete)
             if self._files_has_user_id:
@@ -900,6 +1256,120 @@ class WorkspaceService:
             raise
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"Failed to delete file: {exc}") from exc
+
+    @staticmethod
+    def generate_pdf_document(title: str, content: str) -> bytes:
+        """Produce a PDF document from the text payload while preserving real PDF bytes for preview."""
+        try:
+            from reportlab.lib.pagesizes import letter
+            from reportlab.lib.styles import getSampleStyleSheet
+            from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+        except ImportError as exc:
+            raise HTTPException(
+                status_code=500,
+                detail="reportlab is required for PDF generation. Run: pip install reportlab"
+            ) from exc
+
+        buffer = BytesIO()
+        styles = getSampleStyleSheet()
+        title_text = str(title or "Document").strip() or "Document"
+        body = [Paragraph(title_text, styles["Heading1"]), Spacer(1, 12)]
+
+        safe_content = str(content or "").replace("\x00", "")
+        paragraphs = [part.strip() for part in safe_content.splitlines() if part and part.strip()]
+        if not paragraphs:
+            paragraphs = ["No content available."]
+
+        for paragraph in paragraphs[:2000]:
+            body.append(Paragraph(paragraph, styles["BodyText"]))
+            body.append(Spacer(1, 6))
+
+        doc = SimpleDocTemplate(buffer, pagesize=letter, title=title_text)
+        doc.build(body)
+        return buffer.getvalue()
+
+    def create_generated_pdf_file(
+        self,
+        user_id: str,
+        folder_id: str,
+        parent_file_id: str,
+        name: str,
+        content: str,
+        original_filename: Optional[str] = None,
+        title: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Persist a generated PDF (extracted text or summary) as a real S3-backed workspace file."""
+        self._detect_files_columns()
+
+        safe_content = str(content or "").replace("\x00", "")
+        pdf_bytes = self.generate_pdf_document(title or name or "Document", safe_content)
+
+        metadata: Dict[str, Any] = {}
+        if self._files_has_user_id:
+            metadata["user_id"] = user_id
+        if self._files_has_folder_id:
+            metadata["folder_id"] = folder_id
+        if self._files_has_parent_file_id:
+            metadata["parent_file_id"] = parent_file_id
+        if self._files_has_name:
+            metadata["name"] = name
+        if self._files_has_original_filename and original_filename:
+            metadata["original_filename"] = original_filename
+        if self._files_has_file_type:
+            metadata["file_type"] = "PDF"
+        if self._files_has_mime_type:
+            metadata["mime_type"] = "application/pdf"
+        if self._files_has_size_bytes:
+            metadata["size_bytes"] = len(pdf_bytes)
+
+        safe_filename = (original_filename or name or "file").replace(" ", "_").replace("/", "_")
+        if not safe_filename.lower().endswith(".pdf"):
+            safe_filename = f"{safe_filename}.pdf"
+
+        storage_key = f"workspace/{user_id}/{folder_id}/{uuid.uuid4().hex}_{safe_filename}"
+        bucket = self._workspace_bucket_name()
+
+        try:
+            self._upload_to_s3(
+                bucket=bucket,
+                object_key=storage_key,
+                content=pdf_bytes,
+                mime_type="application/pdf",
+            )
+        except HTTPException:
+            raise
+
+        if self._files_has_storage_path:
+            metadata["storage_path"] = storage_key
+        if self._files_has_file_url:
+            metadata["file_url"] = storage_key
+        if self._files_has_storage_url:
+            metadata["storage_url"] = storage_key
+
+        if not metadata:
+            raise HTTPException(status_code=500, detail="No writable file metadata columns found")
+
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"[FILES] Detected columns: {list(k for k, v in _COLUMNS_CACHE.items() if v)}")
+        logger.info(f"[FILES] Inserting file: {name}")
+        logger.info(f"[FILES] file_url: {metadata.get('file_url')}")
+
+        try:
+            saved = self.supabase.table("files").insert(metadata).execute()
+            if not saved.data:
+                self._delete_from_s3(bucket, storage_key)
+                raise HTTPException(status_code=500, detail="Generated PDF insert failed")
+            
+            inserted = saved.data[0]
+            logger.info(f"[FILES] Created file id: {inserted.get('id')}")
+            return inserted
+        except HTTPException:
+            self._delete_from_s3(bucket, storage_key)
+            raise
+        except Exception as exc:
+            self._delete_from_s3(bucket, storage_key)
+            raise HTTPException(status_code=500, detail=f"Failed to save generated PDF: {exc}") from exc
 
     def create_generated_text_file(
         self,
@@ -913,8 +1383,7 @@ class WorkspaceService:
     ) -> Dict[str, Any]:
         """Persist an extracted text or summary file as a child file row.
         
-        Files are stored both in the database (file_content column) AND in
-        Supabase Storage, ensuring they survive across logins without expiry issues.
+        Files are stored in the database for metadata and in AWS S3 for durable object storage.
         """
         self._detect_files_columns()
 
@@ -939,56 +1408,28 @@ class WorkspaceService:
         if self._files_has_size_bytes:
             metadata["size_bytes"] = len(content_bytes)
 
-        # Always store content in DB columns for instant preview without needing storage
-        if self._files_has_file_content:
-            metadata["file_content"] = safe_content
-        elif self._files_has_raw_text:
-            metadata["raw_text"] = safe_content
-        elif self._files_has_text:
-            metadata["text"] = safe_content
-        elif self._files_has_content:
-            metadata["content"] = safe_content
-        elif self._files_has_summary:
-            metadata["summary"] = safe_content
 
-        # ALSO upload to Supabase Storage for persistent URL access across sessions
+        # Upload the generated text asset to AWS S3 so the object survives across sessions.
         safe_filename = (original_filename or name or "file").replace(" ", "_").replace("/", "_")
         storage_key = f"workspace/{user_id}/{folder_id}/{uuid.uuid4().hex}_{safe_filename}"
         bucket = self._workspace_bucket_name()
 
-        storage_url: Optional[str] = None
         try:
-            storage_url = self._upload_to_supabase_storage(
+            self._upload_to_s3(
                 bucket=bucket,
                 object_key=storage_key,
                 content=content_bytes,
                 mime_type="text/plain",
             )
-        except Exception as storage_exc:
-            # Storage upload failure is non-fatal — content is still in DB
-            import logging
-            logging.getLogger(__name__).warning(
-                f"Storage upload for generated file failed (content saved in DB): {storage_exc}"
-            )
+        except HTTPException:
+            raise
 
-        if storage_url:
-            if self._files_has_storage_url:
-                metadata["storage_url"] = storage_url
-            elif self._files_has_file_url:
-                metadata["file_url"] = storage_url
-            if self._files_has_storage_path:
-                metadata["storage_path"] = storage_key
-
-        # Last-resort fallback: no content column AND no storage → encode as data URL
-        content_saved = any(
-            k in metadata for k in ("file_content", "raw_text", "text", "content", "summary", "storage_url", "storage_path")
-        )
-        if not content_saved:
-            data_url = f"data:text/plain;base64,{base64.b64encode(content_bytes).decode('ascii')}"
-            if self._files_has_storage_url:
-                metadata["storage_url"] = data_url
-            elif self._files_has_storage_path:
-                metadata["storage_path"] = data_url
+        if self._files_has_storage_path:
+            metadata["storage_path"] = storage_key
+        if self._files_has_file_url:
+            metadata["file_url"] = storage_key
+        if self._files_has_storage_url:
+            metadata["storage_url"] = storage_key
 
         if not metadata:
             raise HTTPException(status_code=500, detail="No writable file metadata columns found")
@@ -996,11 +1437,14 @@ class WorkspaceService:
         try:
             saved = self.supabase.table("files").insert(metadata).execute()
             if not saved.data:
+                self._delete_from_s3(bucket, storage_key)
                 raise HTTPException(status_code=500, detail="Generated file insert failed")
             return saved.data[0]
         except HTTPException:
+            self._delete_from_s3(bucket, storage_key)
             raise
         except Exception as exc:
+            self._delete_from_s3(bucket, storage_key)
             raise HTTPException(status_code=500, detail=f"Failed to save generated file: {exc}") from exc
 
 

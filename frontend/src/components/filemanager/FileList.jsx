@@ -466,15 +466,17 @@ const FileList = ({ selectedFolder, files, onSelectFile, onFilesUpdate }) => {
           <span>Type</span>
         </div>
 
-        {isLoading ? (
-          <div style={{ padding: 24, color: theme.colors.text.tertiary }}>Loading files...</div>
-        ) : folderFiles.length === 0 ? (
-          <div style={{ padding: 24, color: theme.colors.text.tertiary }}>No files in this folder yet.</div>
-        ) : (
-          folderFiles.map((file) => (
-            <FileRow key={file.id} file={file} depth={0} onSelectFile={onSelectFile} onDelete={handleDelete} theme={theme} isDark={isDark} />
-          ))
-        )}
+        <div style={{ height: 'calc(100% - 38px)', overflowY: 'auto' }}>
+          {isLoading ? (
+            <div style={{ padding: 24, color: theme.colors.text.tertiary }}>Loading files...</div>
+          ) : folderFiles.length === 0 ? (
+            <div style={{ padding: 24, color: theme.colors.text.tertiary }}>No files in this folder yet.</div>
+          ) : (
+            folderFiles.map((file) => (
+              <FileRow key={file.id} file={file} depth={0} onSelectFile={onSelectFile} onDelete={handleDelete} theme={theme} isDark={isDark} />
+            ))
+          )}
+        </div>
       </div>
     </div>
   );

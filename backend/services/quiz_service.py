@@ -11,6 +11,15 @@ from services.ai_service import AIService
 from utils.file_processor import FileProcessor
 
 
+def _strip_nul(value):
+    """Postgres text columns reject embedded NUL (0x00) bytes outright — strip
+    them from any string headed for the DB (extracted file text, source_content
+    passed straight from the frontend, or AI-generated question/answer text)."""
+    if isinstance(value, str):
+        return value.replace("\x00", "")
+    return value
+
+
 def _keyword_match_score(user_text: str, expected_text: str) -> float:
     """Return fraction of expected keywords found in user answer (0.0 – 1.0)."""
     import re
@@ -64,6 +73,7 @@ class QuizService:
         """Generate a quiz from uploaded files or existing source content"""
         try:
             text = source_content or await self.file_processor.process_files(files)
+            text = _strip_nul(text)
 
             questions_data = await self.ai_service.generate_questions(
                 text, num_questions, difficulty, question_type, content_focus
@@ -89,11 +99,11 @@ class QuizService:
                 question = Question(
                     quiz_id=quiz.quiz_id,
                     question_number=q_data["number"],
-                    question_text=q_data["text"],
+                    question_text=_strip_nul(q_data["text"]),
                     difficulty=difficulty,
                     question_type=q_data["type"],
-                    code_snippet=q_data.get("code_snippet"),
-                    expected_answer=q_data.get("correct_answer") if q_data["type"] in ("short_answer", "long_answer") else None,
+                    code_snippet=_strip_nul(q_data.get("code_snippet")),
+                    expected_answer=_strip_nul(q_data.get("correct_answer")) if q_data["type"] in ("short_answer", "long_answer") else None,
                 )
                 self.db.add(question)
                 self.db.flush()  # get question.question_id
@@ -104,7 +114,7 @@ class QuizService:
                         self.db.add(AnswerOption(
                             question_id=question.question_id,
                             option_letter=opt["letter"],
-                            option_text=opt["text"],
+                            option_text=_strip_nul(opt["text"]),
                             is_correct=opt["is_correct"],
                         ))
                     # Flush to make options queryable

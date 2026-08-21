@@ -310,6 +310,9 @@ const FileList = ({ selectedFolder, files, onSelectFile, onFilesUpdate }) => {
 
     try {
       const targetFile = findFileInTreeById(folderFiles, fileId);
+
+      // Call backend — only proceed with UI update on success
+      await workspaceApi.deleteFile(fileId);
       // Call backend — check if it's a note or file
       if (targetFile?.is_note || targetFile?.type === 'NOTE') {
         await workspaceApi.deleteNote(fileId);
@@ -340,7 +343,7 @@ const FileList = ({ selectedFolder, files, onSelectFile, onFilesUpdate }) => {
           },
           targetFile?.originalFilename || targetFile?.name,
         );
-      } catch (e) {
+      } catch {
         // Ignore local sync errors; file is already deleted from the backend
       }
 

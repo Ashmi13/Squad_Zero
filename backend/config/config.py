@@ -50,6 +50,7 @@ class Settings:
     PASS_THRESHOLD: int = PASS_THRESHOLD
 
     # AI model settings
+    AI_MODEL: str = "google/gemini-2.5-flash"
     AI_MODEL: str = "google/gemini-3.1-flash-lite-preview"
     AI_TEMPERATURE: float = 0.5
 

@@ -383,6 +383,29 @@ class WorkspaceService:
 
         raise HTTPException(status_code=404, detail="File bytes could not be resolved from storage or database content")
 
+    def get_file_content(self, user_id: str, file_id: str) -> Dict[str, Any]:
+        """Fetch raw file bytes plus filename/mime metadata, proxied through the backend.
+
+        This exists so the frontend never has to hit S3 directly from the browser
+        (which requires the bucket to have CORS configured for every deployment
+        origin, and breaks with a generic "Failed to fetch" when it isn't). Instead
+        the browser calls this same-origin, authenticated endpoint and the backend
+        does the S3 (or DB-fallback) read itself.
+        """
+        content = self.get_file_object_bytes(user_id=user_id, file_id=file_id)
+
+        self._detect_files_columns()
+        file_query = self.supabase.table("files").select("*").eq("id", file_id).limit(1)
+        if self._files_has_user_id:
+            file_query = file_query.eq("user_id", user_id)
+        existing = file_query.execute()
+        row = existing.data[0] if existing.data else {}
+
+        filename = row.get("name") or row.get("original_filename") or file_id
+        mime_type = row.get("mime_type") or "application/octet-stream"
+
+        return {"content": content, "filename": filename, "mime_type": mime_type}
+
     @staticmethod
     def _build_tree(flat_folders: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         lookup: Dict[str, Dict[str, Any]] = {}

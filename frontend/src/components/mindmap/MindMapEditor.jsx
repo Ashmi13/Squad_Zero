@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+
 import {
   Box,
   AppBar,
@@ -21,8 +22,9 @@ import {
   FormControl,
   InputLabel,
   Fab,
-  CircularProgress
+  CircularProgress,
 } from '@mui/material';
+
 import {
   ArrowLeft,
   Download,
@@ -35,12 +37,12 @@ import {
   ChevronRight,
   Save,
 } from 'lucide-react';
+
 import MindMapCanvas from './MindMapCanvas';
 import NotesPanel from './NotesPanel';
 import axios from 'axios';
 import { workspaceApi } from '@/services/workspaceApi';
 import { useAuth } from '@/hooks/useAuth';
-
 // Helper to recursively search for a node
 const findNodeInTree = (nodes, targetId) => {
   if (!nodes || !Array.isArray(nodes)) return null;
@@ -520,6 +522,27 @@ const MindMapEditor = ({
             onNodeContextMenu={handleNodeContextMenu}
             updateNode={updateNode}
           />
+
+          {/* Floating Action Button (FAB) for Adding Node */}
+          <Tooltip title="Add New Concept Node">
+            <Fab
+              color="success"
+              aria-label="add"
+              onClick={handleOpenAddNode}
+              sx={{
+                position: 'absolute',
+                bottom: 24,
+                left: 24,
+                boxShadow: 4,
+                background: `linear-gradient(135deg, ${theme.palette.success.main} 0%, ${theme.palette.success.dark} 100%)`,
+                '&:hover': {
+                  background: `linear-gradient(135deg, ${theme.palette.success.dark} 0%, ${theme.palette.success.dark} 100%)`,
+                }
+              }}
+            >
+              <Plus size={24} style={{ color: 'white' }} />
+            </Fab>
+          </Tooltip>
 
           {/* Floating Action Button (FAB) for Saving Mind Map */}
           <Tooltip title="Save Mind Map to Folder">

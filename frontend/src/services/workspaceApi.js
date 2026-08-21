@@ -160,6 +160,25 @@ export const workspaceApi = {
     return request(`/api/v1/workspace/files/${fileId}/preview?expires_in=${encodeURIComponent(expiresIn)}`);
   },
 
+  // Fetches the raw file bytes through the backend (same-origin, authenticated)
+  // instead of hitting the S3 presigned URL directly from the browser. Direct S3
+  // fetches fail with a generic "Failed to fetch" whenever the bucket's CORS
+  // policy doesn't list the current origin, so this route avoids CORS entirely.
+  async getFileContent(fileId) {
+    const res = await authFetch(`/api/v1/workspace/files/${fileId}/content`);
+    if (!res.ok) {
+      let detail = `Server returned ${res.status}`;
+      try {
+        const data = await res.json();
+        detail = data?.detail || detail;
+      } catch {
+        // ignore json parsing errors, body wasn't JSON
+      }
+      throw new Error(detail);
+    }
+    return res.blob();
+  },
+
   uploadFile(folderId, file, onProgress) {
     const formData = new FormData();
     formData.append('folder_id', folderId);

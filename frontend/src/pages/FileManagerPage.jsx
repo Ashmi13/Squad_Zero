@@ -283,6 +283,7 @@ const FileManagerPage = ({ activeView, setActiveView }) => {
                 <div style={{ padding: '24px 32px', overflowY: 'auto', flex: 1 }}>
                   <FileList
                     selectedFolder={selectedFolder}
+                    onSelectFile={setSelectedFile}
                     onSelectFile={handleSelectFile}
                     files={files}
                     onFilesUpdate={handleFilesUpdate}

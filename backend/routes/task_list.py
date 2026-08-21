@@ -1,16 +1,30 @@
-# backend/models/task_list.py  (renamed from tast_list.py — typo fix)
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime
-from sqlalchemy.sql import func
-from database import Base
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from typing import List
+from database import get_db
+from models.task import Task
 
+router = APIRouter(prefix="/task-lists", tags=["Task Lists"])
 
-class TaskList(Base):
-    __tablename__ = "task_lists"
+@router.get("/")
+async def get_task_lists(db: Session = Depends(get_db)):
+    """Get all task lists"""
+    task_lists = db.query(TaskList).all()
+    return task_lists
 
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    name = Column(String(100), nullable=False)
-    icon = Column(String(50), default="list")
-    color = Column(String(7), default="#6366f1")
-    order_number = Column(Integer, default=0)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+@router.get("/{task_list_id}")
+async def get_task_list(task_list_id: int, db: Session = Depends(get_db)):
+    """Get a specific task list"""
+    task_list = db.query(TaskList).filter(TaskList.id == task_list_id).first()
+    if not task_list:
+        raise HTTPException(status_code=404, detail="Task list not found")
+    return task_list
+
+@router.post("/")
+async def create_task_list(name: str, db: Session = Depends(get_db)):
+    """Create a new task list"""
+    new_task_list = TaskList(name=name)
+    db.add(new_task_list)
+    db.commit()
+    db.refresh(new_task_list)
+    return new_task_list

@@ -23,7 +23,6 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import styles from './UploadSection.module.css';
 import { uploadPDF } from '../api';
-import { getAccessToken } from '../../utils/tokenStorage';
 
 // ─────────────────────────────────────────────────────────────
 //  CONSTANTS
@@ -164,96 +163,97 @@ const UploadSection = ({ userId: userIdProp }) => {
   }, []);
 
   // ── Poll job status ─────────────────────────────────────────
-  const startPolling = useCallback((id) => {
+  const startPolling = useCallback((id, allFiles = []) => {
     const poll = async () => {
       try {
         const { data } = await axios.get(`${API_BASE}/job/${id}/status`);
         setJobStatus(data.status);
 
         if (data.status === 'done') {
-          const noteId = data.note_id;
+          const noteId = data.note_id
+          console.log('[Poll] Done! noteId:', noteId)
           
           if (!noteId || noteId === '...') {
-            console.error('[Poll] Missing note_id!');
-            setErrorMsg('Note generated but ID missing.');
-            setIsProcessing(false);
-            setJobStatus(null);
-            return;
+            console.error('[Poll] Missing note_id!')
+            setErrorMsg('Note generated but ID missing.')
+            setIsProcessing(false)
+            setJobStatus(null)
+            return
           }
           
-          // Redirect to NoteEditor
-          setTimeout(() => {
-            navigate(`/notes/editor/${noteId}`);
-          }, 1000);
-          return;
-        }
-
-        if (data.status === 'failed') {
-          setErrorMsg(data.error || 'Pipeline compilation failed.');
+          // Store files before navigating
+          if (successfulUploadsRef && 
+              successfulUploadsRef.current) {
+            localStorage.setItem(
+              'currentNoteFiles',
+              JSON.stringify(successfulUploadsRef.current)
+            )
+          }
+          
+          // Navigate with real noteId
+          navigate('/notes/editor/' + noteId)
+          return
+        } else if (data.status === 'failed') {
           setIsProcessing(false);
-          setJobStatus(null);
-          return;
-        }
+          setErrorMsg(data.error || 'Generation failed. Please try again.');
 
-        // Keep polling
-        pollTimerRef.current = setTimeout(poll, POLL_INTERVAL_MS);
+        } else {
+          // Still running — poll again
+          pollTimerRef.current = setTimeout(poll, POLL_INTERVAL_MS);
+        }
       } catch (err) {
-        console.error('[Poll] Error:', err);
-        setErrorMsg('Disconnected from generation pipeline. Retrying…');
-        pollTimerRef.current = setTimeout(poll, POLL_INTERVAL_MS);
+        console.error('[poll]', err);
+        pollTimerRef.current = setTimeout(poll, POLL_INTERVAL_MS * 2);
       }
     };
-
     poll();
   }, [navigate]);
 
-  const addLocalFiles = (files) => {
+  // ── File selection ──────────────────────────────────────────
+  const addLocalFiles = useCallback((files) => {
     const valid = [];
     const errors = [];
 
-    for (let i = 0; i < files.length; i++) {
-      const f = files[i];
-      const ext = getFileExt(f.name);
-
+    Array.from(files).forEach(file => {
+      const ext = getFileExt(file.name);
       if (!ALLOWED_EXTENSIONS.includes(ext)) {
-        errors.push(`${f.name}: Only PDF, PPTX, MD, and TXT are supported.`);
-        continue;
+        errors.push(`${file.name}: unsupported type (${ext})`);
+        return;
       }
-
-      if (f.size > MAX_SIZE_MB * 1024 * 1024) {
-        errors.push(`${f.name}: Exceeds maximum size of ${MAX_SIZE_MB}MB.`);
-        continue;
+      if (file.size > MAX_SIZE_MB * 1024 * 1024) {
+        errors.push(`${file.name}: exceeds ${MAX_SIZE_MB}MB limit`);
+        return;
       }
+      const alreadyAdded = selectedFiles.some(
+        f => f.name === file.name && f.size === file.size
+      );
+      if (!alreadyAdded) valid.push(file);
+    });
 
-      valid.push(f);
-    }
-
-    if (errors.length) {
-      setErrorMsg(errors.join('\n'));
-    }
-
-    if (valid.length) {
-      setSelectedFiles(prev => [...prev, ...valid]);
-    }
-  };
+    if (errors.length) setErrorMsg(errors.join('\n'));
+    if (valid.length)  setSelectedFiles(prev => [...prev, ...valid]);
+  }, [selectedFiles]);
 
   const handleFileInputChange = (e) => {
     addLocalFiles(e.target.files);
     e.target.value = '';
   };
 
-  const removeLocalFile = (idx) => {
-    setSelectedFiles(prev => prev.filter((_, i) => i !== idx));
+  const removeLocalFile = (index) => {
+    setSelectedFiles(prev => prev.filter((_, i) => i !== index));
   };
 
-  const addNotebookNote = (note) => {
-    if (notebookNotes.some(n => n.id === note.id)) return;
-    setNotebookNotes(prev => [...prev, note]);
+  const removeNotebookNote = (index) => {
+    setNotebookNotes(prev => prev.filter((_, i) => i !== index));
   };
 
-  const removeNotebookNote = (idx) => {
-    setNotebookNotes(prev => notebookNotes.filter((_, i) => i !== idx));
-  };
+  // ── Notebook note selection ─────────────────────────────────
+  const addNotebookNote = useCallback((note) => {
+    setNotebookNotes(prev => {
+      if (prev.some(n => n.id === note.id)) return prev;
+      return [...prev, { ...note, content: getNotebookNoteContent(note) }];
+    });
+  }, []);
 
   // ── Drag and drop ────────────────────────────────────────────
   const handleDragStart = (e, note) => {
@@ -268,61 +268,17 @@ const UploadSection = ({ userId: userIdProp }) => {
 
   const handleDropZoneDragLeave = () => setDragOver(false);
 
-  const handleDropZoneDrop = async (e) => {
+  const handleDropZoneDrop = (e) => {
     e.preventDefault();
     setDragOver(false);
 
-    console.log('[Drop] DataTransfer types:', e.dataTransfer.types);
-    const json = e.dataTransfer.getData('neuranote-quiz-file') || e.dataTransfer.getData('application/json');
-    console.log('[Drop] Received payload:', json);
-
+    const json = e.dataTransfer.getData('application/json');
     if (json) {
       try {
-        const dragData = JSON.parse(json);
-        console.log('[Drop] Parsed drag data object:', dragData);
-        if (dragData.fileId) {
-          setIsProcessing(true);
-          setErrorMsg('');
-          setJobStatus('retrieving');
-          try {
-            const token = getAccessToken();
-            const config = token ? { headers: { Authorization: `Bearer ${token}` } } : {};
-            
-            const MAIN_API_BASE = (import.meta.env && import.meta.env.VITE_API_BASE_URL)
-              ? import.meta.env.VITE_API_BASE_URL
-              : 'http://127.0.0.1:8000';
-              
-            const { data } = await axios.get(`${MAIN_API_BASE}/api/v1/workspace/files/${dragData.fileId}/preview`, config);
-            const downloadUrl = data.preview;
-            
-            const response = await fetch(downloadUrl);
-            const blob = await response.blob();
-            
-            let mimeType = 'application/pdf';
-            const ext = getFileExt(dragData.fileName);
-            if (ext === '.pptx') mimeType = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
-            else if (ext === '.md') mimeType = 'text/markdown';
-            else if (ext === '.txt') mimeType = 'text/plain';
-
-            const fileObj = new File([blob], dragData.fileName, { type: mimeType });
-            addLocalFiles([fileObj]);
-          } catch (err) {
-            setErrorMsg('Failed to load workspace file.');
-            console.error(err);
-          } finally {
-            setIsProcessing(false);
-            setJobStatus(null);
-          }
-        } else if (dragData.id) {
-          if (!notebookNotes.some(n => n.id === dragData.id)) {
-            setNotebookNotes(prev => [...prev, dragData]);
-          }
-        }
-      } catch (err) {
-        console.error('[Drop] Failed parsing drag data:', err);
-      }
+        const note = JSON.parse(json);
+        addNotebookNote(note);
+      } catch {}
     } else if (e.dataTransfer.files.length) {
-      console.log('[Drop] Received local files:', e.dataTransfer.files);
       addLocalFiles(e.dataTransfer.files);
     }
   };
@@ -353,6 +309,7 @@ const UploadSection = ({ userId: userIdProp }) => {
       const filesToUpload = [...selectedFiles];
 
       for (const note of notebookNotes) {
+        // FIX: use real content, not mock string
         const content = note.content || getNotebookNoteContent(note);
         const blob = new Blob([content], { type: 'text/markdown' });
         const virtualFile = new File([blob], `${note.name}.md`, { type: 'text/markdown' });
@@ -369,10 +326,14 @@ const UploadSection = ({ userId: userIdProp }) => {
         throw new Error(`Upload Failed:\n${errorDetails || 'All files failed to upload.'}`);
       }
 
-      localStorage.setItem(
-        'currentPdfId',
-        successfulUploads[0].pdf_id
-      );
+      if (successfulUploads.length > 0) {
+        localStorage.setItem(
+          'currentPdfId',
+          successfulUploads[0].pdf_id
+        )
+      }
+
+      const allPdfIds = successfulUploads.map(f => f.pdf_id);
 
       // Step 3 — Start structured note background job
       const inputItems = successfulUploads.map(f => ({
@@ -393,7 +354,7 @@ const UploadSection = ({ userId: userIdProp }) => {
 
       // Step 4 — Poll until done or failed
       successfulUploadsRef.current = successfulUploads;
-      startPolling(newJobId);
+      startPolling(newJobId, successfulUploads);
 
     } catch (err) {
       console.error('[handleGenerate]', err);
@@ -532,8 +493,6 @@ const UploadSection = ({ userId: userIdProp }) => {
                       </button>
                     </div>
                   ))}
-
-
                 </div>
               </div>
             )}

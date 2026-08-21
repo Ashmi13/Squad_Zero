@@ -1,6 +1,4 @@
 import React, { useState } from 'react';
-import axios from 'axios';
-import { getAccessToken } from '../../utils/tokenStorage';
 import {
   Paper,
   TextField,
@@ -52,44 +50,11 @@ const PdfUploadSection = ({ onMindmapCreated }) => {
     }));
   };
 
-  const handleDrop = async (e) => {
+  const handleDrop = (e) => {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
-
-    const json = e.dataTransfer.getData('neuranote-quiz-file') || e.dataTransfer.getData('application/json');
-    if (json) {
-      try {
-        const dragData = JSON.parse(json);
-        if (dragData.fileId) {
-          setIsLoading(true);
-          setError(null);
-          try {
-            const token = getAccessToken();
-            const config = token ? { headers: { Authorization: `Bearer ${token}` } } : {};
-            
-            const MAIN_API_BASE = (import.meta.env && import.meta.env.VITE_API_BASE_URL)
-              ? import.meta.env.VITE_API_BASE_URL
-              : 'http://127.0.0.1:8000';
-              
-            const { data } = await axios.get(`${MAIN_API_BASE}/api/v1/workspace/files/${dragData.fileId}/preview`, config);
-            const downloadUrl = data.preview;
-            
-            const response = await fetch(downloadUrl);
-            const blob = await response.blob();
-            const fileObj = new File([blob], dragData.fileName, { type: 'application/pdf' });
-            handleFile(fileObj);
-          } catch (err) {
-            setError('Failed to load workspace file for mind map generation.');
-            console.error(err);
-          } finally {
-            setIsLoading(false);
-          }
-        }
-      } catch (err) {
-        console.error('[Drop] Failed parsing drag data:', err);
-      }
-    } else if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       handleFile(e.dataTransfer.files[0]);
     }
   };

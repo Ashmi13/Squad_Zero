@@ -237,6 +237,11 @@ const UploadSection = ({ userId: userIdProp }) => {
     }
   };
 
+  const handleFileInputChange = (e) => {
+    addLocalFiles(e.target.files);
+    e.target.value = '';
+  };
+
   const removeLocalFile = (idx) => {
     setSelectedFiles(prev => prev.filter((_, i) => i !== idx));
   };

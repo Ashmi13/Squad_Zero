@@ -272,10 +272,14 @@ const UploadSection = ({ userId: userIdProp }) => {
     e.preventDefault();
     setDragOver(false);
 
+    console.log('[Drop] DataTransfer types:', e.dataTransfer.types);
     const json = e.dataTransfer.getData('neuranote-quiz-file') || e.dataTransfer.getData('application/json');
+    console.log('[Drop] Received payload:', json);
+
     if (json) {
       try {
         const dragData = JSON.parse(json);
+        console.log('[Drop] Parsed drag data object:', dragData);
         if (dragData.fileId) {
           if (!workspaceFiles.some(f => f.id === dragData.fileId)) {
             setWorkspaceFiles(prev => [...prev, {
@@ -293,6 +297,7 @@ const UploadSection = ({ userId: userIdProp }) => {
         console.error('[Drop] Failed parsing drag data:', err);
       }
     } else if (e.dataTransfer.files.length) {
+      console.log('[Drop] Received local files:', e.dataTransfer.files);
       addLocalFiles(e.dataTransfer.files);
     }
   };

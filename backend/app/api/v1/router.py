@@ -94,3 +94,4 @@ try:
     print("[OK] Admin routes loaded")
 except Exception as e:
     print(f"⚠️ Admin routes skipped: {e}")
+    print(f"⚠️ Admin routes skipped: {e}")

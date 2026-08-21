@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { axiosInstance } from '@/lib/axios';
 import toast from '@/lib/simpleToast';
+import { motion } from 'framer-motion';
 const SUPER_ADMIN_ID = "b422ac95-a9dd-4aa0-ab5c-54c09fa58267";
 
 const AdminDashboard = () => {

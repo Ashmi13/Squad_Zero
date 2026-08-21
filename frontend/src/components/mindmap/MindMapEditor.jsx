@@ -21,6 +21,8 @@ import {
   FormControl,
   InputLabel,
   Fab
+  Fab,
+  CircularProgress
 } from '@mui/material';
 import {
   ArrowLeft,
@@ -35,6 +37,13 @@ import {
 } from 'lucide-react';
 import MindMapCanvas from './MindMapCanvas';
 import NotesPanel from './NotesPanel';
+  Save,
+} from 'lucide-react';
+import MindMapCanvas from './MindMapCanvas';
+import NotesPanel from './NotesPanel';
+import axios from 'axios';
+import { workspaceApi } from '@/services/workspaceApi';
+import { useAuth } from '@/hooks/useAuth';
 
 // Helper to recursively search for a node
 const findNodeInTree = (nodes, targetId) => {
@@ -100,6 +109,81 @@ const MindMapEditor = ({
 
   // Custom Context Menu state
   const [contextMenu, setContextMenu] = useState(null);
+
+  // Folder Organization & Save State
+  const { user } = useAuth();
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [folders, setFolders] = useState([]);
+  const [foldersLoading, setFoldersLoading] = useState(false);
+  const [showNewFolderInput, setShowNewFolderInput] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [isCreatingFolder, setIsCreatingFolder] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Fetch folders and build directory tree
+  const loadWorkspaceFolders = async () => {
+    setFoldersLoading(true);
+    try {
+      const data = await workspaceApi.getFolders();
+      const list = [];
+      const flatten = (nodes, depth = 0) => {
+        if (!nodes) return;
+        nodes.forEach(n => {
+          list.push({ id: n.id, name: n.name, depth });
+          if (n.children && n.children.length > 0) {
+            flatten(n.children, depth + 1);
+          }
+        });
+      };
+      flatten(data.folders || []);
+      setFolders(list);
+    } catch (e) {
+      console.error('Failed to load workspace folders:', e);
+    } finally {
+      setFoldersLoading(false);
+    }
+  };
+
+  const handleOpenSaveModal = () => {
+    setShowSaveModal(true);
+    loadWorkspaceFolders();
+  };
+
+  const handleCreateFolder = async () => {
+    if (!newFolderName.trim()) return;
+    setIsCreatingFolder(true);
+    try {
+      await workspaceApi.createFolder({ name: newFolderName });
+      setNewFolderName('');
+      setShowNewFolderInput(false);
+      await loadWorkspaceFolders();
+    } catch (e) {
+      console.error('Failed to create folder:', e);
+    } finally {
+      setIsCreatingFolder(false);
+    }
+  };
+
+  const handleSaveToFolder = async (folder) => {
+    if (!mindmap?.id) return;
+    setIsSaving(true);
+    try {
+      const noteId = `mindmap_${mindmap.id}`;
+      const API_BASE = (import.meta.env && import.meta.env.VITE_API_BASE_URL) 
+        ? `${import.meta.env.VITE_API_BASE_URL}/api/m3`
+        : 'http://127.0.0.1:8000/api/m3';
+        
+      await axios.put(`${API_BASE}/notes/${noteId}/folder`, {
+        folder_id: folder.id,
+      });
+      setShowSaveModal(false);
+    } catch (err) {
+      console.error('Failed to save mindmap to folder:', err);
+      alert('Failed to save to folder');
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   // Retrieve current selected node object (supporting recursive lookup)
   const selectedNode = selectedNodeId === 'center-root' 
@@ -447,6 +531,13 @@ const MindMapEditor = ({
               color="success"
               aria-label="add"
               onClick={handleOpenAddNode}
+          {/* Floating Action Button (FAB) for Saving Mind Map */}
+          <Tooltip title="Save Mind Map to Folder">
+            <Fab
+              color="primary"
+              aria-label="save"
+              onClick={handleOpenSaveModal}
+              disabled={isSaving}
               sx={{
                 position: 'absolute',
                 bottom: 24,
@@ -459,6 +550,13 @@ const MindMapEditor = ({
               }}
             >
               <Plus size={24} style={{ color: 'white' }} />
+                background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.primary.dark} 100%)`,
+                '&:hover': {
+                  background: `linear-gradient(135deg, ${theme.palette.primary.dark} 0%, ${theme.palette.primary.dark} 100%)`,
+                }
+              }}
+            >
+              {isSaving ? <CircularProgress size={24} color="inherit" /> : <Save size={24} style={{ color: 'white' }} />}
             </Fab>
           </Tooltip>
         </Box>
@@ -678,6 +776,114 @@ const MindMapEditor = ({
           </Button>
           <Button variant="text" color="inherit" onClick={() => setDeleteConfirmOpen(false)} sx={{ textTransform: 'none' }}>
             Cancel
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Save to Folder Dialog */}
+      <Dialog
+        open={showSaveModal}
+        onClose={() => setShowSaveModal(false)}
+        maxWidth="xs"
+        fullWidth
+        PaperProps={{
+          sx: {
+            borderRadius: 3,
+            p: 1,
+            boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04)'
+          }
+        }}
+      >
+        <DialogTitle sx={{ fontWeight: 'bold', fontSize: '1.2rem', pb: 1 }}>
+          Save Mind Map to Folder
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Select a workspace folder to organize your Mind Map.
+          </Typography>
+          
+          {foldersLoading ? (
+            <Stack direction="row" spacing={1} justifyContent="center" alignItems="center" sx={{ py: 3 }}>
+              <CircularProgress size={20} />
+              <Typography variant="body2">Loading folders...</Typography>
+            </Stack>
+          ) : folders.length === 0 ? (
+            <Box sx={{ py: 3, textAlign: 'center', bgcolor: 'action.hover', borderRadius: 2, mb: 2 }}>
+              <Typography variant="body2" color="text.secondary">
+                No folders found. Create one below to get started.
+              </Typography>
+            </Box>
+          ) : (
+            <Stack spacing={1} sx={{ maxHeight: 240, overflowY: 'auto', mb: 2, pr: 0.5 }}>
+              {folders.map((f) => (
+                <Button
+                  key={f.id}
+                  variant="outlined"
+                  fullWidth
+                  onClick={() => handleSaveToFolder(f)}
+                  sx={{
+                    justifyContent: 'flex-start',
+                    pl: 2 + f.depth * 2,
+                    textTransform: 'none',
+                    borderColor: 'divider',
+                    color: 'text.primary',
+                    '&:hover': {
+                      backgroundColor: 'primary.light',
+                      color: 'primary.contrastText',
+                      borderColor: 'primary.main'
+                    }
+                  }}
+                >
+                  📁 {f.name}
+                </Button>
+              ))}
+            </Stack>
+          )}
+
+          {/* New Folder Creation form inline */}
+          {showNewFolderInput ? (
+            <Stack spacing={1} sx={{ mt: 1 }}>
+              <TextField
+                size="small"
+                placeholder="Folder Name"
+                value={newFolderName}
+                onChange={(e) => setNewFolderName(e.target.value)}
+                disabled={isCreatingFolder}
+                autoFocus
+                fullWidth
+              />
+              <Stack direction="row" spacing={1} justifyContent="flex-end">
+                <Button 
+                  size="small" 
+                  onClick={() => setShowNewFolderInput(false)}
+                  disabled={isCreatingFolder}
+                >
+                  Cancel
+                </Button>
+                <Button 
+                  size="small" 
+                  variant="contained" 
+                  onClick={handleCreateFolder}
+                  disabled={isCreatingFolder || !newFolderName.trim()}
+                >
+                  Create
+                </Button>
+              </Stack>
+            </Stack>
+          ) : (
+            <Button
+              variant="text"
+              size="small"
+              onClick={() => setShowNewFolderInput(true)}
+              sx={{ textTransform: 'none', fontWeight: 'bold' }}
+            >
+              + Create New Folder
+            </Button>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowSaveModal(false)} color="inherit">
+            Close
           </Button>
         </DialogActions>
       </Dialog>

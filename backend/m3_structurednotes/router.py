@@ -314,19 +314,46 @@ async def generate_structured_note_route(req: StructuredNoteRequest, background_
     background_tasks.add_task(
         _run_structured_note_job,
         job_id=job_id, input_items=req.input_items,
-        user_id=req.user_id, language=req.language
+        user_id=req.user_id, language=req.language,
+        module_name=req.module_name
     )
     return {"job_id": job_id, "status": "queued"}
 
 
-async def _run_structured_note_job(job_id: str, input_items: list, user_id: str, language: str):
+async def _run_structured_note_job(job_id: str, input_items: list, user_id: str, language: str, module_name: str = None):
     try:
         content = note_service.generate_structured_note(
             input_items=input_items, user_id=user_id, language=language, job_id=job_id
         )
+
+        # Determine base topic / name
+        topic = module_name or "Document"
+        if not module_name or module_name == "Study Notes":
+            # If default name or blank, try to extract first filename topic
+            topic = "Document"
+            conn = get_db_connection()
+            if conn:
+                try:
+                    cur = conn.cursor()
+                    if input_items and isinstance(input_items[0], dict) and input_items[0].get("value"):
+                        first_id = input_items[0]["value"]
+                        cur.execute("SELECT file_name FROM document_files WHERE id = %s", (first_id,))
+                        row = cur.fetchone()
+                        if row and row[0]:
+                            import os
+                            topic, _ = os.path.splitext(row[0])
+                    cur.close()
+                    conn.close()
+                except Exception:
+                    if conn:
+                        conn.close()
+
+        # Format title to end with "— Structured Note"
+        title = f"{topic} — Structured Note"
+
         note_id = note_service.save_note_to_db(
             user_id, None,
-            "Structured Study Notes",
+            title,
             content
         )
         if note_id:
@@ -409,7 +436,7 @@ async def generate_note(req: NoteRequest, background_tasks: BackgroundTasks):
     return {"job_id": job_id, "status": "queued"}
 
 
-async def _run_generation_job(
+def _run_generation_job(
     job_id: str,
     pdf_ids: list,
     user_id: str,
@@ -432,8 +459,36 @@ async def _run_generation_job(
             job_id=job_id,
         )
 
-        # Save note to DB
-        title = f"Study Notes — {len(pdf_ids)} Document(s)"
+        # Get the first filename to extract the topic
+        topic = "Document"
+        conn = get_db_connection()
+        if conn:
+            try:
+                cur = conn.cursor()
+                if pdf_ids:
+                    # Query document_files (M3)
+                    cur.execute("SELECT file_name FROM document_files WHERE id = %s", (pdf_ids[0],))
+                    row = cur.fetchone()
+                    if row and row[0]:
+                        import os
+                        base_name, _ = os.path.splitext(row[0])
+                        topic = base_name
+                    else:
+                        # Fallback to files table (M2)
+                        cur.execute("SELECT name FROM files WHERE id = %s", (pdf_ids[0],))
+                        row = cur.fetchone()
+                        if row and row[0]:
+                            import os
+                            base_name, _ = os.path.splitext(row[0])
+                            topic = base_name
+                cur.close()
+                conn.close()
+            except Exception:
+                if conn:
+                    conn.close()
+
+        # Save note to DB with standardized naming format
+        title = f"{topic} — Structured Study Notes"
         note_id = note_service.save_note_to_db(user_id, None, title, content)
 
         if not note_id:
@@ -769,6 +824,16 @@ async def delete_note(note_id: str):
         cur.execute("DELETE FROM notes WHERE note_id = %s", (note_id,))
         deleted = cur.rowcount > 0
         conn.commit()
+
+        # Clean up corresponding mindmaps table if this is a synced mindmap note
+        if deleted and note_id.startswith("mindmap_"):
+            try:
+                mm_id = int(note_id.split("_")[1])
+                cur.execute("DELETE FROM mindmaps WHERE id = %s", (mm_id,))
+                conn.commit()
+            except Exception as mm_del_err:
+                print(f"Failed to clean up mindmap {note_id}: {mm_del_err}")
+                
         cur.close()
         conn.close()
     except Exception as e:
@@ -783,6 +848,7 @@ async def delete_note(note_id: str):
 # ─────────────────────────────────────────────────────────────
 
 @router.get("/documents/{filename}")
+@router.head("/documents/{filename}")
 async def serve_document(filename: str):
     """
     Returns the actual PDF file.

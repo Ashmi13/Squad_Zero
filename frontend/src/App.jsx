@@ -131,6 +131,18 @@ const AppLayout = () => {
   }, [userLoading, userScope]);
 
   // Persist selected workspace folder
+
+  useEffect(() => {
+    if (userLoading) return;
+
+    try {
+      const savedFolder = localStorage.getItem(getScopedStorageKey(ACTIVE_WORKSPACE_FOLDER_KEY, userScope));
+      setSelectedWorkspaceFolder(savedFolder ? JSON.parse(savedFolder) : null);
+    } catch {
+      setSelectedWorkspaceFolder(null);
+    }
+  }, [userLoading, userScope]);
+
   useEffect(() => {
     if (userLoading) return;
 

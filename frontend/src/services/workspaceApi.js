@@ -92,6 +92,12 @@ export const workspaceApi = {
     });
   },
 
+  deleteNote(noteId) {
+    return request(`/api/m3/notes/${noteId}`, {
+      method: 'DELETE',
+    });
+  },
+
   getFiles(folderId = null) {
     const query = folderId ? `?folder_id=${encodeURIComponent(folderId)}` : '';
     return request(`/api/v1/workspace/files${query}`);

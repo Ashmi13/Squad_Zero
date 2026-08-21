@@ -158,6 +158,7 @@ const FileList = ({ selectedFolder, files, onSelectFile, onFilesUpdate }) => {
           mimeType: f.mime_type,
           isParentPDF: computedType === 'PDF',
           backendFile: true,
+          is_note: !!f.is_note,
           children: [],
         };
       });
@@ -312,6 +313,12 @@ const FileList = ({ selectedFolder, files, onSelectFile, onFilesUpdate }) => {
 
       // Call backend — only proceed with UI update on success
       await workspaceApi.deleteFile(fileId);
+      // Call backend — check if it's a note or file
+      if (targetFile?.is_note || targetFile?.type === 'NOTE') {
+        await workspaceApi.deleteNote(fileId);
+      } else {
+        await workspaceApi.deleteFile(fileId);
+      }
 
       // Immediately remove from local folderFiles state (no page refresh needed)
       setFolderFiles((prev) => removeFileNodeById(prev, fileId));
@@ -340,6 +347,7 @@ const FileList = ({ selectedFolder, files, onSelectFile, onFilesUpdate }) => {
         // Ignore local sync errors; file is already deleted from the backend
       }
 
+      await loadFiles();
       window.dispatchEvent(new Event('neuranote:files-updated'));
     } catch (err) {
       setError(err.message || 'Delete failed');

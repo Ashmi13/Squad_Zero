@@ -107,6 +107,24 @@ class MindMapService:
             # Call _create_nodes_from_structure()
             self._create_nodes_from_structure(mindmap_id, structure)
 
+            # Create corresponding note in notes table so it integrates with folders/sidebar tree
+            try:
+                note_id = f"mindmap_{mindmap_id}"
+                note_title = f"{title} — Mind Map"
+                note_payload = {
+                    "note_id": note_id,
+                    "user_id": user_id,
+                    "title": note_title,
+                    "content": f"Mind map generated from {file.filename}.",
+                    "note_type": "MINDMAP",
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "updated_at": datetime.now(timezone.utc).isoformat()
+                }
+                self.supabase.table("notes").insert(note_payload).execute()
+                print(f"[MINDMAP] Successfully synced mindmap_{mindmap_id} to notes table.")
+            except Exception as notes_err:
+                print(f"[MINDMAP] Failed to sync mindmap to notes table: {notes_err}")
+
             # Retrieve count of nodes
             nodes_res = self.supabase.table("mindmap_nodes").select("id", count="exact").eq("mindmap_id", mindmap_id).execute()
             nodes_count = nodes_res.count if nodes_res.count is not None else 0
@@ -290,6 +308,10 @@ class MindMapService:
         self.get_mindmap(mindmap_id, user_id)
 
         self.supabase.table("mindmaps").delete().eq("id", mindmap_id).execute()
+        try:
+            self.supabase.table("notes").delete().eq("note_id", f"mindmap_{mindmap_id}").execute()
+        except Exception:
+            pass
         return {"message": "Mind map deleted successfully"}
 
     def get_usage_stats(self, user_id: str) -> dict:

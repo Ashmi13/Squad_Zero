@@ -142,6 +142,7 @@ const FolderPanel = ({ selectedFolder, onSelectFolder, onSelectFile, onFolderDel
           fileUrl: f.file_url || f.storage_url || f.preview_url || inlineAsset,
           content: inlineAsset ? null : resolvedPayload,
           isParentPDF: (f.file_type || '').toUpperCase() === 'PDF',
+          is_note: !!f.is_note,
         };
       });
       setFilesByFolder((prev) => {

@@ -82,6 +82,30 @@ const FileManagerPage = ({ activeView, setActiveView }) => {
   const [files, setFiles] = useState({});
   const [folders, setFolders] = useState([]);
 
+  const handleSelectFile = (file) => {
+    const noteTypes = ['NOTE', 'STRUCTURED', 'CHEATSHEET', 'DETAILED'];
+    
+    const isMindMap = file?.type === 'MINDMAP' || 
+      file?.file_type === 'MINDMAP' || 
+      String(file?.id).startsWith('mindmap_');
+      
+    if (isMindMap) {
+      const realId = String(file.id).replace('mindmap_', '');
+      navigate(`/mindmap?id=${realId}`);
+      return;
+    }
+
+    const isNote = file?.is_note || 
+      noteTypes.includes(file?.type?.toUpperCase()) || 
+      noteTypes.includes(file?.file_type?.toUpperCase());
+
+    if (isNote) {
+      navigate(`/notes/editor/${file.id}`);
+    } else {
+      setSelectedFile(file);
+    }
+  };
+
   useEffect(() => {
     if (userLoading) {
       return;
@@ -185,7 +209,7 @@ const FileManagerPage = ({ activeView, setActiveView }) => {
             setSelectedFolder(folder);
             setSelectedFile(null);
           }}
-          onSelectFile={setSelectedFile}
+          onSelectFile={handleSelectFile}
           files={files}
           onFilesUpdate={setFiles}
           onFolderDelete={handleFolderDelete}
@@ -259,7 +283,7 @@ const FileManagerPage = ({ activeView, setActiveView }) => {
                 <div style={{ padding: '24px 32px', overflowY: 'auto', flex: 1 }}>
                   <FileList
                     selectedFolder={selectedFolder}
-                    onSelectFile={setSelectedFile}
+                    onSelectFile={handleSelectFile}
                     files={files}
                     onFilesUpdate={handleFilesUpdate}
                     onFolderDelete={handleFolderDelete}

@@ -128,11 +128,13 @@ __pycache__/
 # History files
 .history/
 
- backend/model_cache/
- backend/__pycache__/
- *.pyc
+# Temporary testing documents and generated assets
+documents/
+frontend/public/notes-assets/
+*.pdf
+backend/*.pdf
 
- # Python bytecode cache
+# Python bytecode cache
 **/__pycache__/
 *.pyc
 *.pyo

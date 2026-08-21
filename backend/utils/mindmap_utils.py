@@ -119,7 +119,7 @@ TEXT TO ANALYZE (first 5000 characters):
 REMEMBER: Every single end node MUST have meaningful notes with specific information!"""
 
         try:
-            # Call OpenAI API
+            # Call OpenAI API enforcing JSON mode output
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
@@ -127,7 +127,8 @@ REMEMBER: Every single end node MUST have meaningful notes with specific informa
                     {"role": "user", "content": user_prompt}
                 ],
                 max_tokens=self.max_tokens,
-                temperature=self.temperature
+                temperature=self.temperature,
+                response_format={"type": "json_object"}
             )
         except Exception as e:
             raise ValueError(f"OpenAI completion request failed: {str(e)}")

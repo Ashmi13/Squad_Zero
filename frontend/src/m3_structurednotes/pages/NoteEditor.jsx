@@ -5,12 +5,17 @@ import { marked } from 'marked'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
 import RefineModal from '../components/RefineModal'
+import { getScopedStorageKey } from '@/hooks/useSupabaseUser'
+import { useAuth } from '@/hooks/useAuth'
+import { workspaceApi } from '@/services/workspaceApi'
 
 const API_BASE = 'http://127.0.0.1:8000/api/m3'
 
 export default function NoteEditor() {
   const { noteId } = useParams()
   const navigate = useNavigate()
+  const { user } = useAuth()
+  const userScope = user?.id || 'anonymous'
   
   // Safety check — if this logs, component mounted
   useEffect(() => {
@@ -31,6 +36,35 @@ export default function NoteEditor() {
   const [noteContent, setNoteContent] = useState('')
   const [sourceFiles, setSourceFiles] = useState([])
   const [activeFile, setActiveFile] = useState(null)
+  const [pdfError, setPdfError] = useState(false)
+  const [checkingPdf, setCheckingPdf] = useState(false)
+
+  useEffect(() => {
+    if (!activeFile) {
+      setPdfError(false)
+      return
+    }
+    const url = getFullPdfUrl(activeFile)
+    if (!url) {
+      setPdfError(true)
+      return
+    }
+    setCheckingPdf(true)
+    setPdfError(false)
+    
+    axios.head(url)
+      .then(() => {
+        setPdfError(false)
+      })
+      .catch((err) => {
+        console.error('[PDF] Verification HEAD request failed:', err)
+        setPdfError(true)
+      })
+      .finally(() => {
+        setCheckingPdf(false)
+      })
+  }, [activeFile])
+
   const [sourceVisible, setSourceVisible] = useState(false)
   const [editorWidth, setEditorWidth] = useState(50)
   const [searchTerm, setSearchTerm] = useState('')
@@ -40,6 +74,10 @@ export default function NoteEditor() {
   const [showTOC, setShowTOC] = useState(false)
   const [tocItems, setTocItems] = useState([])
   const [folders, setFolders] = useState([])
+  const [foldersLoading, setFoldersLoading] = useState(false)
+  const [showNewFolderInput, setShowNewFolderInput] = useState(false)
+  const [newFolderName, setNewFolderName] = useState('')
+  const [isCreatingFolder, setIsCreatingFolder] = useState(false)
   const [showSaveModal, setShowSaveModal] = useState(false)
   const [selectedFolder, setSelectedFolder] = useState(null)
   const [toast, setToast] = useState('')
@@ -97,17 +135,73 @@ export default function NoteEditor() {
         console.error('[Source] parse error')
       }
     }
+  }, [noteId])
 
-    // Folder loading
+  // Helper to fetch and flatten workspace folders (exact same logic as sidebar)
+  const fetchWorkspaceFolders = async () => {
+    setFoldersLoading(true);
     try {
-      const storedFolders = localStorage.getItem('neuranote_folders')
+      const data = await workspaceApi.getFolders();
+      const flatFolders = [];
+      const flatten = (nodes) => {
+        (nodes || []).forEach(node => {
+          flatFolders.push({
+            id: node.id,
+            name: node.name,
+            parent_folder_id: node.parent_folder_id || node.parent_id || null
+          });
+          if (node.children?.length) {
+            flatten(node.children);
+          }
+        });
+      };
+      flatten(data.folders || []);
+      setFolders(flatFolders);
+      
+      if (userScope) {
+        const key = getScopedStorageKey('neuranote_folders', userScope);
+        localStorage.setItem(key, JSON.stringify(flatFolders));
+      }
+    } catch (err) {
+      console.error('Failed to fetch workspace folders:', err);
+    } finally {
+      setFoldersLoading(false);
+    }
+  };
+
+  // Helper to create folder inline in the modal
+  const handleCreateFolder = async () => {
+    if (!newFolderName.trim()) return;
+    setIsCreatingFolder(true);
+    try {
+      await workspaceApi.createFolder(newFolderName.trim());
+      setNewFolderName('');
+      setShowNewFolderInput(false);
+      await fetchWorkspaceFolders();
+      showToast('Folder created!');
+    } catch (e) {
+      showToast('Failed to create folder');
+    } finally {
+      setIsCreatingFolder(false);
+    }
+  };
+
+  // Folder loading with scoped cache and API refresh
+  useEffect(() => {
+    if (!userScope) return;
+
+    try {
+      const key = getScopedStorageKey('neuranote_folders', userScope);
+      const storedFolders = localStorage.getItem(key);
       if (storedFolders) {
-        setFolders(JSON.parse(storedFolders))
+        setFolders(JSON.parse(storedFolders));
       }
     } catch (e) {
-      console.error('Failed to load folders')
+      console.error('Failed to load folders from scoped cache', e);
     }
-  }, [noteId])
+
+    fetchWorkspaceFolders();
+  }, [userScope])
 
   // Load content into editor when noteContent changes
   useEffect(() => {
@@ -127,9 +221,15 @@ export default function NoteEditor() {
     let cleaned = noteContent
       .replace(/End_of_Notes/g, '')
       .replace(/END_SECTION/g, '')
-      .replace(/^```markdown\s*/gm, '')
-      .replace(/^```\s*$/gm, '')
-      .trim()
+      .trim();
+
+    // Safely strip outer wrapping code fence if present (some LLM outputs wrap the entire markdown)
+    if (cleaned.startsWith('```')) {
+      const firstNewline = cleaned.indexOf('\n');
+      if (firstNewline !== -1 && cleaned.endsWith('```')) {
+        cleaned = cleaned.substring(firstNewline + 1, cleaned.length - 3).trim();
+      }
+    }
 
     // Step 2: Detect if content is HTML or markdown
     const hasHtmlTags = /<(h[1-6]|div|ul|ol|li|strong|em|p|pre|code|blockquote)\b/i.test(
@@ -962,6 +1062,7 @@ export default function NoteEditor() {
 <html>
 <head>
 <meta charset="UTF-8">
+<base href="${window.location.origin}/">
 <title>${noteTitle || 'Study Notes'}</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" crossorigin="anonymous">
 <style>
@@ -1007,6 +1108,19 @@ pre { background: #1e1e2e; color: #cdd6f4;
       padding: 14px; border-radius: 8px;
       font-size: 12px; white-space: pre-wrap;
       margin: 12px 0; }
+pre code { background: none !important; padding: 0 !important; border-radius: 0 !important; color: inherit !important; }
+img, .slide-image, .diagram {
+  max-width: 100% !important;
+  width: auto !important;
+  height: auto !important;
+  display: block !important;
+  margin: 16px auto !important;
+  border: 3px solid #EDE9FE !important;
+  border-radius: 12px !important;
+  padding: 6px !important;
+  background-color: #ffffff !important;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05) !important;
+}
 blockquote { border-left: 4px solid #7C3AED;
              padding-left: 14px; color: #5F5E5A;
              margin: 12px 0; font-style: italic; }
@@ -1429,6 +1543,15 @@ ${bodyHtml}
       margin: 14px 0;
     }
 
+    .note-editor-body pre code {
+      background: none !important;
+      padding: 0 !important;
+      border-radius: 0 !important;
+      color: inherit !important;
+      font-size: inherit !important;
+      font-family: inherit !important;
+    }
+
     .note-editor-body blockquote {
       display: block !important;
       border-left: 4px solid #7C3AED;
@@ -1473,9 +1596,12 @@ ${bodyHtml}
     .note-editor-body img {
       display: block !important;
       max-width: 100%;
-      border-radius: 8px;
-      margin: 12px 0;
-      border: 1px solid #EDE9FE;
+      border-radius: 12px;
+      margin: 16px auto;
+      border: 3px solid #EDE9FE;
+      padding: 6px;
+      background-color: #ffffff;
+      box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -2px rgba(0, 0, 0, 0.03);
     }
 
     .note-editor-body mark.search-hl {
@@ -1585,31 +1711,60 @@ ${bodyHtml}
               </select>
               <button onClick={() => setSourceVisible(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', color: 'var(--color-text-secondary)' }}>✕</button>
             </div>
-            <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', height: '100%' }}>
               {activeFile ? (
-                <iframe
-                  className="source-iframe"
-                  key={activeFile.pdf_id}
-                  src={getFullPdfUrl(activeFile)}
-                  style={{
-                    width: '100%',
-                    height: '100%',
-                    border: 'none'
-                  }}
-                  title={activeFile.filename || 'Source'}
-                  onLoad={(e) => {
-                    console.log(
-                      '[iframe] Loaded:',
-                      e.target.src
-                    )
-                  }}
-                  onError={(e) => {
-                    console.error(
-                      '[iframe] Failed to load:',
-                      e.target.src
-                    )
-                  }}
-                />
+                checkingPdf ? (
+                  <div style={{
+                    padding: '40px 20px',
+                    fontSize: '14px',
+                    color: 'var(--color-text-secondary)',
+                    textAlign: 'center'
+                  }}>
+                    Loading document viewer...
+                  </div>
+                ) : pdfError ? (
+                  <div style={{
+                    padding: '40px 20px',
+                    fontSize: '14px',
+                    color: '#c41a16',
+                    textAlign: 'center',
+                    background: '#fff5f5',
+                    border: '1px solid #fecaca',
+                    borderRadius: '8px',
+                    margin: '20px'
+                  }}>
+                    <div style={{ fontSize: '20px', marginBottom: '8px' }}>⚠️</div>
+                    <strong>Original PDF unavailable</strong>
+                    <div style={{ fontSize: '12px', marginTop: '6px', color: '#7f1d1d' }}>
+                      The source document file could not be retrieved from the server.
+                    </div>
+                  </div>
+                ) : (
+                  <iframe
+                    className="source-iframe"
+                    key={activeFile.pdf_id}
+                    src={getFullPdfUrl(activeFile)}
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      border: 'none'
+                    }}
+                    title={activeFile.filename || 'Source'}
+                    onLoad={(e) => {
+                      console.log(
+                        '[iframe] Loaded:',
+                        e.target.src
+                      )
+                    }}
+                    onError={(e) => {
+                      console.error(
+                        '[iframe] Failed to load:',
+                        e.target.src
+                      )
+                      setPdfError(true)
+                    }}
+                  />
+                )
               ) : (
                 <div style={{
                   padding: '20px',
@@ -1684,21 +1839,230 @@ ${bodyHtml}
             </div>
           ))}
         </div>
-      )}
-
-      {/* SAVE MODAL */}
+      )}      {/* SAVE MODAL */}
       {showSaveModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
-          <div style={{ width: '340px', background: 'var(--color-background-primary)', borderRadius: '12px', border: '0.5px solid var(--color-border-tertiary)', overflow: 'hidden' }}>
-            <div style={{ padding: '14px 16px', borderBottom: '0.5px solid var(--color-border-tertiary)', fontSize: '14px', fontWeight: 500, color: 'var(--color-text-primary)' }}>Save to folder</div>
-            {folders.length === 0 && <div style={{ padding: '20px', fontSize: '13px', color: 'var(--color-text-secondary)' }}>No folders found. Create a folder in the notebook first.</div>}
-            {folders.map(folder => (
-              <div key={folder.id} onClick={() => confirmSave(folder)} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 16px', cursor: 'pointer', borderBottom: '0.5px solid var(--color-border-tertiary)', fontSize: '13px', color: 'var(--color-text-primary)' }} onMouseEnter={e => e.currentTarget.style.background = '#EDE9FE'} onMouseLeave={e => e.currentTarget.style.background = 'none'}>
-                <span>📁</span><span>{folder.name}</span>
-              </div>
-            ))}
-            <div style={{ padding: '12px 16px', display: 'flex', justifyContent: 'flex-end' }}>
-              <button onClick={() => setShowSaveModal(false)} style={{ padding: '6px 16px', borderRadius: '6px', border: '0.5px solid var(--color-border-tertiary)', background: 'none', cursor: 'pointer', fontSize: '12px', color: 'var(--color-text-secondary)' }}>Cancel</button>
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(15, 15, 20, 0.4)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+          padding: '16px'
+        }}>
+          <div style={{
+            width: '100%',
+            maxWidth: '380px',
+            backgroundColor: '#ffffff',
+            borderRadius: '16px',
+            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.05)',
+            border: '1px solid #E5E7EB',
+            overflow: 'hidden',
+            fontFamily: 'system-ui, -apple-system, sans-serif'
+          }}>
+            {/* Header */}
+            <div style={{
+              padding: '16px 20px',
+              borderBottom: '1px solid #F3F4F6',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between'
+            }}>
+              <span style={{ fontSize: '15px', fontWeight: 600, color: '#111827' }}>Save Study Notes</span>
+              <button
+                onClick={() => setShowSaveModal(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: '18px',
+                  color: '#9CA3AF',
+                  cursor: 'pointer',
+                  padding: '4px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Folder selection description */}
+            <div style={{ padding: '12px 20px 4px 20px', fontSize: '12.5px', color: '#6B7280' }}>
+              Select a notebook folder to save this study note:
+            </div>
+
+            {/* Folder list */}
+            <div style={{
+              maxHeight: '220px',
+              overflowY: 'auto',
+              padding: '8px 16px'
+            }}>
+              {foldersLoading && folders.length === 0 ? (
+                <div style={{
+                  padding: '24px 16px',
+                  fontSize: '13px',
+                  color: '#9CA3AF',
+                  textAlign: 'center',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px'
+                }}>
+                  <span className="animate-spin" style={{ fontSize: '16px' }}>⏳</span> Loading folders...
+                </div>
+              ) : folders.length === 0 ? (
+                <div style={{
+                  padding: '24px 16px',
+                  fontSize: '13px',
+                  color: '#9CA3AF',
+                  textAlign: 'center'
+                }}>
+                  No folders found. Please create one below!
+                </div>
+              ) : (
+                folders.map(folder => (
+                  <div
+                    key={folder.id}
+                    onClick={() => confirmSave(folder)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '12px',
+                      padding: '10px 12px',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      fontSize: '13.5px',
+                      fontWeight: 500,
+                      color: '#374151',
+                      transition: 'all 0.2s',
+                      marginBottom: '4px'
+                    }}
+                    onMouseEnter={e => {
+                      e.currentTarget.style.backgroundColor = '#EDE9FE';
+                      e.currentTarget.style.color = '#7C3AED';
+                    }}
+                    onMouseLeave={e => {
+                      e.currentTarget.style.backgroundColor = 'transparent';
+                      e.currentTarget.style.color = '#374151';
+                    }}
+                  >
+                    <span style={{ fontSize: '16px' }}>📁</span>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {folder.name}
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Inline New Folder Creation */}
+            <div style={{ padding: '8px 20px 12px 20px', borderTop: '1px solid #F3F4F6' }}>
+              {!showNewFolderInput ? (
+                <button
+                  onClick={() => setShowNewFolderInput(true)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: '#7C3AED',
+                    fontSize: '12.5px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '4px 0'
+                  }}
+                >
+                  <span>➕</span> Create New Folder
+                </button>
+              ) : (
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '4px' }}>
+                  <input
+                    value={newFolderName}
+                    onChange={e => setNewFolderName(e.target.value)}
+                    placeholder="Folder name..."
+                    style={{
+                      flex: 1,
+                      padding: '6px 12px',
+                      fontSize: '12.5px',
+                      borderRadius: '8px',
+                      border: '1px solid #D1D5DB',
+                      outline: 'none',
+                      backgroundColor: '#ffffff',
+                      color: '#1F2937'
+                    }}
+                    autoFocus
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') handleCreateFolder()
+                      if (e.key === 'Escape') setShowNewFolderInput(false)
+                    }}
+                  />
+                  <button
+                    onClick={handleCreateFolder}
+                    disabled={isCreatingFolder}
+                    style={{
+                      padding: '6px 12px',
+                      borderRadius: '8px',
+                      border: 'none',
+                      background: '#7C3AED',
+                      color: '#ffffff',
+                      cursor: 'pointer',
+                      fontSize: '12px',
+                      fontWeight: 600
+                    }}
+                  >
+                    {isCreatingFolder ? '...' : 'Create'}
+                  </button>
+                  <button
+                    onClick={() => setShowNewFolderInput(false)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: '#9CA3AF',
+                      fontSize: '12px',
+                      cursor: 'pointer',
+                      padding: '4px'
+                    }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Footer / Scope Info */}
+            <div style={{
+              padding: '10px 20px',
+              borderTop: '1px solid #F3F4F6',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              backgroundColor: '#F9FAFB'
+            }}>
+              <span style={{ fontSize: '10px', color: '#9CA3AF' }}>
+                Scope: {userScope || 'Loading...'}
+              </span>
+              <button
+                onClick={() => setShowSaveModal(false)}
+                style={{
+                  padding: '6px 14px',
+                  borderRadius: '8px',
+                  border: '1px solid #D1D5DB',
+                  background: '#ffffff',
+                  cursor: 'pointer',
+                  fontSize: '12.5px',
+                  fontWeight: 500,
+                  color: '#4B5563',
+                  transition: 'background 0.2s'
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = '#F9FAFB'}
+                onMouseLeave={e => e.currentTarget.style.background = '#ffffff'}
+              >
+                Cancel
+              </button>
             </div>
           </div>
         </div>

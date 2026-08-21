@@ -13,6 +13,7 @@
  *  - CSS Module classes preserved; new classes added at bottom
  */
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { useAuth } from '@/hooks/useAuth';
 import {
   CloudUpload, FolderOpen, Loader2, FileText, X,
   File, CheckCircle2, ChevronRight, ChevronDown,
@@ -113,6 +114,8 @@ function getNotebookNoteContent(note) {
 
 const UploadSection = ({ userId: userIdProp }) => {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const userScope = user?.id || 'anonymous';
 
   // ── State ──────────────────────────────────────────────────
   const [selectedFiles, setSelectedFiles]     = useState([]);   // Real File objects
@@ -124,6 +127,7 @@ const UploadSection = ({ userId: userIdProp }) => {
   const [selectedLanguage, setSelectedLanguage] = useState('English');
   const [ordering, setOrdering]                 = useState('ai');
   const [instruction, setInstruction]           = useState('');
+  const [customTitle, setCustomTitle]           = useState('');
 
   const [jobId, setJobId]             = useState(null);
   const [jobStatus, setJobStatus]     = useState(null);   // pipeline status string
@@ -137,6 +141,7 @@ const UploadSection = ({ userId: userIdProp }) => {
 
   // ── Resolve userId ─────────────────────────────────────────
   const userId = userIdProp
+    || userScope
     || localStorage.getItem('neuranote_user_id')
     || localStorage.getItem('user_id')
     || 'guest_user';
@@ -340,7 +345,7 @@ const UploadSection = ({ userId: userIdProp }) => {
         input_items: inputItems,
         user_id: userId,
         language: selectedLanguage,
-        module_name: "Study Notes" // title or default
+        module_name: customTitle.trim() || 'Study Notes'
       });
 
       const newJobId = jobData.job_id;
@@ -496,6 +501,22 @@ const UploadSection = ({ userId: userIdProp }) => {
 
         {/* ── Options Row ── */}
         <div className={styles.optionsRow}>
+
+          {/* Note Title / Topic */}
+          <div className={styles.optionGroup} style={{ flex: 1, minWidth: '180px' }}>
+            <label className={styles.optionLabel} htmlFor="title-input">
+              Note Title / Topic <span style={{ opacity: 0.5 }}>(optional)</span>
+            </label>
+            <input
+              id="title-input"
+              type="text"
+              placeholder="e.g. Lecture 6 Overview"
+              value={customTitle}
+              onChange={e => setCustomTitle(e.target.value)}
+              disabled={isProcessing}
+              className={styles.textInput}
+            />
+          </div>
 
           {/* Language */}
           <div className={styles.optionGroup}>

@@ -221,9 +221,15 @@ export default function NoteEditor() {
     let cleaned = noteContent
       .replace(/End_of_Notes/g, '')
       .replace(/END_SECTION/g, '')
-      .replace(/^```markdown\s*/gm, '')
-      .replace(/^```\s*$/gm, '')
-      .trim()
+      .trim();
+
+    // Safely strip outer wrapping code fence if present (some LLM outputs wrap the entire markdown)
+    if (cleaned.startsWith('```')) {
+      const firstNewline = cleaned.indexOf('\n');
+      if (firstNewline !== -1 && cleaned.endsWith('```')) {
+        cleaned = cleaned.substring(firstNewline + 1, cleaned.length - 3).trim();
+      }
+    }
 
     // Step 2: Detect if content is HTML or markdown
     const hasHtmlTags = /<(h[1-6]|div|ul|ol|li|strong|em|p|pre|code|blockquote)\b/i.test(

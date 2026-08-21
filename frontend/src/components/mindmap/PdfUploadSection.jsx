@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import axios from 'axios';
+import { getAccessToken } from '../../utils/tokenStorage';
 import {
   Paper,
   TextField,
@@ -59,11 +61,21 @@ const PdfUploadSection = ({ onMindmapCreated }) => {
     if (json) {
       try {
         const dragData = JSON.parse(json);
-        if (dragData.fileUrl && dragData.fileName) {
+        if (dragData.fileId) {
           setIsLoading(true);
           setError(null);
           try {
-            const response = await fetch(dragData.fileUrl);
+            const token = getAccessToken();
+            const config = token ? { headers: { Authorization: `Bearer ${token}` } } : {};
+            
+            const MAIN_API_BASE = (import.meta.env && import.meta.env.VITE_API_BASE_URL)
+              ? import.meta.env.VITE_API_BASE_URL
+              : 'http://127.0.0.1:8000';
+              
+            const { data } = await axios.get(`${MAIN_API_BASE}/api/v1/workspace/files/${dragData.fileId}/preview`, config);
+            const downloadUrl = data.preview;
+            
+            const response = await fetch(downloadUrl);
             const blob = await response.blob();
             const fileObj = new File([blob], dragData.fileName, { type: 'application/pdf' });
             handleFile(fileObj);

@@ -23,6 +23,7 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import styles from './UploadSection.module.css';
 import { uploadPDF } from '../api';
+import { getAccessToken } from '../../utils/tokenStorage';
 
 // ─────────────────────────────────────────────────────────────
 //  CONSTANTS
@@ -251,7 +252,7 @@ const UploadSection = ({ userId: userIdProp }) => {
   };
 
   const removeNotebookNote = (idx) => {
-    setNotebookNotes(prev => prev.filter((_, i) => i !== idx));
+    setNotebookNotes(prev => notebookNotes.filter((_, i) => i !== idx));
   };
 
   // ── Drag and drop ────────────────────────────────────────────
@@ -279,12 +280,22 @@ const UploadSection = ({ userId: userIdProp }) => {
       try {
         const dragData = JSON.parse(json);
         console.log('[Drop] Parsed drag data object:', dragData);
-        if (dragData.fileUrl && dragData.fileName) {
+        if (dragData.fileId) {
           setIsProcessing(true);
           setErrorMsg('');
           setJobStatus('retrieving');
           try {
-            const response = await fetch(dragData.fileUrl);
+            const token = getAccessToken();
+            const config = token ? { headers: { Authorization: `Bearer ${token}` } } : {};
+            
+            const MAIN_API_BASE = (import.meta.env && import.meta.env.VITE_API_BASE_URL)
+              ? import.meta.env.VITE_API_BASE_URL
+              : 'http://127.0.0.1:8000';
+              
+            const { data } = await axios.get(`${MAIN_API_BASE}/api/v1/workspace/files/${dragData.fileId}/preview`, config);
+            const downloadUrl = data.preview;
+            
+            const response = await fetch(downloadUrl);
             const blob = await response.blob();
             
             let mimeType = 'application/pdf';

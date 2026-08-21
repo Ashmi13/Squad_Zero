@@ -24,7 +24,6 @@ class Announcement(AnnouncementBase):
     class Config:
         from_attributes = True
 
-
 class AnnouncementStatusResponse(BaseModel):
     total_announcements: int
     read_count: int

@@ -23,8 +23,12 @@ export const useAuth = () => {
               });
               setIsAuthenticated(true);
             } else {
+              // Token expired — clear and fall to unauthenticated state
               clearTokens();
+              setIsAuthenticated(false);
             }
+          } else {
+            clearTokens();
           }
         }
       } catch (err) {

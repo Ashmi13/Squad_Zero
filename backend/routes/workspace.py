@@ -3,6 +3,7 @@
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi.responses import Response
 from pydantic import BaseModel
 from supabase import Client
 
@@ -119,6 +120,24 @@ async def get_file_preview(
     service = WorkspaceService(supabase)
     preview = service.get_file_preview(user_id=user_id, file_id=file_id, expires_in=expires_in)
     return {"preview": preview}
+
+
+@router.get("/files/{file_id}/content")
+async def get_file_content(
+    file_id: str,
+    user_id: str = Depends(get_current_user_id),
+    supabase: Client = Depends(get_supabase_service_client),
+):
+    """Stream the raw file bytes through the backend (same-origin, authenticated),
+    so the browser never has to fetch S3 directly and hit its CORS policy."""
+    service = WorkspaceService(supabase)
+    result = service.get_file_content(user_id=user_id, file_id=file_id)
+    filename = str(result["filename"]).replace('"', "")
+    return Response(
+        content=result["content"],
+        media_type=result["mime_type"],
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
 
 
 @router.post("/files/upload")

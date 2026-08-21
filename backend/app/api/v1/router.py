@@ -1,5 +1,8 @@
 """FastAPI v1 API router"""
 from fastapi import APIRouter
+from app.api.v1.endpoints import auth, user, tasks, admin, announcements
+from app.api.v1.endpoints.calendar import router as calendar_router
+from app.api.v1.endpoints.notifications import router as notifications_router
 from app.api.v1.endpoints import auth, payments, user
 
 def _safe_import(module_path: str, label: str):
@@ -90,4 +93,5 @@ try:
     router.include_router(admin.router)
     print("[OK] Admin routes loaded")
 except Exception as e:
+    print(f"⚠️ Admin routes skipped: {e}")
     print(f"⚠️ Admin routes skipped: {e}")

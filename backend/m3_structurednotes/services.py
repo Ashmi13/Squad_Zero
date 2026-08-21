@@ -101,6 +101,307 @@ ONE unified, cohesive, exam-ready study sheet.
 6. Include a final "## 🗝️ KEY TAKEAWAYS" section listing must-remember facts,
    formulas, traps, and shortcuts.
 
+## CODE RETENTION RULE (CRITICAL — do NOT violate):
+You MUST retain and format ALL code implementations provided in the source text.
+- Every code block (```...```) from the source must appear in your output.
+- Every function definition, class, SQL query, algorithm, configuration snippet,
+  shell command, or programming example must be preserved in full.
+- Do NOT paraphrase code. Do NOT replace a full function with "the function does X".
+- Do NOT skip any code block because "it's too long" or "it's straightforward".
+- Use proper language-tagged code fences: ```python, ```sql, ```bash, ```c, etc.
+- Indented inline code (4+ spaces / tab) must also be captured and fenced properly.
+- If the source contains a code implementation, your output MUST contain it.
+  No exceptions.
+
+## FORMAT RULES:
+- Use ## for major topics, ### for sub-topics, #### for details
+- **Bold** every key term, definition, formula name, and technical keyword
+- Use ⚡ for high-yield exam points
+- Use 💡 for solved examples and worked exercises
+- Use ⚠️ for common mistakes, exceptions, and exam traps
+- Use ``` blocks for code (WITH language tag), $$...$$ for displayed math,
+  $...$ for inline math
+
+## ACCOUNTABILITY CHECK:
+The user prompt will tell you exactly how many code blocks and solved exercises
+are in the source. Your output MUST contain AT LEAST those counts. If you
+cannot fit everything, PRIORITISE completeness over brevity — a longer,
+complete sheet is always better than a short, incomplete one.
+
+## VERIFICATION GATE (mandatory before output):
+Internally scan the source text one more time. For each distinct item below,
+confirm it appears explicitly in your output. If anything is missing, ADD IT NOW:
+- Equations and formulas
+- Laws, rules, theorems, and their conditions
+- Database constraints, SQL, and code snippets (EVERY code block)
+- Technical definitions
+- Exercises / practice problems (both prompt AND solution)
+- Edge cases / exceptions mentioned
+- All code implementations (functions, classes, algorithms)
+
+Returning incomplete work is unacceptable. A student must be able to study
+ONLY this sheet and pass the exam."""
+
+UNIFIED_CHEATSHEET_USER = """Create ONE unified, cohesive, exam-ready study sheet from all the
+uploaded source material below.
+
+## GOAL
+The uploaded materials are the student's full set of exam notes. Produce a single
+pre-exam study sheet that combines ALL of them.
+
+## CORE RULE
+**SIMPLIFY, NEVER SUMMARISE. NEVER OMIT.**
+Explain every concept clearly and simply, but do NOT drop facts, equations, rules,
+exceptions, exercises, or code. If something exists in the source, it must exist
+in the output.
+
+## REQUIRED SECTIONS
+
+### 1. Topic-by-Topic Coverage
+For every topic / sub-topic in the source:
+- **What it is**
+- **Why it matters**
+- **Full explanation** with formulas, rules, definitions
+- **Conditions, exceptions, edge cases** (do not skip these)
+- **All code implementations** — every function, class, SQL query, algorithm,
+  config snippet, and shell command from the source, preserved in full
+
+### 2. Solved Exercises & Problems
+Scan the raw text carefully from top to bottom. Find EVERY exercise, practice problem,
+worked example, or question. For EACH:
+- Display the FULL problem statement.
+- Show the COMPLETE step-by-step solution in this exact format:
+  - **Given:** ...
+  - **To find / Rule used:** ...
+  - **Working:** ...
+  - **Answer:** ...
+- Never leave a problem unsolved. Never summarise a problem into one line.
+
+### 3. Important Rules to Remember
+Numbered list of all laws, theorems, formulas, constraints, conditions, and
+must-know rules.
+
+### 4. Common Mistakes / Exam Traps
+A ⚠️ bulleted list of mistakes students make in this topic.
+
+## FINAL SECTION
+## 🗝️ KEY TAKEAWAYS
+Write the absolute must-remember points at the very end. Include every high-yield
+formula, exception, definition, and shortcut.
+
+{accountability_note}
+
+## OUTPUT RULES
+- Valid Markdown only.
+- Technical depth > brevity. A longer, complete sheet is far better than a short,
+  incomplete one.
+- A student should be able to study ONLY this sheet and pass.
+
+## SOURCE CONTENT
+{content}
+
+## OUTPUT (unified pre-exam study sheet in Markdown):"""
+
+REFINE_SYSTEM = """You are an expert academic editor. Improve the given note section:
+- Fix grammar/spelling
+- Add missing detail if the user asks
+- Restructure if asked
+- Preserve ⚡💡⚠️ markers
+Return ONLY the improved Markdown."""
+
+DISCUSS_SYSTEM = """You are a helpful academic tutor. The user is viewing a section of their
+notes and has a question. Answer clearly with examples where helpful. Be concise but thorough."""
+
+
+# ---------------------------------------------------------------------------
+# Helper: text extraction (NO LLM calls — pure file I/O)
+# ---------------------------------------------------------------------------
+
+def extract_text_from_pdf(file_path: str) -> Tuple[str, List[Dict[str, Any]]]:
+    """Extract text and image references from a PDF."""
+    doc = fitz.open(file_path)
+    full_text_parts: List[str] = []
+    images: List[Dict[str, Any]] = []
+
+    for page_idx in range(len(doc)):
+        page = doc[page_idx]
+        full_text_parts.append(page.get_text())
+        try:
+            for img_info in page.get_image_info():
+                images.append({
+                    "page": page_idx + 1,
+                    "bbox": img_info.get("bbox"),
+                    "size": img_info.get("size"),
+                })
+        except Exception as img_err:
+            logger.debug("get_image_info failed on page %d: %s", page_idx + 1, img_err)
+
+    return "\n".join(full_text_parts), images
+
+
+def extract_text_from_pptx(file_path: str) -> str:
+    """Extract text from a PowerPoint file."""
+    prs = Presentation(file_path)
+    parts: List[str] = []
+    for slide in prs.slides:
+        for shape in slide.shapes:
+            if shape.has_text_frame:
+                parts.append(shape.text_frame.text)
+    return "\n\n".join(parts)
+
+
+def extract_text_from_file(file_path: str) -> Tuple[str, List[Dict[str, Any]]]:
+    """Dispatch to the right extractor based on extension."""
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext == ".pdf":
+        return extract_text_from_pdf(file_path)
+    elif ext in (".pptx", ".ppt"):
+        return extract_text_from_pptx(file_path), []
+    elif ext in (".md", ".txt"):
+        with open(file_path, "r", encoding="utf-8") as f:
+            return f.read(), []
+    else:
+        raise ValueError(f"Unsupported file type: {ext}")
+
+
+# ---------------------------------------------------------------------------
+# Module-level formatting utilities
+# ---------------------------------------------------------------------------
+
+def classify_line(line: str) -> str:
+    """Classify a single line of text."""
+    stripped = line.strip()
+    if not stripped:
+        return "blank"
+    if re.match(r"^\|.*\|$", stripped):
+        return "table_row"
+    if re.match(r"^\d+[.)]\s", stripped):
+        return "numbered"
+    if re.match(r"^[-•*→>]\s", stripped):
+        return "bullet"
+    if len(stripped) > 40:
+        return "paragraph"
+    if len(stripped) > 10:
+        return "short"
+    return "fragment"
+
+
+def clean_note_formatting(markdown: str) -> str:
+    """Post-process LLM output for clean Markdown."""
+    markdown = markdown.strip()
+    markdown = re.sub(r"([^\n])\n(#{1,3}\s)", r"\1\n\n\2", markdown)
+    markdown = re.sub(r"\n{3,}", "\n\n", markdown)
+    markdown = re.sub(r"^```(?:markdown)?\s*\n?", "", markdown)
+    markdown = re.sub(r"\n?```\s*$", "", markdown)
+    return markdown.strip()
+
+
+def extract_title_from_filename(filename: str) -> str:
+    """Derive a human-readable title from a filename."""
+    base = os.path.splitext(os.path.basename(filename))[0]
+    base = re.sub(r"[_-]", " ", base)
+    base = " ".join(w.capitalize() for w in base.split())
+    return base or "Untitled"
+
+
+def count_source_items(full_text: str) -> Dict[str, int]:
+    """
+    Pre-scan the source text to count code blocks and exercises.
+    These counts are injected into the LLM prompt so the model knows
+    exactly how many it must include — no skipping.
+
+    Returns: {"code_blocks": N, "exercises": M}
+    """
+    # --- Count fenced code blocks: ```...``` ---
+    fenced_blocks = len(re.findall(r'```[\s\S]*?```', full_text))
+
+    # --- Count indented code blocks (4+ spaces or tab at line start) ---
+    # We count *runs* of indented lines as a single block
+    indented_blocks = 0
+    prev_indented = False
+    for line in full_text.split('\n'):
+        is_indented = bool(re.match(r'^(?: {4,}|\t)\S', line))
+        if is_indented and not prev_indented:
+            indented_blocks += 1
+        prev_indented = is_indented
+
+    # --- Count exercises / problems ---
+    exercise_patterns = [
+        # Classic academic labels
+        r'(?i)(?:^|\n)\s*(?:Exercise|Problem|Question|Task)\s*\d+',
+        r'(?i)(?:^|\n)\s*\d+\.\s*(?:Solve|Find|Calculate|Prove|Compute|Determine|Show|Write|Implement|Create|Design|Derive|Evaluate|Simplify|Graph|State|Explain\s+why)',
+        r'(?i)(?:^|\n)\s*Q\d+[\.\)]',
+        r'(?i)(?:^|\n)\s*Ex(?:ercise)?\s*\d+[\.\):]',
+        r'(?i)(?:^|\n)\s*Problem\s*\d+[\.\):]',
+        r'(?i)(?:^|\n)\s*Example\s*\d+[\.\):]',
+        # DSA / LeetCode / competitive-programming patterns
+        r'(?i)(?:^|\n)\s*Example\s*\d+[\s:]*[\r\n]+\s*(?:Input|Output)',
+        r'(?i)(?:^|\n)\s*Given\s+(?:an?\s+)?(?:array|list|string|linked\s*list|tree|graph|matrix|heap|stack|queue|set|map|number|sorted|unsorted)',
+        r'(?i)(?:^|\n)\s*Write\s+a\s+(?:function|program|method|code|algorithm|pseudocode)',
+        r'(?i)(?:^|\n)\s*What\s+is\s+the\s+(?:time|space)\s+complexity',
+        r'(?i)(?:^|\n)\s*(?:Implement|Design)\s+(?:a\s+|an\s+)?(?:function|stack|queue|linked|hash|tree|graph|algorithm|class|method)',
+        r'(?i)(?:^|\n)\s*(?:Practice|Sample|Worked)\s+(?:Question|Problem|Exercise|Example)',
+        r'(?i)(?:^|\n)\s*Constraints?\s*:[\s]*[\r\n]',
+    ]
+
+    # Deduplicate — a single line might match multiple patterns
+    unique_exercises: set = set()
+    for pattern in exercise_patterns:
+        for m in re.finditer(pattern, full_text):
+            unique_exercises.add(m.start())
+    exercise_count = len(unique_exercises)
+
+    return {
+        "code_blocks": fenced_blocks + indented_blocks,
+        "exercises": exercise_count,
+    }
+
+
+# ---------------------------------------------------------------------------
+# NoteService — EVERY router method, signature-for-signature
+# ---------------------------------------------------------------------------
+
+class NoteService:
+    """Everything M3: upload, generate, refine, discuss, folders, search."""
+
+    def __init__(self, db_url: Optional[str] = None):
+        self._db_url = db_url or os.getenv(
+            "DATABASE_URL",
+            "postgresql://postgres.iatjbhvtcvnsbitpbfim:NeuroNote2026"
+            "@aws-1-ap-south-1.pooler.supabase.com:5432/postgres",
+        )
+        self._embeddings: Optional[SentenceTransformer] = None
+
+UNIFIED_CHEATSHEET_SYSTEM = """You are a "Pre-Exam Study Sheet Synthesizer".
+Your job is to take one or more uploaded lecture/tutorial materials and produce
+ONE unified, cohesive, exam-ready study sheet.
+
+## CORE PHILOSOPHY (do NOT violate):
+**SIMPLIFY, NEVER SUMMARISE. NEVER OMIT.**
+- Simplifying = explaining a complex idea in clearer, student-friendly language
+  while keeping every fact, formula, condition, exception, and step.
+- Summarising = dropping details, merging distinct points into vague bullets,
+  or writing "etc.", "and so on", "various", "including but not limited to".
+  That is FORBIDDEN.
+- If the source has 50 distinct facts, your output must contain 50 distinct facts.
+  No exceptions.
+
+## YOUR PROTOCOL:
+1. Read all source materials as ONE combined syllabus.
+2. Preserve every topic from start to finish. Do not skip small definitions or side notes.
+3. Merge duplicate explanations across files, but keep every unique rule, equation,
+   case, exception, and exercise.
+4. Re-organise by concept (not by file) so the sheet reads as one coherent whole.
+5. For every exercise, problem, or practice question found anywhere in the raw text:
+   - Quote the FULL problem statement.
+   - Provide a COMPLETE step-by-step solution using:
+     - **Given:** ...
+     - **Formula/Rule:** ...
+     - **Substitution/Working:** ...
+     - **Final Answer:** ...
+6. Include a final "## 🗝️ KEY TAKEAWAYS" section listing must-remember facts,
+   formulas, traps, and shortcuts.
+
 ## IMAGE RETENTION RULE (CRITICAL):
 The source text contains image placeholder tokens in the format: `[IMAGE:stable_id|caption: "description"]`.
 - You MUST preserve these tokens exactly in your output.
@@ -754,6 +1055,9 @@ class NoteService:
             tmp.write(file_bytes)
             tmp_path = tmp.name
 
+        try:
+            full_text, images = extract_text_from_file(tmp_path)
+
         # Persist the file to documents/ for split-view serving
         try:
             os.makedirs("documents", exist_ok=True)
@@ -809,6 +1113,35 @@ class NoteService:
                 conn.commit()
 
             # --- Always store chunks (needed for generation) ---
+            with conn.cursor() as cur:
+                for batch_start in range(0, len(chunks), MAX_EMBEDDING_BATCH):
+                    batch = chunks[batch_start:batch_start + MAX_EMBEDDING_BATCH]
+                    for i, chunk_text in enumerate(batch):
+                        chunk_idx = batch_start + i
+                        # Store NULL embedding when embeddings are disabled
+                        if EMBEDDINGS_ENABLED:
+                            try:
+                                emb = self.get_embedding(chunk_text)
+                            except Exception as emb_err:
+                                logger.warning("Embedding failed for chunk %d: %s — storing NULL", chunk_idx, emb_err)
+                                emb = None
+                        else:
+                            emb = None
+
+                        if emb is not None:
+                            cur.execute(
+                                """INSERT INTO document_chunks
+                                   (id, pdf_id, chunk_index, content, embedding)
+                                   VALUES (gen_random_uuid(), %s, %s, %s, %s::vector)""",
+                                (file_id, chunk_idx, chunk_text, emb),
+                            )
+                        else:
+                            cur.execute(
+                                """INSERT INTO document_chunks
+                                   (id, pdf_id, chunk_index, content)
+                                   VALUES (gen_random_uuid(), %s, %s, %s)""",
+                                (file_id, chunk_idx, chunk_text),
+                            )
             chunk_rows = []
             for chunk_idx, chunk_text in enumerate(chunks):
                 if EMBEDDINGS_ENABLED:
@@ -836,6 +1169,14 @@ class NoteService:
 
             # Store image references
             if images:
+                with conn.cursor() as cur:
+                    for img in images:
+                        cur.execute(
+                            """INSERT INTO document_images
+                               (id, pdf_id, page_number)
+                               VALUES (gen_random_uuid()::text, %s, %s)""",
+                            (file_id, img["page"]),
+                        )
                 image_rows = []
                 for img in images:
                     image_rows.append((img["id"], file_id, img["page"], img.get("caption")))
@@ -1007,6 +1348,7 @@ class NoteService:
             prompt,
             system=UNIFIED_CHEATSHEET_SYSTEM,
             temperature=0.1,   # very low — maximise factual adherence, minimise creativity
+            max_tokens=65536,  # larger budget for full solved exercises + key takeaways
             max_tokens=8192,   # standard Gemini output token limit for fast routing
         )
 

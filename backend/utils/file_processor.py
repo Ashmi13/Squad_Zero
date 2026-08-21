@@ -59,6 +59,12 @@ class FileProcessor:
                 text = _extraction_cache[cache_key]
             else:
                 text = self._extract(raw, ext, file.filename)
+                # PDFs/DOCX/OCR can yield embedded NUL (0x00) bytes, which Postgres
+                # text columns reject outright with "A string literal cannot contain
+                # NUL (0x00) characters." Strip them right after extraction so the
+                # bad byte never reaches the DB or the AI prompt.
+                if text:
+                    text = text.replace("\x00", "")
                 if text:
                     _extraction_cache[cache_key] = text
                     if len(_extraction_cache) > _CACHE_MAX:

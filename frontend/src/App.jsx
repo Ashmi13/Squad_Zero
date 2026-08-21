@@ -93,7 +93,7 @@ const AppLayout = () => {
   const { user, isLoading } = useAuth();
   const { userScope, loading: userLoading } = useSupabaseUser();
   const [activeView, setActiveView] = useState('home');
-  const [quizStep, setQuizStep] = useState('upload');
+  const [quizStep, setQuizStep] = useState('upload'); // 'upload' | 'taking' | 'results'
   const [selectedWorkspaceFolder, setSelectedWorkspaceFolder] = useState(null);
   const lastSavedCompletionVersionRef = useRef(0);
 
@@ -119,6 +119,19 @@ const AppLayout = () => {
     !(location.pathname.startsWith('/quiz') && quizStep !== 'upload');
 
   // Load user-scoped workspace folder
+  useEffect(() => {
+    if (userLoading) return;
+
+    try {
+      const savedFolder = localStorage.getItem(getScopedStorageKey(ACTIVE_WORKSPACE_FOLDER_KEY, userScope));
+      setSelectedWorkspaceFolder(savedFolder ? JSON.parse(savedFolder) : null);
+    } catch {
+      setSelectedWorkspaceFolder(null);
+    }
+  }, [userLoading, userScope]);
+
+  // Persist selected workspace folder
+
   useEffect(() => {
     if (userLoading) return;
 

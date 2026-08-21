@@ -20,6 +20,7 @@ import {
   Select,
   FormControl,
   InputLabel,
+  Fab
   Fab,
   CircularProgress
 } from '@mui/material';
@@ -33,6 +34,9 @@ import {
   Redo2,
   ChevronLeft,
   ChevronRight,
+} from 'lucide-react';
+import MindMapCanvas from './MindMapCanvas';
+import NotesPanel from './NotesPanel';
   Save,
 } from 'lucide-react';
 import MindMapCanvas from './MindMapCanvas';
@@ -521,6 +525,12 @@ const MindMapEditor = ({
             updateNode={updateNode}
           />
 
+          {/* Floating Action Button (FAB) for Adding Node */}
+          <Tooltip title="Add New Concept Node">
+            <Fab
+              color="success"
+              aria-label="add"
+              onClick={handleOpenAddNode}
           {/* Floating Action Button (FAB) for Saving Mind Map */}
           <Tooltip title="Save Mind Map to Folder">
             <Fab
@@ -533,6 +543,13 @@ const MindMapEditor = ({
                 bottom: 24,
                 right: 24,
                 boxShadow: 4,
+                background: `linear-gradient(135deg, ${theme.palette.success.main} 0%, ${theme.palette.success.dark} 100%)`,
+                '&:hover': {
+                  background: `linear-gradient(135deg, ${theme.palette.success.dark} 0%, ${theme.palette.success.dark} 100%)`,
+                }
+              }}
+            >
+              <Plus size={24} style={{ color: 'white' }} />
                 background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.primary.dark} 100%)`,
                 '&:hover': {
                   background: `linear-gradient(135deg, ${theme.palette.primary.dark} 0%, ${theme.palette.primary.dark} 100%)`,

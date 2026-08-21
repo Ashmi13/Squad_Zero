@@ -8,6 +8,7 @@ import MindMapEditor from '../components/mindmap/MindMapEditor';
 
 const MindMapPage = () => {
   const theme = useTheme();
+  const [mindmapId, setMindmapId] = useState(null);
   const [searchParams] = useSearchParams();
   const urlId = searchParams.get('id');
   const [mindmapId, setMindmapId] = useState(null);

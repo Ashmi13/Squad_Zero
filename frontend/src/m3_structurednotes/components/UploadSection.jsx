@@ -120,7 +120,6 @@ const UploadSection = ({ userId: userIdProp }) => {
   // ── State ──────────────────────────────────────────────────
   const [selectedFiles, setSelectedFiles]     = useState([]);   // Real File objects
   const [notebookNotes, setNotebookNotes]     = useState([]);   // { id, name, type, content }
-  const [workspaceFiles, setWorkspaceFiles]   = useState([]);   // { id, name, type }
   const [folders, setFolders]                 = useState([]);
   const [filesByFolder, setFilesByFolder]     = useState({});
   const [expandedFolders, setExpandedFolders] = useState({});
@@ -268,7 +267,7 @@ const UploadSection = ({ userId: userIdProp }) => {
 
   const handleDropZoneDragLeave = () => setDragOver(false);
 
-  const handleDropZoneDrop = (e) => {
+  const handleDropZoneDrop = async (e) => {
     e.preventDefault();
     setDragOver(false);
 
@@ -280,13 +279,28 @@ const UploadSection = ({ userId: userIdProp }) => {
       try {
         const dragData = JSON.parse(json);
         console.log('[Drop] Parsed drag data object:', dragData);
-        if (dragData.fileId) {
-          if (!workspaceFiles.some(f => f.id === dragData.fileId)) {
-            setWorkspaceFiles(prev => [...prev, {
-              id: dragData.fileId,
-              name: dragData.fileName || dragData.name,
-              type: dragData.fileType || dragData.type
-            }]);
+        if (dragData.fileUrl && dragData.fileName) {
+          setIsProcessing(true);
+          setErrorMsg('');
+          setJobStatus('retrieving');
+          try {
+            const response = await fetch(dragData.fileUrl);
+            const blob = await response.blob();
+            
+            let mimeType = 'application/pdf';
+            const ext = getFileExt(dragData.fileName);
+            if (ext === '.pptx') mimeType = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+            else if (ext === '.md') mimeType = 'text/markdown';
+            else if (ext === '.txt') mimeType = 'text/plain';
+
+            const fileObj = new File([blob], dragData.fileName, { type: mimeType });
+            addLocalFiles([fileObj]);
+          } catch (err) {
+            setErrorMsg('Failed to load workspace file.');
+            console.error(err);
+          } finally {
+            setIsProcessing(false);
+            setJobStatus(null);
           }
         } else if (dragData.id) {
           if (!notebookNotes.some(n => n.id === dragData.id)) {
@@ -311,13 +325,12 @@ const UploadSection = ({ userId: userIdProp }) => {
   const clearAll = () => {
     setSelectedFiles([]);
     setNotebookNotes([]);
-    setWorkspaceFiles([]);
     setErrorMsg('');
   };
 
   // ── MAIN: Upload + Generate ──────────────────────────────────
   const handleGenerate = async () => {
-    const totalItems = selectedFiles.length + notebookNotes.length + workspaceFiles.length;
+    const totalItems = selectedFiles.length + notebookNotes.length;
     if (totalItems === 0) return;
 
     setErrorMsg('');
@@ -335,38 +348,26 @@ const UploadSection = ({ userId: userIdProp }) => {
         filesToUpload.push(virtualFile);
       }
 
-      let successfulUploads = [];
+      // Step 2 — Upload all files
+      setJobStatus('retrieving');
+      const uploadResult = await uploadPDF(filesToUpload);
+      const successfulUploads = uploadResult.uploaded_files?.filter(f => !f.error) || [];
 
-      if (filesToUpload.length > 0) {
-        // Step 2 — Upload all files
-        setJobStatus('retrieving');
-        const uploadResult = await uploadPDF(filesToUpload);
-        successfulUploads = uploadResult.uploaded_files?.filter(f => !f.error) || [];
-
-        if (successfulUploads.length === 0) {
-          const errorDetails = uploadResult.uploaded_files?.map(f => `${f.filename}: ${f.error}`).join('\n');
-          throw new Error(`Upload Failed:\n${errorDetails || 'All files failed to upload.'}`);
-        }
-
-        localStorage.setItem(
-          'currentPdfId',
-          successfulUploads[0].pdf_id
-        )
+      if (successfulUploads.length === 0) {
+        const errorDetails = uploadResult.uploaded_files?.map(f => `${f.filename}: ${f.error}`).join('\n');
+        throw new Error(`Upload Failed:\n${errorDetails || 'All files failed to upload.'}`);
       }
 
-      const allPdfIds = successfulUploads.map(f => f.pdf_id);
+      localStorage.setItem(
+        'currentPdfId',
+        successfulUploads[0].pdf_id
+      );
 
       // Step 3 — Start structured note background job
-      const inputItems = [
-        ...successfulUploads.map(f => ({
-          type: "pdf_id",
-          value: f.pdf_id
-        })),
-        ...workspaceFiles.map(f => ({
-          type: "pdf_id",
-          value: f.id
-        }))
-      ];
+      const inputItems = successfulUploads.map(f => ({
+        type: "pdf_id",
+        value: f.pdf_id
+      }));
 
       const { data: jobData } = await axios.post(`${API_BASE}/generate-structured-note`, {
         input_items: inputItems,
@@ -381,7 +382,7 @@ const UploadSection = ({ userId: userIdProp }) => {
 
       // Step 4 — Poll until done or failed
       successfulUploadsRef.current = successfulUploads;
-      startPolling(newJobId, successfulUploads);
+      startPolling(newJobId);
 
     } catch (err) {
       console.error('[handleGenerate]', err);
@@ -396,7 +397,7 @@ const UploadSection = ({ userId: userIdProp }) => {
   };
 
   // ── Derived state ────────────────────────────────────────────
-  const totalItems    = selectedFiles.length + notebookNotes.length + workspaceFiles.length;
+  const totalItems    = selectedFiles.length + notebookNotes.length;
   const hasItems      = totalItems > 0;
   const progressPct   = STATUS_PROGRESS[jobStatus] || 0;
   const statusLabel   = STATUS_LABELS[jobStatus] || '';
@@ -521,26 +522,7 @@ const UploadSection = ({ userId: userIdProp }) => {
                     </div>
                   ))}
 
-                  {/* Workspace files */}
-                  {workspaceFiles.map((file, i) => (
-                    <div key={`workspace-${i}`} className={`${styles.fileItem} ${styles.notebookItem}`}>
-                      <span className={styles.fileEmoji}>{getFileIcon(file.name)}</span>
-                      <div className={styles.fileDetails}>
-                        <span className={styles.fileName}>{file.name}</span>
-                        <span className={styles.fileMeta}>
-                          Workspace · {getFileExt(file.name).toUpperCase().slice(1)}
-                        </span>
-                      </div>
-                      <button
-                        className={styles.removeBtn}
-                        onClick={() => setWorkspaceFiles(prev => prev.filter((_, idx) => idx !== i))}
-                        disabled={isProcessing}
-                        aria-label={`Remove ${file.name}`}
-                      >
-                        <X size={13} />
-                      </button>
-                    </div>
-                  ))}
+
                 </div>
               </div>
             )}

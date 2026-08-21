@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+
 import {
   Box,
   AppBar,
@@ -20,10 +21,10 @@ import {
   Select,
   FormControl,
   InputLabel,
-  Fab
   Fab,
-  CircularProgress
+  CircularProgress,
 } from '@mui/material';
+
 import {
   ArrowLeft,
   Download,
@@ -34,17 +35,14 @@ import {
   Redo2,
   ChevronLeft,
   ChevronRight,
-} from 'lucide-react';
-import MindMapCanvas from './MindMapCanvas';
-import NotesPanel from './NotesPanel';
   Save,
 } from 'lucide-react';
+
 import MindMapCanvas from './MindMapCanvas';
 import NotesPanel from './NotesPanel';
 import axios from 'axios';
 import { workspaceApi } from '@/services/workspaceApi';
 import { useAuth } from '@/hooks/useAuth';
-
 // Helper to recursively search for a node
 const findNodeInTree = (nodes, targetId) => {
   if (!nodes || !Array.isArray(nodes)) return null;
@@ -531,6 +529,21 @@ const MindMapEditor = ({
               color="success"
               aria-label="add"
               onClick={handleOpenAddNode}
+              sx={{
+                position: 'absolute',
+                bottom: 24,
+                left: 24,
+                boxShadow: 4,
+                background: `linear-gradient(135deg, ${theme.palette.success.main} 0%, ${theme.palette.success.dark} 100%)`,
+                '&:hover': {
+                  background: `linear-gradient(135deg, ${theme.palette.success.dark} 0%, ${theme.palette.success.dark} 100%)`,
+                }
+              }}
+            >
+              <Plus size={24} style={{ color: 'white' }} />
+            </Fab>
+          </Tooltip>
+
           {/* Floating Action Button (FAB) for Saving Mind Map */}
           <Tooltip title="Save Mind Map to Folder">
             <Fab
@@ -543,13 +556,6 @@ const MindMapEditor = ({
                 bottom: 24,
                 right: 24,
                 boxShadow: 4,
-                background: `linear-gradient(135deg, ${theme.palette.success.main} 0%, ${theme.palette.success.dark} 100%)`,
-                '&:hover': {
-                  background: `linear-gradient(135deg, ${theme.palette.success.dark} 0%, ${theme.palette.success.dark} 100%)`,
-                }
-              }}
-            >
-              <Plus size={24} style={{ color: 'white' }} />
                 background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.primary.dark} 100%)`,
                 '&:hover': {
                   background: `linear-gradient(135deg, ${theme.palette.primary.dark} 0%, ${theme.palette.primary.dark} 100%)`,

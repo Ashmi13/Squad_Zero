@@ -390,7 +390,7 @@ const UploadSection = ({ userId: userIdProp }) => {
   };
 
   // ── Derived state ────────────────────────────────────────────
-  const totalItems    = selectedFiles.length + notebookNotes.length;
+  const totalItems    = selectedFiles.length + notebookNotes.length + workspaceFiles.length;
   const hasItems      = totalItems > 0;
   const progressPct   = STATUS_PROGRESS[jobStatus] || 0;
   const statusLabel   = STATUS_LABELS[jobStatus] || '';

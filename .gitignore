@@ -140,3 +140,4 @@ __pycache__/
 
 # Machine Learning Models & Cache
 backend/model_cache/
+.env

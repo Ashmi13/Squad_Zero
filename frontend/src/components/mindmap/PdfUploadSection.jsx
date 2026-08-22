@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import axios from 'axios';
+import { getAccessToken } from '../../utils/tokenStorage';
 import {
   Paper,
   TextField,
@@ -50,11 +52,51 @@ const PdfUploadSection = ({ onMindmapCreated }) => {
     }));
   };
 
-  const handleDrop = (e) => {
+  const handleDrop = async (e) => {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+
+    const json = e.dataTransfer.getData('neuranote-quiz-file') || e.dataTransfer.getData('application/json');
+    if (json) {
+      try {
+        const dragData = JSON.parse(json);
+        if (dragData.fileId) {
+          setIsLoading(true);
+          setError(null);
+          try {
+            const token = getAccessToken();
+            const headers = token ? { Authorization: `Bearer ${token}` } : {};
+            
+            const response = await fetch(`/api/v1/workspace/files/${dragData.fileId}/content`, {
+              headers
+            });
+            if (!response.ok) {
+              throw new Error(`Failed to fetch file content: ${response.statusText}`);
+            }
+            const mimeType = response.headers.get('Content-Type') || 'application/pdf';
+            const blob = await response.blob();
+            
+            let filename = dragData.fileName || 'file';
+            const extFromUrl = dragData.fileUrl ? '.' + dragData.fileUrl.split('.').pop().toLowerCase() : '';
+            if (extFromUrl && extFromUrl === '.pdf' && !filename.toLowerCase().endsWith('.pdf')) {
+              filename += '.pdf';
+            } else if (mimeType.includes('pdf') && !filename.toLowerCase().endsWith('.pdf')) {
+              filename += '.pdf';
+            }
+            const fileObj = new File([blob], filename, { type: mimeType });
+            handleFile(fileObj);
+          } catch (err) {
+            setError('Failed to load workspace file for mind map generation.');
+            console.error(err);
+          } finally {
+            setIsLoading(false);
+          }
+        }
+      } catch (err) {
+        console.error('[Drop] Failed parsing drag data:', err);
+      }
+    } else if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       handleFile(e.dataTransfer.files[0]);
     }
   };

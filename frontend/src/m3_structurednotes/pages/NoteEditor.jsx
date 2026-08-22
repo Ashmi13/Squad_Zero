@@ -1694,9 +1694,9 @@ ${bodyHtml}
               background: 'var(--color-background-primary)', display: 'flex', alignItems: 'center', gap: '8px'
             }}>
               <select
-                value={activeFile?.pdf_url || ''}
+                value={activeFile?.pdf_id || ''}
                 onChange={e => {
-                  const file = sourceFiles.find(f => f.pdf_url === e.target.value)
+                  const file = sourceFiles.find(f => f.pdf_id === e.target.value)
                   if (file) setActiveFile(file)
                 }}
                 style={{
@@ -1706,7 +1706,7 @@ ${bodyHtml}
               >
                 {sourceFiles.length === 0 && <option value="">No source files</option>}
                 {sourceFiles.map(f => (
-                  <option key={f.pdf_id} value={f.pdf_url}>{f.filename}</option>
+                  <option key={f.pdf_id} value={f.pdf_id}>{f.filename}</option>
                 ))}
               </select>
               <button onClick={() => setSourceVisible(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', color: 'var(--color-text-secondary)' }}>✕</button>

@@ -269,12 +269,12 @@ function NoteDropZone({ onNoteAdded }) {
       try {
         const { fileId, fileName } = JSON.parse(treeData);
         setStatus('Fetching file from workspace...');
-        const { preview } = await workspaceApi.getFilePreview(fileId);
-        const url = preview?.url;
-        if (!url) throw new Error('No preview URL — file may not exist in workspace yet.');
-        const resp = await fetch(url);
-        const blob = await resp.blob();
-        const file = new File([blob], fileName, { type: blob.type });
+        // Fetch bytes through the backend (same-origin, authenticated) instead of
+        // the S3 signed URL directly — direct S3 fetches fail with "Failed to
+        // fetch" whenever the bucket's CORS policy doesn't allow this origin.
+        const blob = await workspaceApi.getFileContent(fileId);
+        if (!blob) throw new Error('No file content returned from workspace.');
+        const file = new File([blob], fileName, { type: blob.type || 'application/octet-stream' });
         await handleFile(file, fileId);
       } catch (err) {
         setStatus(`Failed: ${err.message}`);

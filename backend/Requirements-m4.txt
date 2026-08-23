@@ -37,4 +37,10 @@ slowapi
 
 fastapi
 
+python-dotenv
+sqlalchemy
+pydantic-settings
+psycopg2-binary
+supabase
+
 

@@ -43,4 +43,6 @@ pydantic-settings
 psycopg2-binary
 supabase
 
+python-multipart
+
 

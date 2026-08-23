@@ -35,4 +35,6 @@ uvicorn
 # Rate limiting
 slowapi
 
+fastapi
+
 

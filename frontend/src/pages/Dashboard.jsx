@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LogOut, User, Mail, Lock } from 'lucide-react';
+import axiosInstance from '../lib/axios';
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -18,10 +19,16 @@ export default function Dashboard() {
     }
   }, [navigate]);
 
-  const handleLogout = () => {
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('user');
-    navigate('/');
+  const handleLogout = async () => {
+    try {
+      await axiosInstance.post('/api/v1/auth/logout');
+    } catch (error) {
+      console.error('Logout failed:', error);
+    } finally {
+      localStorage.removeItem('access_token');
+      localStorage.removeItem('user');
+      navigate('/');
+    }
   };
 
   const handleChangePassword = () => {

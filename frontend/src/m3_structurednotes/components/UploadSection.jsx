@@ -12,8 +12,8 @@
  *  - Accessible: keyboard nav, aria-labels, focus rings
  *  - CSS Module classes preserved; new classes added at bottom
  */
-
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { useAuth } from '@/hooks/useAuth';
 import {
   CloudUpload, FolderOpen, Loader2, FileText, X,
   File, CheckCircle2, ChevronRight, ChevronDown,
@@ -23,6 +23,7 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import styles from './UploadSection.module.css';
 import { uploadPDF } from '../api';
+import { getAccessToken } from '../../utils/tokenStorage';
 
 // ─────────────────────────────────────────────────────────────
 //  CONSTANTS
@@ -35,28 +36,25 @@ const API_BASE = (import.meta.env && import.meta.env.VITE_API_BASE_URL)
  * Matches the status values written by services.py _update_job().
  */
 const STATUS_LABELS = {
-  queued:        'Preparing your materials…',
-  retrieving:    'Reading all lecture content…',
-  deduplicating: 'Removing repeated content…',
-  analyzing:     'Extracting key concepts…',
-  generating:    'Writing your study notes…',
-  finalising:    'Assembling final note…',
-  done:          'Done! Opening your notes…',
-  failed:        'Something went wrong.',
+  queued:      'Preparing your materials…',
+  retrieving:  'Reading lecture content…',
+  analyzing:   'Extracting topic structure…',
+  expanding:   'Writing detailed explanations…',
+  assembling:  'Building your note…',
+  generating:  'Creating structured note…',
+  done:        'Done! Opening your notes…',
+  failed:      'Something went wrong.',
 };
 
-/**
- * Progress percentage per status step (for the progress bar).
- */
 const STATUS_PROGRESS = {
-  queued: 5,
+  queued:     5,
   retrieving: 15,
-  deduplicating: 30,
-  analyzing: 45,
-  generating: 70,
-  finalising: 90,
-  done: 100,
-  failed: 100,
+  analyzing:  30,
+  expanding:  55,
+  assembling: 75,
+  generating: 88,
+  done:       100,
+  failed:     100,
 };
 
 const ALLOWED_EXTENSIONS = ['.pdf', '.pptx', '.md', '.txt'];
@@ -117,6 +115,8 @@ function getNotebookNoteContent(note) {
 
 const UploadSection = ({ userId: userIdProp }) => {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const userScope = user?.id || 'anonymous';
 
   // ── State ──────────────────────────────────────────────────
   const [selectedFiles, setSelectedFiles]     = useState([]);   // Real File objects
@@ -128,6 +128,7 @@ const UploadSection = ({ userId: userIdProp }) => {
   const [selectedLanguage, setSelectedLanguage] = useState('English');
   const [ordering, setOrdering]                 = useState('ai');
   const [instruction, setInstruction]           = useState('');
+  const [customTitle, setCustomTitle]           = useState('');
 
   const [jobId, setJobId]             = useState(null);
   const [jobStatus, setJobStatus]     = useState(null);   // pipeline status string
@@ -137,9 +138,11 @@ const UploadSection = ({ userId: userIdProp }) => {
 
   const fileInputRef  = useRef(null);
   const pollTimerRef  = useRef(null);
+  const successfulUploadsRef = useRef([]);
 
   // ── Resolve userId ─────────────────────────────────────────
   const userId = userIdProp
+    || userScope
     || localStorage.getItem('neuranote_user_id')
     || localStorage.getItem('user_id')
     || 'guest_user';
@@ -161,85 +164,101 @@ const UploadSection = ({ userId: userIdProp }) => {
   }, []);
 
   // ── Poll job status ─────────────────────────────────────────
-  const startPolling = useCallback((id, allFiles = []) => {
+  const startPolling = useCallback((id) => {
     const poll = async () => {
       try {
         const { data } = await axios.get(`${API_BASE}/job/${id}/status`);
         setJobStatus(data.status);
 
         if (data.status === 'done') {
-          setIsProcessing(false);
-          // Store minimal info + file metadata for editor
-          localStorage.setItem('currentNote', JSON.stringify({
-            noteId: data.note_id,
-            filename: allFiles[0]?.filename,
-            pdfUrl: allFiles[0]?.pdf_url,
-            pdfId: allFiles[0]?.pdf_id,
-            allFiles: allFiles
-          }));
-          setTimeout(() => navigate(`/notes/editor/${data.note_id}`), 600);
+          const noteId = data.note_id;
+          
+          if (!noteId || noteId === '...') {
+            console.error('[Poll] Missing note_id!');
+            setErrorMsg('Note generated but ID missing.');
+            setIsProcessing(false);
+            setJobStatus(null);
+            return;
+          }
 
-        } else if (data.status === 'failed') {
-          setIsProcessing(false);
-          setErrorMsg(data.error || 'Generation failed. Please try again.');
-
-        } else {
-          // Still running — poll again
-          pollTimerRef.current = setTimeout(poll, POLL_INTERVAL_MS);
+          if (successfulUploadsRef.current && successfulUploadsRef.current.length > 0) {
+            console.log('[Poll] Saving source files to localStorage:', successfulUploadsRef.current);
+            localStorage.setItem('currentNoteFiles', JSON.stringify(successfulUploadsRef.current));
+          }
+          
+          // Redirect to NoteEditor
+          setTimeout(() => {
+            navigate(`/notes/editor/${noteId}`);
+          }, 1000);
+          return;
         }
+
+        if (data.status === 'failed') {
+          setErrorMsg(data.error || 'Pipeline compilation failed.');
+          setIsProcessing(false);
+          setJobStatus(null);
+          return;
+        }
+
+        // Keep polling
+        pollTimerRef.current = setTimeout(poll, POLL_INTERVAL_MS);
       } catch (err) {
-        console.error('[poll]', err);
-        pollTimerRef.current = setTimeout(poll, POLL_INTERVAL_MS * 2);
+        console.error('[Poll] Error:', err);
+        setErrorMsg('Disconnected from generation pipeline. Retrying…');
+        pollTimerRef.current = setTimeout(poll, POLL_INTERVAL_MS);
       }
     };
+
     poll();
   }, [navigate]);
 
-  // ── File selection ──────────────────────────────────────────
-  const addLocalFiles = useCallback((files) => {
+  const addLocalFiles = (files) => {
     const valid = [];
     const errors = [];
 
-    Array.from(files).forEach(file => {
-      const ext = getFileExt(file.name);
-      if (!ALLOWED_EXTENSIONS.includes(ext)) {
-        errors.push(`${file.name}: unsupported type (${ext})`);
-        return;
-      }
-      if (file.size > MAX_SIZE_MB * 1024 * 1024) {
-        errors.push(`${file.name}: exceeds ${MAX_SIZE_MB}MB limit`);
-        return;
-      }
-      const alreadyAdded = selectedFiles.some(
-        f => f.name === file.name && f.size === file.size
-      );
-      if (!alreadyAdded) valid.push(file);
-    });
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      const ext = getFileExt(f.name);
 
-    if (errors.length) setErrorMsg(errors.join('\n'));
-    if (valid.length)  setSelectedFiles(prev => [...prev, ...valid]);
-  }, [selectedFiles]);
+      if (!ALLOWED_EXTENSIONS.includes(ext)) {
+        errors.push(`${f.name}: Only PDF, PPTX, MD, and TXT are supported.`);
+        continue;
+      }
+
+      if (f.size > MAX_SIZE_MB * 1024 * 1024) {
+        errors.push(`${f.name}: Exceeds maximum size of ${MAX_SIZE_MB}MB.`);
+        continue;
+      }
+
+      valid.push(f);
+    }
+
+    if (errors.length) {
+      setErrorMsg(errors.join('\n'));
+    }
+
+    if (valid.length) {
+      setSelectedFiles(prev => [...prev, ...valid]);
+    }
+  };
 
   const handleFileInputChange = (e) => {
     addLocalFiles(e.target.files);
     e.target.value = '';
   };
 
-  const removeLocalFile = (index) => {
-    setSelectedFiles(prev => prev.filter((_, i) => i !== index));
+  const removeLocalFile = (idx) => {
+    setSelectedFiles(prev => prev.filter((_, i) => i !== idx));
   };
 
-  const removeNotebookNote = (index) => {
-    setNotebookNotes(prev => prev.filter((_, i) => i !== index));
+  const addNotebookNote = (note) => {
+    if (notebookNotes.some(n => n.id === note.id)) return;
+    setNotebookNotes(prev => [...prev, note]);
   };
 
-  // ── Notebook note selection ─────────────────────────────────
-  const addNotebookNote = useCallback((note) => {
-    setNotebookNotes(prev => {
-      if (prev.some(n => n.id === note.id)) return prev;
-      return [...prev, { ...note, content: getNotebookNoteContent(note) }];
-    });
-  }, []);
+  const removeNotebookNote = (idx) => {
+    setNotebookNotes(prev => notebookNotes.filter((_, i) => i !== idx));
+  };
 
   // ── Drag and drop ────────────────────────────────────────────
   const handleDragStart = (e, note) => {
@@ -254,17 +273,70 @@ const UploadSection = ({ userId: userIdProp }) => {
 
   const handleDropZoneDragLeave = () => setDragOver(false);
 
-  const handleDropZoneDrop = (e) => {
+  const handleDropZoneDrop = async (e) => {
     e.preventDefault();
     setDragOver(false);
 
-    const json = e.dataTransfer.getData('application/json');
+    console.log('[Drop] DataTransfer types:', e.dataTransfer.types);
+    const json = e.dataTransfer.getData('neuranote-quiz-file') || e.dataTransfer.getData('application/json');
+    console.log('[Drop] Received payload:', json);
+
     if (json) {
       try {
-        const note = JSON.parse(json);
-        addNotebookNote(note);
-      } catch {}
+        const dragData = JSON.parse(json);
+        console.log('[Drop] Parsed drag data object:', dragData);
+        if (dragData.fileId) {
+          setIsProcessing(true);
+          setErrorMsg('');
+          setJobStatus('retrieving');
+          try {
+            const token = getAccessToken();
+            const headers = token ? { Authorization: `Bearer ${token}` } : {};
+            
+            const response = await fetch(`/api/v1/workspace/files/${dragData.fileId}/content`, {
+              headers
+            });
+            if (!response.ok) {
+              throw new Error(`Failed to fetch file content: ${response.statusText}`);
+            }
+            const mimeType = response.headers.get('Content-Type') || 'application/pdf';
+            const blob = await response.blob();
+            
+            // Auto-detect and fix missing extensions in the filename
+            let filename = dragData.fileName || 'file';
+            const extFromUrl = getFileExt(dragData.fileUrl || '');
+            
+            if (extFromUrl && ALLOWED_EXTENSIONS.includes(extFromUrl.toLowerCase()) && !filename.toLowerCase().endsWith(extFromUrl.toLowerCase())) {
+              filename += extFromUrl;
+            } else if (mimeType.includes('pdf') && !filename.toLowerCase().endsWith('.pdf')) {
+              filename += '.pdf';
+            } else if ((mimeType.includes('presentation') || mimeType.includes('powerpoint') || mimeType.includes('pptx')) && !filename.toLowerCase().endsWith('.pptx')) {
+              filename += '.pptx';
+            } else if (mimeType.includes('markdown') && !filename.toLowerCase().endsWith('.md')) {
+              filename += '.md';
+            } else if (mimeType.includes('text') && !filename.toLowerCase().endsWith('.txt')) {
+              filename += '.txt';
+            }
+
+            const fileObj = new window.File([blob], filename, { type: mimeType });
+            addLocalFiles([fileObj]);
+          } catch (err) {
+            setErrorMsg('Failed to load workspace file.');
+            console.error(err);
+          } finally {
+            setIsProcessing(false);
+            setJobStatus(null);
+          }
+        } else if (dragData.id) {
+          if (!notebookNotes.some(n => n.id === dragData.id)) {
+            setNotebookNotes(prev => [...prev, dragData]);
+          }
+        }
+      } catch (err) {
+        console.error('[Drop] Failed parsing drag data:', err);
+      }
     } else if (e.dataTransfer.files.length) {
+      console.log('[Drop] Received local files:', e.dataTransfer.files);
       addLocalFiles(e.dataTransfer.files);
     }
   };
@@ -295,10 +367,9 @@ const UploadSection = ({ userId: userIdProp }) => {
       const filesToUpload = [...selectedFiles];
 
       for (const note of notebookNotes) {
-        // FIX: use real content, not mock string
         const content = note.content || getNotebookNoteContent(note);
         const blob = new Blob([content], { type: 'text/markdown' });
-        const virtualFile = new File([blob], `${note.name}.md`, { type: 'text/markdown' });
+        const virtualFile = new window.File([blob], `${note.name}.md`, { type: 'text/markdown' });
         filesToUpload.push(virtualFile);
       }
 
@@ -312,15 +383,22 @@ const UploadSection = ({ userId: userIdProp }) => {
         throw new Error(`Upload Failed:\n${errorDetails || 'All files failed to upload.'}`);
       }
 
-      const allPdfIds = successfulUploads.map(f => f.pdf_id);
+      localStorage.setItem(
+        'currentPdfId',
+        successfulUploads[0].pdf_id
+      );
 
-      // Step 3 — Start background generation job
-      const { data: jobData } = await axios.post(`${API_BASE}/generate-note`, {
-        pdf_ids: allPdfIds,
+      // Step 3 — Start structured note background job
+      const inputItems = successfulUploads.map(f => ({
+        type: "pdf_id",
+        value: f.pdf_id
+      }));
+
+      const { data: jobData } = await axios.post(`${API_BASE}/generate-structured-note`, {
+        input_items: inputItems,
         user_id: userId,
-        instruction: instruction.trim(),
         language: selectedLanguage,
-        ordering,
+        module_name: customTitle.trim() || 'Study Notes'
       });
 
       const newJobId = jobData.job_id;
@@ -328,7 +406,8 @@ const UploadSection = ({ userId: userIdProp }) => {
       setJobStatus(jobData.status || 'queued');
 
       // Step 4 — Poll until done or failed
-      startPolling(newJobId, successfulUploads);
+      successfulUploadsRef.current = successfulUploads;
+      startPolling(newJobId);
 
     } catch (err) {
       console.error('[handleGenerate]', err);
@@ -373,73 +452,7 @@ const UploadSection = ({ userId: userIdProp }) => {
         {/* ── Main Grid ── */}
         <div className={styles.mainGrid}>
 
-          {/* LEFT: Notebook Explorer */}
-          <div className={styles.explorerSection}>
-            <div className={styles.sectionHeader}>
-              <FolderOpen size={16} />
-              <span>My Notebooks</span>
-            </div>
-
-            <div className={styles.treeContainer}>
-              {folders.length === 0 ? (
-                <div className={styles.emptyTree}>
-                  <BookOpen size={18} style={{ opacity: 0.4 }} />
-                  <span>No notebooks found</span>
-                </div>
-              ) : (
-                folders.map(folder => (
-                  <div key={folder.id} className={styles.folderNode}>
-                    <button
-                      className={styles.folderRow}
-                      onClick={() => toggleFolder(folder.name)}
-                      aria-expanded={!!expandedFolders[folder.name]}
-                    >
-                      {expandedFolders[folder.name]
-                        ? <ChevronDown size={13} />
-                        : <ChevronRight size={13} />}
-                      <Folder size={13} className={styles.folderIcon} />
-                      <span>{folder.name}</span>
-                    </button>
-
-                    {expandedFolders[folder.name] && (
-                      <div className={styles.fileNodes}>
-                        {(filesByFolder[folder.name] || []).length === 0 && (
-                          <span className={styles.emptyFolder}>Empty folder</span>
-                        )}
-                        {(filesByFolder[folder.name] || []).map(file => {
-                          const isAdded = notebookNotes.some(n => n.id === file.id);
-                          return (
-                            <div
-                              key={file.id}
-                              className={`${styles.fileRow} ${isAdded ? styles.fileRowAdded : ''}`}
-                              draggable={!isAdded}
-                              onDragStart={(e) => handleDragStart(e, file)}
-                              onClick={() => !isAdded && addNotebookNote(file)}
-                              role="button"
-                              tabIndex={0}
-                              aria-label={`Add ${file.name} to selection`}
-                              onKeyDown={(e) => e.key === 'Enter' && !isAdded && addNotebookNote(file)}
-                            >
-                              <FileText size={12} className={styles.fileIconSmall} />
-                              <span className={styles.fileRowName}>{file.name}</span>
-                              {isAdded && (
-                                <CheckCircle2 size={12} className={styles.addedCheck} />
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-
-            <p className={styles.hintText}>
-              💡 Drag notes to the drop zone, or click to add
-            </p>
-          </div>
-
+         
           {/* RIGHT: Drop Zone + File List */}
           <div className={styles.actionSection}>
 
@@ -533,6 +546,8 @@ const UploadSection = ({ userId: userIdProp }) => {
                       </button>
                     </div>
                   ))}
+
+
                 </div>
               </div>
             )}
@@ -541,6 +556,22 @@ const UploadSection = ({ userId: userIdProp }) => {
 
         {/* ── Options Row ── */}
         <div className={styles.optionsRow}>
+
+          {/* Note Title / Topic */}
+          <div className={styles.optionGroup} style={{ flex: 1, minWidth: '180px' }}>
+            <label className={styles.optionLabel} htmlFor="title-input">
+              Note Title / Topic <span style={{ opacity: 0.5 }}>(optional)</span>
+            </label>
+            <input
+              id="title-input"
+              type="text"
+              placeholder="e.g. Lecture 6 Overview"
+              value={customTitle}
+              onChange={e => setCustomTitle(e.target.value)}
+              disabled={isProcessing}
+              className={styles.textInput}
+            />
+          </div>
 
           {/* Language */}
           <div className={styles.optionGroup}>

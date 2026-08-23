@@ -34,13 +34,16 @@ class AuthService:
         """
         try:
             # Create user in Supabase Auth
-            # Add specific redirect URL for email verification
+            # Adding specific redirect URL for email verification
             auth_response = self.db.auth.sign_up(
                 {
                     "email": email, 
                     "password": password,
                     "options": {
-                        "email_redirect_to": f"{settings.frontend_url}/account-verified"
+                        "email_redirect_to": "http://localhost:5173/account-verified",
+                        "data": {
+                            "full_name": full_name,
+                        },
                     }
                 }
             )
@@ -49,25 +52,20 @@ class AuthService:
                 raise Exception("Failed to create auth user")
             
             user_id = auth_response.user.id
-            
-            # Use UPSERT logic/ check existence to prevent "duplicate key" error for cases when SQL trigger might have already created a record
-            user_data = {
-                "id": user_id,
-                "email": email,
-                "full_name": full_name,
-            }
-            
-            # UPSERT: Insert or update if exists
-            user_response = self.db.table("users").upsert(user_data).execute()
-            
-            if not user_response.data:
-                # If upsert fails but no exception, try selecting
-                user_record = await self.get_user_by_id(user_id)
-                if not user_record:
-                    raise Exception("Failed to create/retrieve user record")
+
+            # In Supabase projects, a DB trigger typically creates the public.users row.
+            # If that row is delayed or missing, return auth-derived data instead of failing signup.
+            user_record = await self.get_user_by_id(user_id)
+            if user_record:
                 return user_record
-            
-            return user_response.data[0]
+
+            return {
+                "id": user_id,
+                "email": auth_response.user.email or email,
+                "full_name": full_name,
+                "role": "user",
+                "is_suspended": False,
+            }
             
         except Exception as e:
             raise Exception(f"Signup failed: {str(e)}")
@@ -95,20 +93,30 @@ class AuthService:
             if not auth_response.user or not auth_response.session:
                 raise Exception("Invalid credentials")
             
-            # Fetch user record
-            user_response = self.db.table("users").select("*").eq(
-                "id", auth_response.user.id
-            ).single().execute()
-            
-            user = user_response.data if user_response.data else {}
-            
+            # Fetch user record if available, but do not fail signin when profile row is absent.
+            user = {}
+            try:
+                user_response = self.db.table("users").select("*").eq(
+                    "id", auth_response.user.id
+                ).single().execute()
+                user = user_response.data if user_response.data else {}
+            except Exception:
+                user = {}
+
+            user_metadata = getattr(auth_response.user, "user_metadata", {}) or {}
+            effective_role = "admin" if str(auth_response.user.id) == str(settings.super_admin_id) else user.get("role", "user")
+
+            if bool(user.get("is_suspended", False)):
+                raise Exception("This account has been suspended. Please contact support.")
+
             return {
                 "user": {
                     "id": auth_response.user.id,
                     "email": auth_response.user.email,
-                    "full_name": user.get("full_name"),
+                    "full_name": user.get("full_name") or user_metadata.get("full_name"),
                     "avatar_url": user.get("avatar_url"),
-                    "role": user.get("role", "user"),
+                    "role": effective_role,
+                    "is_suspended": bool(user.get("is_suspended", False)),
                 },
                 "access_token": auth_response.session.access_token,
                 "refresh_token": auth_response.session.refresh_token,
@@ -209,7 +217,8 @@ class AuthService:
                 create_res = self.db.table("users").upsert(new_user_data).execute()
                 return create_res.data[0]
 
-            # Create new user in Auth if not found (Manual flow for Google)
+            # 3. Create a new user in Auth if not found (Manual flow for Google)
+            # This follows your existing trigger setup
             import secrets
             import string
             random_password = ''.join(secrets.choice(string.ascii_letters + string.digits) for i in range(20))
@@ -225,7 +234,8 @@ class AuthService:
             })
             
             if new_auth and new_auth.user:
-                # Trigger handle_new_user(). build the users profile, 
+                # The trigger handle_new_user() will likely build the users profile, 
+                # but we'll return it manually to be safe.
                 return {
                     "id": new_auth.user.id,
                     "email": email,

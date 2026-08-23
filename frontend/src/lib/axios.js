@@ -14,6 +14,9 @@ export const axiosInstance = axios.create({
   },
 });
 
+// Prevent multiple concurrent refresh token requests
+let refreshPromise = null;
+
 /**
  * Request interceptor to attach JWT token to requests
  */
@@ -39,34 +42,82 @@ axiosInstance.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
+    const detail = String(error.response?.data?.detail || '').toLowerCase();
+    const isSuspendedUser = /suspend|suspended/i.test(detail) || error.response?.status === 403 && window.location.pathname !== '/account-suspended';
 
-    // Handle 401 Unauthorized - Token expired
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    // Skip token refresh/redirection for authentication endpoints
+    const isAuthRequest =
+      originalRequest?.url &&
+      (originalRequest.url.includes('/auth/signin') ||
+       originalRequest.url.includes('/auth/signup') ||
+       originalRequest.url.includes('/auth/request-password-reset') ||
+       originalRequest.url.includes('/auth/confirm-password-reset') ||
+       originalRequest.url.includes('/auth/refresh-token'));
+
+    if (error.response?.status === 401 && !originalRequest._retry && !isAuthRequest) {
+      // Prevent multiple concurrent refresh attempts
+      if (refreshPromise) {
+        try {
+          const newTokens = await refreshPromise;
+          originalRequest.headers.Authorization = `Bearer ${newTokens.accessToken}`;
+          return axiosInstance(originalRequest);
+        } catch (err) {
+          return Promise.reject(err);
+        }
+      }
+
       originalRequest._retry = true;
 
-      try {
-        const refreshToken = getRefreshToken();
+      refreshPromise = (async () => {
+        try {
+          const refreshToken = getRefreshToken();
 
-        if (!refreshToken) {
+          if (!refreshToken) {
+            clearTokens();
+            if (window.location.pathname !== '/login') {
+              window.location.href = '/login';
+            }
+            throw new Error('No refresh token available');
+          }
+
+          const refreshResponse = await axios.post(
+            `${config.apiBaseUrl}/api/v1/auth/refresh-token`,
+            { refresh_token: refreshToken },
+            {
+              headers: { 'Content-Type': 'application/json' },
+              withCredentials: true,
+            }
+          );
+
+          const { access_token, refresh_token } = refreshResponse.data;
+          setTokens(access_token, refresh_token);
+          
+          return { accessToken: access_token, refreshToken: refresh_token };
+        } catch (refreshError) {
+          // Clear tokens and redirect to login on refresh failure
           clearTokens();
-          window.location.href = '/login';
-          return Promise.reject(error);
+          if (window.location.pathname !== '/login') {
+            window.location.href = '/login';
+          }
+          throw refreshError;
+        } finally {
+          refreshPromise = null;
         }
+      })();
 
-        const refreshResponse = await axiosInstance.post(
-          '/refresh-token',
-          { refresh_token: refreshToken },
-          { headers: { 'Content-Type': 'application/json' } }
-        );
-
-        setTokens(refreshResponse.data.access_token, refreshResponse.data.refresh_token);
-        originalRequest.headers.Authorization = `Bearer ${refreshResponse.data.access_token}`;
+      try {
+        const newTokens = await refreshPromise;
+        originalRequest.headers.Authorization = `Bearer ${newTokens.accessToken}`;
         return axiosInstance(originalRequest);
-      } catch (refreshError) {
-        clearTokens();
-        window.location.href = '/login';
-        return Promise.reject(refreshError);
+      } catch (err) {
+        return Promise.reject(err);
       }
+    }
+
+    if (isSuspendedUser && window.location.pathname !== '/account-suspended') {
+      clearTokens();
+      window.location.href = '/account-suspended';
+      return Promise.reject(error);
     }
 
     return Promise.reject(error);

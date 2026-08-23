@@ -1,20 +1,16 @@
-import React from 'react';
+import React, { useState } from 'react';
+
 import UploadSection from '../components/UploadSection';
+import FolderGrid from '../components/FolderGrid';
+import RecentFiles from '../components/RecentFiles';
+import styles from './Dashboard.module.css';
 
 const Dashboard = () => {
     return (
-        <div style={{ 
-            height: '100vh',
-            overflowY: 'auto',
-            backgroundColor: '#f8f9fa', 
-            padding: '60px 20px',
-            display: 'flex',
-            justifyContent: 'center',
-            alignItems: 'flex-start'
-        }}>
-            <div style={{ width: '100%', maxWidth: '900px' }}>
+        <div className={styles.app}>
+            <main className={styles.mainContent}>
                 <UploadSection />
-            </div>
+            </main>
         </div>
     );
 };

@@ -1,14 +1,38 @@
-﻿import React from 'react';
+import React from 'react';
 import { Box, Typography, Chip, Button } from '@mui/material';
 import AddRoundedIcon from '@mui/icons-material/AddRounded';
-import MenuBookOutlinedIcon from '@mui/icons-material/MenuBookOutlined';
 import TaskItem from './TaskItem';
 import { TaskIcon } from './taskIcons';
+import { useTheme } from '../../context/ThemeContext';
+
+const PALETTE = {
+  dark: {
+    colors: {
+      text: { primary: '#f3f4f6', secondary: '#e5e7eb', tertiary: '#9ca3af', muted: '#6b7280', subtle: '#4b5563' },
+      bg: { primary: '#0b0f19', secondary: '#111827' },
+      ui: { border: 'rgba(255,255,255,0.07)' },
+      accent: '#6366f1', accentSoft: '#818cf8', accentDark: '#4f46e5',
+    },
+  },
+  light: {
+    colors: {
+      text: { primary: '#1a202c', secondary: '#4a5568', tertiary: '#718096', muted: '#64748b', subtle: '#94a3b8' },
+      bg: { primary: '#f8fafc', secondary: '#ffffff' },
+      ui: { border: '#e2e8f0' },
+      accent: '#6366f1', accentSoft: '#818cf8', accentDark: '#4f46e5',
+    },
+  },
+};
 
 export default function TaskList({ category, tasks, onToggle, onAdd, onEdit, onDelete }) {
+  const { isDark = true } = useTheme();
+  const theme = isDark ? PALETTE.dark : PALETTE.light;
+
   if (!category) return (
     <Box display="flex" alignItems="center" justifyContent="center" height="100%">
-      <Typography sx={{ color: '#6b7280' }}>No list selected — click + to create one.</Typography>
+      <Typography sx={{ color: theme.colors.text.tertiary, fontSize: '0.95rem' }}>
+        No list selected — click + to create one.
+      </Typography>
     </Box>
   );
 
@@ -29,26 +53,20 @@ export default function TaskList({ category, tasks, onToggle, onAdd, onEdit, onD
           <Chip label={`${done}/${total}`} size="small" className="task-counter" />
         </Box>
 
-        {/* ── CUSTOM PROGRESS BAR (replaces broken MUI LinearProgress) ── */}
-       {total > 0 && (
+        {total > 0 && (
           <div style={{ marginBottom: '6px' }}>
             <div style={{
-              height: '5px',
-              borderRadius: '99px',
-              backgroundColor: '#1c2333',
-              overflow: 'hidden',
-              marginBottom: '4px',
+              height: '5px', borderRadius: '99px',
+              backgroundColor: theme.colors.ui.border, overflow: 'hidden', marginBottom: '4px',
             }}>
               <div style={{
-                height: '100%',
-                width: `${progress}%`,
-                borderRadius: '99px',
+                height: '100%', width: `${progress}%`, borderRadius: '99px',
                 background: `linear-gradient(90deg, ${category.color}, #ec4899)`,
                 transition: 'width 0.5s cubic-bezier(0.4,0,0.2,1)',
                 boxShadow: `0 0 10px ${category.color}70`,
               }} />
             </div>
-            <span style={{ color: '#6b7280', fontSize: '0.72rem' }}>
+            <span style={{ color: theme.colors.text.tertiary, fontSize: '0.85rem' }}>
               {Math.round(progress)}% complete
             </span>
           </div>
@@ -58,8 +76,7 @@ export default function TaskList({ category, tasks, onToggle, onAdd, onEdit, onD
       <Button fullWidth variant="outlined" startIcon={<AddRoundedIcon />} onClick={onAdd}
         className="add-task-btn"
         sx={{
-          borderColor: category.color,
-          color: category.color,
+          borderColor: category.color, color: category.color,
           '&:hover': { borderColor: category.color, bgcolor: `${category.color}18` },
         }}>
         Add Task

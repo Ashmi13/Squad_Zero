@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useForm } from 'react-hook-form';
+import { useNavigate } from 'react-router-dom';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Mail, Lock, AlertCircle, CheckCircle } from 'lucide-react';
 import { z } from 'zod';
@@ -24,12 +25,13 @@ const loginSchema = z.object({
  * Login Card Component
  * Production-ready authentication component with:
  * - Email/Password form validation using React Hook Form + Zod
- * - OAuth2 integration (Google/GitHub)
+ * - OAuth2 integration (Google)
  * - Loading, error, and success state management
- * - Responsive design with Tailwind CSS
+ 
  * - Security best practices
  */
 export const LoginCard = () => {
+  const navigate = useNavigate();
   // Form state management with React Hook Form + Zod validation
   const {
     register,
@@ -62,24 +64,43 @@ export const LoginCard = () => {
         password: data.password,
       });
 
+      if (response.data?.user?.is_suspended) {
+        setIsError(true);
+        setErrorMessage('This account has been suspended. Please contact support.');
+        setTimeout(() => {
+          window.location.href = '/account-suspended';
+        }, 600);
+        return;
+      }
+
       // Store JWT tokens securely
       setTokens(response.data.access_token, response.data.refresh_token);
+      // Persist user record and notify UI listeners so profile appears immediately
+      localStorage.setItem('user', JSON.stringify(response.data.user));
+      window.dispatchEvent(new Event('user-profile-updated'));
 
       // Success state
       setIsSuccess(true);
 
-      // Redirect to dashboard or home page
+      // Redirect to files dashboard
       setTimeout(() => {
-        window.location.href = '/dashboard';
+        window.location.href = '/files';
       }, 1000);
     } catch (error) {
       // Error handling
-      setIsError(true);
+      const backendMessage =
+        error.response?.data?.message ||
+        error.response?.data?.detail ||
+        error.response?.data?.error;
 
-      if (error.response?.data?.detail) {
-        setErrorMessage(error.response.data.detail);
-      } else {
-        setErrorMessage('Invalid email or password. Please try again.');
+      const detail = error.response?.data?.detail || 'Invalid email or password. Please try again.';
+      const isSuspended = /suspend|suspended/i.test(detail);
+      setErrorMessage(isSuspended ? 'This account has been suspended. Please contact support.' : detail);
+
+      if (isSuspended) {
+        setTimeout(() => {
+          window.location.href = '/account-suspended';
+        }, 600);
       }
 
       console.error('Login error:', error);
@@ -92,7 +113,7 @@ export const LoginCard = () => {
    * Handle forgot password
    */
   const handleForgotPassword = () => {
-    window.location.href = '/forgot-password';
+    navigate('/forgot-password');
   };
 
   /**

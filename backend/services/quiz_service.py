@@ -11,15 +11,17 @@ from services.ai_service import AIService
 from utils.file_processor import FileProcessor
 
 
-def _keyword_match_score(user_text: str, expected_text: str) -> float:
-    """Return fraction of expected keywords found in user answer (0.0 – 1.0).
+def _strip_nul(value):
+    """Postgres text columns reject embedded NUL (0x00) bytes outright — strip
+    them from any string headed for the DB (extracted file text, source_content
+    passed straight from the frontend, or AI-generated question/answer text)."""
+    if isinstance(value, str):
+        return value.replace("\x00", "")
+    return value
 
-    Algorithm:
-    - Tokenise both strings into lowercase alphabetic words ≥ 3 chars
-      (strips noise like 'a', 'is', 'of', 'the')
-    - Score = |expected_keywords ∩ user_keywords| / |expected_keywords|
-    - Returns 0.0 if expected_text is empty or has no qualifying keywords
-    """
+
+def _keyword_match_score(user_text: str, expected_text: str) -> float:
+    """Return fraction of expected keywords found in user answer (0.0 – 1.0)."""
     import re
     _STOPWORDS = {
         "the","and","for","are","but","not","you","all","can","her","was",
@@ -71,6 +73,7 @@ class QuizService:
         """Generate a quiz from uploaded files or existing source content"""
         try:
             text = source_content or await self.file_processor.process_files(files)
+            text = _strip_nul(text)
 
             questions_data = await self.ai_service.generate_questions(
                 text, num_questions, difficulty, question_type, content_focus
@@ -96,11 +99,11 @@ class QuizService:
                 question = Question(
                     quiz_id=quiz.quiz_id,
                     question_number=q_data["number"],
-                    question_text=q_data["text"],
+                    question_text=_strip_nul(q_data["text"]),
                     difficulty=difficulty,
                     question_type=q_data["type"],
-                    code_snippet=q_data.get("code_snippet"),
-                    expected_answer=q_data.get("correct_answer") if q_data["type"] == "short_answer" else None,
+                    code_snippet=_strip_nul(q_data.get("code_snippet")),
+                    expected_answer=_strip_nul(q_data.get("correct_answer")) if q_data["type"] in ("short_answer", "long_answer") else None,
                 )
                 self.db.add(question)
                 self.db.flush()  # get question.question_id
@@ -111,7 +114,7 @@ class QuizService:
                         self.db.add(AnswerOption(
                             question_id=question.question_id,
                             option_letter=opt["letter"],
-                            option_text=opt["text"],
+                            option_text=_strip_nul(opt["text"]),
                             is_correct=opt["is_correct"],
                         ))
                     # Flush to make options queryable
@@ -413,6 +416,53 @@ class QuizService:
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
 
+    async def get_retake_config(self, attempt_id: int, user_id: int):
+        """Return the original quiz settings so the caller can regenerate the same quiz"""
+        try:
+            attempt = (
+                self.db.query(QuizAttempt)
+                .filter(
+                    QuizAttempt.attempt_id == attempt_id,
+                    QuizAttempt.user_id == user_id,
+                )
+                .first()
+            )
+            if not attempt:
+                raise HTTPException(status_code=404, detail="Attempt not found")
+
+            quiz = self.db.query(Quiz).filter(Quiz.quiz_id == attempt.quiz_id).first()
+            if not quiz:
+                raise HTTPException(status_code=404, detail="Quiz not found")
+
+            # Determine original question type from the stored questions
+            questions = (
+                self.db.query(Question)
+                .filter(Question.quiz_id == quiz.quiz_id)
+                .all()
+            )
+            types = {q.question_type for q in questions}
+            if types == {"multiple_choice"}:
+                question_type = "mcq"
+            elif "multiple_choice" not in types:
+                question_type = "long_answer" if "long_answer" in types else "short_answer"
+            elif len(types) == 1:
+                question_type = "mcq"
+            else:
+                question_type = "mixed"
+
+            return {
+                "quiz_id": quiz.quiz_id,
+                "source_content": quiz.source_content,
+                "num_questions": quiz.total_questions,
+                "difficulty": quiz.difficulty,
+                "time_limit": quiz.time_limit,
+                "question_type": question_type,
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
     async def delete_attempt(self, attempt_id: int, user_id: int):
         """Delete a quiz attempt — user_id verified against DB record"""
         try:
@@ -465,17 +515,7 @@ class QuizService:
         answers: dict,
         count_ref: list | None = None,
     ) -> list:
-        """Build per-question result dicts shared by submit_quiz and get_attempt_details.
-
-        Args:
-            questions: Ordered list of Question ORM objects
-            options_by_question: Dict from _load_options_by_question
-            answers: Dict of {str(idx): answer_value}
-            count_ref: Optional list; if provided, appends (correct_count) for caller
-
-        Returns:
-            List of detailed result dicts
-        """
+        """Build per-question result dicts shared by submit_quiz and get_attempt_details."""
         results = []
         correct_count = 0.0
 
@@ -499,10 +539,15 @@ class QuizService:
                     correct_count += 1
 
             else:
-                # Short answer: keyword match against AI's expected answer
+                # Short answer or long answer: keyword match against AI's expected answer
                 user_answer_text = user_answer or ""
                 expected = getattr(question, "expected_answer", None) or ""
+                min_words = 50 if question.question_type == "long_answer" else 0
                 if not user_answer or not user_answer.strip():
+                    is_correct = False
+                    correct_answer_text = expected
+                elif min_words > 0 and len(user_answer.split()) < min_words:
+                    # Long answer submitted but too short — mark incorrect
                     is_correct = False
                     correct_answer_text = expected
                 else:

@@ -20,10 +20,10 @@ class UserProfile(BaseModel):
     full_name: Optional[str] = Field(None, description="User full name")
     avatar_url: Optional[str] = Field(None, description="User avatar URL")
     role: str = Field(default="user", description="User role (admin or user)")
+    is_suspended: bool = Field(default=False, description="Whether the account is suspended")
     created_at: Optional[datetime] = Field(None, description="Profile creation date")
 
 
 class UserMeResponse(BaseModel):
     """Response for /me endpoint"""
     profile: UserProfile = Field(..., description="User profile")
-

@@ -1,0 +1,51 @@
+/* m3 Dashboard layout — overrides shared App.module.css for the m3 page only.
+   Owned by member 3. Safe to edit; affects only m3 dashboard. */
+
+.app {
+    display: flex;
+    min-height: 100vh;
+}
+
+.mainContent {
+    flex: 1;
+    padding: 40px;
+    min-height: 100vh;
+    background-color: var(--bg-main);
+}
+
+.sectionHeader {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    margin-bottom: 20px;
+}
+
+.sectionTitle h2 {
+    font-size: 18px;
+    font-weight: 700;
+    margin-bottom: 4px;
+}
+
+.sectionTitle p {
+    font-size: 13px;
+}
+
+.contentGrid {
+    display: flex;
+    flex-direction: column;
+    gap: 32px;
+}
+
+.sectionControls {
+    display: flex;
+    gap: 8px;
+}
+
+.controlBtn,
+.sortSelect {
+    padding: 6px 12px;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    background: #fff;
+    cursor: pointer;
+}

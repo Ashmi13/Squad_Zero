@@ -10,8 +10,8 @@ class TaskCreate(BaseModel):
     priority: Optional[str] = "medium"
     due_date: Optional[datetime] = None
     category: Optional[str] = None
-    color: Optional[str] = "#6366f1"
     reminder_minutes_before: Optional[int] = None
+    color: Optional[str] = None
 
 
 class TaskUpdate(BaseModel):
@@ -21,8 +21,8 @@ class TaskUpdate(BaseModel):
     priority: Optional[str] = None
     due_date: Optional[datetime] = None
     category: Optional[str] = None
-    color: Optional[str] = None
     reminder_minutes_before: Optional[int] = None
+    color: Optional[str] = None
 
 
 class TaskResponse(BaseModel):
@@ -34,19 +34,7 @@ class TaskResponse(BaseModel):
     priority: str
     due_date: Optional[datetime] = None
     category: Optional[str] = None
-    color: Optional[str] = "#6366f1"
     reminder_minutes_before: Optional[int] = None
+    color: Optional[str] = None
     created_at: datetime
     updated_at: datetime
-
-
-class CategoryCreate(BaseModel):
-    name: str
-    icon: Optional[str] = "📋"
-    color: Optional[str] = "#6366f1"
-
-
-class CategoryUpdate(BaseModel):
-    name: Optional[str] = None
-    icon: Optional[str] = None
-    color: Optional[str] = None

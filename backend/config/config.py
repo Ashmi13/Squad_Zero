@@ -32,7 +32,7 @@ class Settings:
     ]
 
     # File upload limits
-    MAX_FILE_SIZE: int = 25 * 1024 * 1024  # 25 MB
+    MAX_FILE_SIZE: int = 100 * 1024 * 1024  # 100 MB
     MAX_FILES: int = 20
     ALLOWED_EXTENSIONS: set = {
         "pdf", "doc", "docx", "txt",
@@ -42,7 +42,7 @@ class Settings:
 
     # Quiz constraints
     MIN_QUESTIONS: int = 1
-    MAX_QUESTIONS: int = 25
+    MAX_QUESTIONS: int = 100
     MIN_TIME_LIMIT: int = 1
     MAX_TIME_LIMIT: int = 180
 
@@ -50,7 +50,8 @@ class Settings:
     PASS_THRESHOLD: int = PASS_THRESHOLD
 
     # AI model settings
-    AI_MODEL: str = "google/gemini-2.5-flash-lite-preview-09-2025"
+    AI_MODEL: str = "google/gemini-2.5-flash"
+    AI_MODEL: str = "google/gemini-3.1-flash-lite-preview"
     AI_TEMPERATURE: float = 0.5
 
 

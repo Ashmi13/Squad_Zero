@@ -30,6 +30,8 @@ striprtf
 # PDF report generation
 reportlab
 
+uvicorn
+
 # Rate limiting
 slowapi
 

@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import axios from 'axios';
-import { getAccessToken } from '../../utils/tokenStorage';
 import {
   Paper,
   TextField,
@@ -14,6 +13,7 @@ import {
 import { useTheme } from '@mui/material/styles';
 import { Cloud, Sparkles } from 'lucide-react';
 import mindmapService from '../../services/mindmapService';
+import { workspaceApi } from '../../services/workspaceApi';
 
 const PdfUploadSection = ({ onMindmapCreated }) => {
   const theme = useTheme();
@@ -65,17 +65,13 @@ const PdfUploadSection = ({ onMindmapCreated }) => {
           setIsLoading(true);
           setError(null);
           try {
-            const token = getAccessToken();
-            const headers = token ? { Authorization: `Bearer ${token}` } : {};
-            
-            const response = await fetch(`/api/v1/workspace/files/${dragData.fileId}/content`, {
-              headers
-            });
-            if (!response.ok) {
-              throw new Error(`Failed to fetch file content: ${response.statusText}`);
-            }
-            const mimeType = response.headers.get('Content-Type') || 'application/pdf';
-            const blob = await response.blob();
+            // Route through workspaceApi.getFileContent() (absolute Render URL,
+            // authenticated, token-refresh aware) — a relative fetch('/api/...')
+            // on the deployed Vercel site is rewritten to index.html by the SPA
+            // catch-all, so the "blob" silently becomes HTML and text extraction
+            // yields 0 chars ("No text found..." / "at least 100 characters").
+            const blob = await workspaceApi.getFileContent(dragData.fileId);
+            const mimeType = blob.type || 'application/pdf';
             
             let filename = dragData.fileName || 'file';
             const extFromUrl = dragData.fileUrl ? '.' + dragData.fileUrl.split('.').pop().toLowerCase() : '';

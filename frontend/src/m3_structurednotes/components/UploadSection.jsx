@@ -23,7 +23,7 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import styles from './UploadSection.module.css';
 import { uploadPDF } from '../api';
-import { getAccessToken } from '../../utils/tokenStorage';
+import { workspaceApi } from '../../services/workspaceApi';
 
 // ─────────────────────────────────────────────────────────────
 //  CONSTANTS
@@ -290,17 +290,13 @@ const UploadSection = ({ userId: userIdProp }) => {
           setErrorMsg('');
           setJobStatus('retrieving');
           try {
-            const token = getAccessToken();
-            const headers = token ? { Authorization: `Bearer ${token}` } : {};
-            
-            const response = await fetch(`/api/v1/workspace/files/${dragData.fileId}/content`, {
-              headers
-            });
-            if (!response.ok) {
-              throw new Error(`Failed to fetch file content: ${response.statusText}`);
-            }
-            const mimeType = response.headers.get('Content-Type') || 'application/pdf';
-            const blob = await response.blob();
+            // Route through workspaceApi.getFileContent() (absolute Render URL,
+            // authenticated, token-refresh aware) — a relative fetch('/api/...')
+            // on the deployed Vercel site is rewritten to index.html by the SPA
+            // catch-all, so the "blob" silently becomes HTML and text extraction
+            // yields 0 chars ("No text found for the given file IDs").
+            const blob = await workspaceApi.getFileContent(dragData.fileId);
+            const mimeType = blob.type || 'application/pdf';
             
             // Auto-detect and fix missing extensions in the filename
             let filename = dragData.fileName || 'file';

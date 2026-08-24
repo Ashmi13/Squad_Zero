@@ -78,8 +78,6 @@ reportlab
 # Rate limiting
 slowapi
 
-#Analytics
-Recharts
 
 #=============AI==========
 # Install ONLY if you work on AI/Notes features (Members 3 & 4)

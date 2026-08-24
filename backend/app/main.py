@@ -208,6 +208,15 @@ async def startup_event():
     except Exception as _e:
         print(f"[STARTUP] Column warmup skipped: {_e}")
 
+    # Ensure Second Brain tables exist so fresh deployments don't 500 on
+    # note writes. init_db() is idempotent (checkfirst=True).
+    try:
+        from second_brain.db import init_db as _sb_init_db
+        _sb_init_db()
+        print("[STARTUP] Second Brain tables ensured")
+    except Exception as _e:
+        print(f"[STARTUP] Second Brain table warmup skipped: {_e}")
+
 @app.on_event("shutdown")
 async def shutdown_event():
     print(f"[SHUTDOWN] Shutting down {app_name}")

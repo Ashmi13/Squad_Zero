@@ -40,6 +40,19 @@ python-docx>=0.8.11
 
 python-multipart
 
+# ===== M3 STRUCTURED NOTES + M4 QUIZ (Members 3 & 4) =====
+# These are imported at module load time -> missing them silently skips the
+# /api/m3/* (notes) and /api/quizzes/* routes. Must stay in requirements.txt.
+PyPDF2>=3.0.0
+python-pptx>=0.6.23
+
+# Cheap lazy-imported extractors so uploads of xlsx / ppt / epub / rtf / images work
+openpyxl>=3.1.2
+ebooklib>=0.18
+beautifulsoup4>=4.12.3
+striprtf
+Pillow>=10.0.0
+
 # ===== TESTING =====
 pytest>=7.4.4
 pytest-asyncio>=0.23.0

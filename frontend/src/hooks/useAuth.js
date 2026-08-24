@@ -46,7 +46,7 @@ export const useAuth = () => {
     localStorage.removeItem('user');
     setUser(null);
     setIsAuthenticated(false);
-    window.location.href = 'http://localhost:5173/';
+    window.location.href = '/';
   }, []);
 
   const checkAuth = useCallback(() => {

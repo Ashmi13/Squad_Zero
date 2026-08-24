@@ -9,7 +9,9 @@ import { getScopedStorageKey } from '@/hooks/useSupabaseUser'
 import { useAuth } from '@/hooks/useAuth'
 import { workspaceApi } from '@/services/workspaceApi'
 
-const API_BASE = 'http://127.0.0.1:8000/api/m3'
+const API_BASE = (import.meta.env && import.meta.env.VITE_API_BASE_URL)
+  ? `${import.meta.env.VITE_API_BASE_URL}/api/m3`
+  : 'http://127.0.0.1:8000/api/m3'
 
 export default function NoteEditor() {
   const { noteId } = useParams()
@@ -1226,7 +1228,7 @@ ${bodyHtml}
     }
 
     // Always use the confirmed working route
-    const url = `http://127.0.0.1:8000/api/m3/documents/${id}.pdf`
+    const url = `${API_BASE}/documents/${id}.pdf`
     console.log('[URL] PDF URL:', url)
     return url
   }

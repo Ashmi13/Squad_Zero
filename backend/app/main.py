@@ -12,24 +12,33 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-# App config
+# Get CORS origins dynamically from Render Environment Variable
+raw_origins = os.getenv("CORS_ORIGINS", "")
+if raw_origins:
+    cors_origins = [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
+else:
+    cors_origins = [
+        "https://squad-zero-ecru.vercel.app",
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:3000",
+    ]
+
+# App config fallback
 try:
     from app.core.config import settings
-    app_name     = settings.app_name
-    cors_origins = settings.cors_origins.split(",") if hasattr(settings, "cors_origins") else ["http://localhost:3000", "http://localhost:5173"]
-    debug        = getattr(settings, "environment", "development") == "development"
+    app_name = getattr(settings, "app_name", "SquadZero")
+    debug = getattr(settings, "environment", "development") == "development"
 except Exception:
     try:
         from config.config import settings as old_settings
-        app_name     = old_settings.APP_NAME
-        cors_origins = old_settings.CORS_ORIGINS
-        debug        = old_settings.DEBUG
+        app_name = old_settings.APP_NAME
+        debug = old_settings.DEBUG
     except Exception as e:
         print(f"[WARN] Config load failed: {e}")
-        app_name     = "NeuraNote"
-        cors_origins = ["https://squad-zero-ecru.vercel.app", "http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173", "http://127.0.0.1:3000"]
-        debug        = True
-
+        app_name = "SquadZero"
+        debug = True
 # Database table creation
 try:
     from database import engine, Base

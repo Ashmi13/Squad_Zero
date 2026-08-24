@@ -35,8 +35,10 @@ export function LoginForm() {
   const handleGoogleSignIn = () => {
     // We rely on the Vite proxy for /api, so we must go to current origin + proxy path
     // Force the browser to treat this as a fresh external navigation
-    const url = `${window.location.origin}${config.oauth.googleAuthUrl}`;
-    console.log('Redirecting to Google login through proxy:', url);
+    // Hit the backend directly (works on both the local Vite proxy AND hosted
+    // platforms like Vercel where there is no /api proxy to Render).
+    const url = `${config.apiBaseUrl}${config.oauth.googleAuthUrl}`;
+    console.log('Redirecting to Google login at backend:', url);
     window.location.assign(url);
   };
 

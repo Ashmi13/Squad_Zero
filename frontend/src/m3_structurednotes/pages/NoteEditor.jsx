@@ -345,6 +345,17 @@ export default function NoteEditor() {
     // Apply post-processing after markdown/HTML detection
     html = postProcess(html)
 
+    // Fix broken diagrams/images: the backend stores note image paths as
+    // RELATIVE /api/m3/images/... (see resolve_image_tokens_to_static_urls).
+    // On the deployed Vercel frontend a relative /api/... src resolves to the
+    // Vercel origin → rewritten to index.html → broken image. Rewrite them to
+    // the absolute backend base URL so images load from Render.
+    if (API_BASE) {
+      const stripBase = API_BASE.replace(/\/$/, '')
+      html = html.replace(/src="\/api\/m3\//g, `src="${stripBase}/`)
+      html = html.replace(/src='\/api\/m3\'/g, `src='${stripBase}/`)
+    }
+
     console.log(
       '[Load] Final HTML length:', html.length
     )

@@ -431,7 +431,7 @@ async def google_callback(
         "grant_type": "authorization_code",
     }
 
-    frontend_url = next((o for o in settings.cors_origins_list if "5173" in o), settings.cors_origins_list[0])
+    frontend_url = next((o for o in settings.cors_origins_list if "vercel.app" in o), settings.cors_origins_list[0])
 
     async with httpx.AsyncClient() as client:
         token_response = await client.post(token_url, data=token_data)

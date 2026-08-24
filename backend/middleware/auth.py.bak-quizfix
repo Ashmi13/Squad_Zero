@@ -92,37 +92,27 @@ def get_current_user(
         )
 
     token = credentials.credentials
-    payload = None
-    # 1) Strict signature verification first (matching the rest of the app).
     try:
         payload = pyjwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-    except (InvalidTokenError, ExpiredSignatureError) as exc:
+    except ExpiredSignatureError as exc:
+        logger.warning("auth: token expired")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has expired — please log in again",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
+    except InvalidTokenError as exc:
+        # Log the first 40 chars of the token so we can confirm it's arriving
         logger.warning(
-            "auth: strict decode failed (%s) | token prefix: %s... - trying fallback",
+            "auth: InvalidTokenError — %s | token prefix: %s...",
             exc, token[:40]
         )
-        payload = None
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Token invalid: {exc}",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
 
-    # 2) Fallback identical to app/api/deps.py: tokens signed with a different
-    #    secret (e.g. Supabase JWT or a rotated SECRET_KEY) are accepted via
-    #    unverified decode so quiz behaves exactly like every other feature.
-    if payload is None:
-        try:
-            payload = pyjwt.decode(
-                token,
-                options={"verify_signature": False},
-                algorithms=["HS256", "RS256"],
-            )
-        except InvalidTokenError as exc:
-            logger.warning(
-                "auth: InvalidTokenError — %s | token prefix: %s...",
-                exc, token[:40]
-            )
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=f"Token invalid: {exc}",
-                headers={"WWW-Authenticate": "Bearer"},
-            ) from exc
     sub = payload.get("sub")
     if sub is None:
         logger.warning("auth: 'sub' claim missing from payload: %s", list(payload.keys()))

@@ -1,6 +1,6 @@
 // Environment configuration
 export const config = {
-  apiBaseUrl: 'https://squad-zero-3.onrender.com',
+  apiBaseUrl:import.meta.env.VITE_API_BASE_URL || '',
   oauth: {
     googleAuthUrl: '/api/v1/auth/google-login',
     githubAuthUrl: '/api/v1/auth/github',

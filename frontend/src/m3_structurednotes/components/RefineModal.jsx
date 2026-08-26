@@ -2,7 +2,9 @@ import React, { useState, useRef, useEffect }
   from 'react'
 import axios from 'axios'
 
-const API_BASE = 'http://127.0.0.1:8000/api/m3'
+const API_BASE = (import.meta.env && import.meta.env.VITE_API_BASE_URL)
+  ? `${import.meta.env.VITE_API_BASE_URL}/api/m3`
+  : 'http://127.0.0.1:8000/api/m3'
 
 export default function RefineModal({
   selectedText,

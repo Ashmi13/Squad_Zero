@@ -24,6 +24,8 @@ WHAT IT DOES:
 import fitz  # PyMuPDF - Library for reading PDF files
 from io import BytesIO
 
+from utils.pdf_text_sanity import looks_like_garbage, ocr_pdf_bytes, safe_strip_leaked_pdf_objects
+
 def extract_text_from_pdf(pdf_bytes: bytes) -> str:
     """
     Extract all text from a PDF file.
@@ -78,7 +80,23 @@ def extract_text_from_pdf(pdf_bytes: bytes) -> str:
         # Step 4: Check if text was actually extracted
         if not extracted_text.strip():
             raise ValueError("PDF appears to be scanned or has no readable text")
-        
+
+        # Step 4b: Check the extracted text isn't leaked PDF internal
+        # structure (/Type, /Catalog, endobj, ...) rather than real page
+        # content — a known fitz/PyPDF2 failure mode on certain malformed
+        # or unusually-encoded PDFs. If so, OCR sidesteps the parser.
+        if looks_like_garbage(extracted_text):
+            print("DEBUG pdf_reader: Extracted text looks like leaked PDF structure — trying OCR")
+            ocr_text = ocr_pdf_bytes(pdf_bytes)
+            if ocr_text.strip():
+                extracted_text = ocr_text
+
+        # Step 4c: Unconditionally strip any leaked PDF object-dictionary
+        # blocks that are embedded in (but didn't dominate) the text — this
+        # catches small leaks in an otherwise-normal document that the
+        # whole-document check above is too diluted to flag.
+        extracted_text = safe_strip_leaked_pdf_objects(extracted_text)
+
         print(f"DEBUG pdf_reader: Total extracted: {len(extracted_text)} characters")
         # Step 5: Return extracted text to caller (routes/pdf.py)
         return extracted_text.strip()

@@ -361,25 +361,57 @@ class WorkspaceService:
             raise HTTPException(status_code=404, detail="File not found")
 
         row = existing.data[0]
-        for key in ("file_content", "raw_text", "summary", "content", "text"):
-            value = row.get(key)
-            if isinstance(value, str):
-                return value.encode("utf-8")
-            if isinstance(value, bytes):
-                return value
+        mime = str(row.get("mime_type") or row.get("file_type") or "").lower()
+        is_binary_doc = any(
+            token in mime
+            for token in (
+                "pdf", "powerpoint", "presentation", "msword",
+                "openxmlformats-officedocument", "octet-stream",
+            )
+        )
 
-        storage_bucket, storage_key = self._extract_storage_location(row)
-        if storage_key and not str(storage_key).startswith("data:"):
-            for candidate_bucket in self._candidate_buckets(storage_bucket):
-                try:
-                    obj = self._s3_client(candidate_bucket).get_object(Bucket=candidate_bucket, Key=str(storage_key).lstrip("/"))
-                    body = obj.get("Body")
-                    if body is not None:
-                        return body.read()
-                except ClientError:
-                    continue
-                except Exception:
-                    continue
+        # Resolve raw storage bytes from S3 (the original file payload).
+        def _resolve_storage_bytes():
+            storage_bucket, storage_key = self._extract_storage_location(row)
+            if storage_key and not str(storage_key).startswith("data:"):
+                for candidate_bucket in self._candidate_buckets(storage_bucket):
+                    try:
+                        obj = self._s3_client(candidate_bucket).get_object(
+                            Bucket=candidate_bucket, Key=str(storage_key).lstrip("/")
+                        )
+                        body = obj.get("Body")
+                        if body is not None:
+                            return body.read()
+                    except (ClientError, Exception):
+                        continue
+            return None
+
+        def _resolve_text_columns() -> Optional[bytes]:
+            for key in ("file_content", "raw_text", "summary", "content", "text"):
+                value = row.get(key)
+                if isinstance(value, bytes):
+                    return value
+                if isinstance(value, str):
+                    return value.encode("utf-8")
+            return None
+
+        # Binary documents (PDF/PPTX/DOCX) MUST return the real file bytes — text
+        # columns are extracted summaries, not valid PDF content. Drag-and-drop
+        # rebuilds PDFs from this endpoint, so returning text breaks re-extraction.
+        if is_binary_doc:
+            storage_bytes = _resolve_storage_bytes()
+            if storage_bytes is not None:
+                return storage_bytes
+            text_bytes = _resolve_text_columns()
+            if text_bytes is not None:
+                return text_bytes
+        else:
+            text_bytes = _resolve_text_columns()
+            if text_bytes is not None:
+                return text_bytes
+            storage_bytes = _resolve_storage_bytes()
+            if storage_bytes is not None:
+                return storage_bytes
 
         raise HTTPException(status_code=404, detail="File bytes could not be resolved from storage or database content")
 

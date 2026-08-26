@@ -2,7 +2,9 @@ import React, { useState, useRef, useCallback } from 'react';
 import { getValidAccessToken, authFetch } from '@/utils/authSession';
 import { workspaceApi } from '@/services/workspaceApi';
 
-const API_BASE = 'http://localhost:8000/api/v1';
+const API_BASE = (import.meta.env && import.meta.env.VITE_API_BASE_URL)
+  ? `${import.meta.env.VITE_API_BASE_URL}/api/v1`
+  : 'http://localhost:8000/api/v1';
 
 const FlashcardsPage = () => {
   const [flashcards, setFlashcards] = useState([]);

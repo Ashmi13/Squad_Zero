@@ -42,8 +42,10 @@ export function SignupForm() {
   const [isSuccess, setIsSuccess] = useState(false);
 
   const handleGoogleSignIn = () => {
-    const url = `${window.location.origin}${config.oauth.googleAuthUrl}`;
-    console.log('Redirecting to Google login through proxy:', url);
+    // Hit the backend directly so this works on hosted platforms too, not just
+    // the local Vite proxy.
+    const url = `${config.apiBaseUrl}${config.oauth.googleAuthUrl}`;
+    console.log('Redirecting to Google login at backend:', url);
     window.location.assign(url);
   };
 

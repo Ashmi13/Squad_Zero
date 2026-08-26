@@ -37,6 +37,11 @@ import psycopg2
 import psycopg2.extras
 from pptx import Presentation
 from .openai_client import ask_llm, get_model
+from utils.pdf_text_sanity import (
+    looks_like_garbage,
+    safe_strip_leaked_pdf_objects,
+    ocr_image_bytes,  # Tesseract-first / vision-LLM-fallback for per-page OCR
+)
 
 logger = logging.getLogger(__name__)
 
@@ -627,6 +632,38 @@ def extract_text_from_pdf(file_path: str, file_id: str = None) -> Tuple[str, Lis
         page_num = page_idx + 1
         page_text = page.get_text()
 
+        # fitz's get_text() can occasionally leak raw PDF object-dictionary
+        # structure (/Type, /Catalog, endobj, ...) instead of real page
+        # content on certain malformed/unusually-encoded PDFs. That garbage
+        # still has plenty of "words", so it would otherwise sail through
+        # into notes (and, later, into AI-generated quiz questions asking
+        # about the PDF's internal structure instead of its actual
+        # subject). OCR the page directly, sidestepping the text layer.
+        #
+        # Delegates to the shared ocr_image_bytes() helper so this site
+        # picks up the same Tesseract-first / vision-LLM-fallback chain
+        # as the quiz module — without it, structured-notes generation
+        # silently failed on any environment without the tesseract binary
+        # installed (the same bug that was breaking quiz uploads).
+        if looks_like_garbage(page_text):
+            logger.warning(
+                "Page %d text looks like leaked PDF structure — falling back to OCR", page_num
+            )
+            try:
+                ocr_pix = page.get_pixmap(dpi=200)
+                png_bytes = ocr_pix.tobytes("png")
+                ocr_text = ocr_image_bytes(png_bytes, "image/png")
+                if ocr_text.strip():
+                    page_text = ocr_text
+            except Exception as ocr_err:
+                logger.warning("OCR fallback failed for page %d: %s", page_num, ocr_err)
+
+        # Unconditional final step: surgically strip any leaked PDF
+        # object-dictionary blocks embedded in the page text, even a small
+        # one too diluted (within this single page) to have tripped the
+        # looks_like_garbage() check above.
+        page_text = safe_strip_leaked_pdf_objects(page_text)
+
         # Fast pre-check: if the page has no raster images and simple/no drawings, skip vision analysis!
         # Note: we also skip if page text is very long (suggesting a standard dense textbook page, not a slide)
         images_list = page.get_images()
@@ -1055,9 +1092,7 @@ class NoteService:
             tmp.write(file_bytes)
             tmp_path = tmp.name
 
-        try:
-            full_text, images = extract_text_from_file(tmp_path)
-
+        
         # Persist the file to documents/ for split-view serving
         try:
             os.makedirs("documents", exist_ok=True)
@@ -1349,7 +1384,7 @@ class NoteService:
             system=UNIFIED_CHEATSHEET_SYSTEM,
             temperature=0.1,   # very low — maximise factual adherence, minimise creativity
             max_tokens=65536,  # larger budget for full solved exercises + key takeaways
-            max_tokens=8192,   # standard Gemini output token limit for fast routing
+            # standard Gemini output token limit for fast routing
         )
 
         # 6) Clean and return

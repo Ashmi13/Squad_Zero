@@ -20,6 +20,12 @@ const getAuthHeaders = () => {
 
 const MAX_FILES    = 20;
 const MAX_FILE_SIZE = 100 * 1024 * 1024;
+const SUPPORTED_EXTENSIONS = new Set([
+  'pdf', 'doc', 'docx', 'txt', 'md', 'rtf',
+  'xlsx', 'xls', 'ppt', 'pptx',
+  'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tiff',
+  'epub',
+]);
 
 const QuizPage = ({ noteId, onStepChange }) => {
   const { user, isLoading } = useAuth();
@@ -65,11 +71,20 @@ const QuizPage = ({ noteId, onStepChange }) => {
       const saved = sessionStorage.getItem('neuranote_quiz_state');
       if (saved) {
         const s = JSON.parse(saved);
-        if (s.step && s.step !== 'taking') setStep(s.step);
+        // Guard: 'results' step is only meaningful if we actually have the results payload to show
+        const restoredStep = s.step === 'results' && !s.results ? 'upload' : s.step;
+
+        if (restoredStep && restoredStep !== 'taking') setStep(restoredStep);
         if (s.currentQuestion !== undefined) setCurrentQuestion(s.currentQuestion);
         if (s.completedLevels)  setCompletedLevels(s.completedLevels);
         if (s.config)           setConfig(s.config);
         if (s.showHistory !== undefined) setShowHistory(s.showHistory);
+        if (restoredStep === 'results') {
+          if (s.quiz)    setQuiz(s.quiz);
+          if (s.results) setResults(s.results);
+          if (s.answers) setAnswers(s.answers);
+          if (s.showReview !== undefined) setShowReview(s.showReview);
+        }
       }
     } catch (_) {}
   }, []); // eslint-disable-line
@@ -77,11 +92,15 @@ const QuizPage = ({ noteId, onStepChange }) => {
   useEffect(() => {
     try {
       sessionStorage.setItem('neuranote_quiz_state', JSON.stringify({
-        step, currentQuestion, config, completedLevels, showHistory,
+        step, currentQuestion, config, completedLevels, showHistory, showReview,
         quizId: quiz?.quiz_id || null,
+        // Only persist the (potentially large) quiz/results/answers payloads while actually on the results step
+        quiz:    step === 'results' ? quiz    : null,
+        results: step === 'results' ? results : null,
+        answers: step === 'results' ? answers : null,
       }));
     } catch (_) {}
-  }, [step, currentQuestion, config, completedLevels, showHistory, quiz?.quiz_id]);
+  }, [step, currentQuestion, config, completedLevels, showHistory, showReview, quiz, results, answers]);
 
   useEffect(() => {
     if (step !== 'taking') return;
@@ -111,13 +130,11 @@ const QuizPage = ({ noteId, onStepChange }) => {
     const existingKeys = new Set(uploadedFiles.map(f => `${f.name.toLowerCase()}::${f.file?.size ?? ''}`));
     const seenInThisBatch = new Set();
     const validFiles = files.filter(file => {
-      // Use lastIndexOf so filenames like "Copy of 1. Introduction" (dots in name,
-      // no real extension) don't get " introduction" treated as an extension.
+      // Use lastIndexOf so filenames
       const lastDot = file.name.lastIndexOf('.');
       const rawExt = lastDot !== -1 ? file.name.slice(lastDot + 1).trim().toLowerCase() : '';
-      const ext = '.' + rawExt;
-      const ok  = ['.pdf','.doc','.docx','.txt','.xlsx','.xls','.ppt','.pptx','.jpg','.jpeg','.png','.gif','.webp','.epub','.bmp','.tiff','.rtf'];
-      const isValidExt = rawExt.length > 0 && rawExt.length <= 5 && !rawExt.includes(' ') && ok.includes(ext);
+      const isValidExt = rawExt.length > 0 && rawExt.length <= 5 && !rawExt.includes(' ')
+        && SUPPORTED_EXTENSIONS.has(rawExt);
       if (!isValidExt) { showToast(`"${file.name}" has an unsupported file type.`, 'error'); return false; }
       if (file.size > MAX_FILE_SIZE) { showToast(`"${file.name}" exceeds 100MB`, 'error'); return false; }
 
@@ -181,10 +198,18 @@ const QuizPage = ({ noteId, onStepChange }) => {
 
   // Resolve a safe filename for a folder-tree file drop.
   const resolveDropFileName = (fileName, fileType, content, blobMime) => {
-    // If we have text content it will be saved as a .txt blob
+    const originalName = String(fileName || 'file').trim() || 'file';
+    const originalExt = originalName.includes('.')
+      ? originalName.slice(originalName.lastIndexOf('.') + 1).toLowerCase()
+      : '';
+
+    // Preserve markdown/RTF extensions when the folder API supplies inline
+    // text. Otherwise the browser upload arrives as .txt and the quiz module
+    // cannot distinguish the original file type.
     if (content) {
-      const base = fileName.replace(/\.[^.]+$/, ''); // strip any existing extension
-      return base.endsWith('.txt') ? base : `${base}.txt`;
+      if (['txt', 'md', 'rtf'].includes(originalExt)) return originalName;
+      const base = originalName.replace(/\.[^.]+$/, '');
+      return `${base}.txt`;
     }
 
     const GENERIC = ['file', '', null, undefined];
@@ -193,15 +218,15 @@ const QuizPage = ({ noteId, onStepChange }) => {
     if (!GENERIC.includes(rawType)) {
       // Real type like 'pdf', 'docx', 'pptx' — append only if not already there
       const ext = `.${rawType}`;
-      return fileName.toLowerCase().endsWith(ext) ? fileName : `${fileName}${ext}`;
+      return originalName.toLowerCase().endsWith(ext) ? originalName : `${originalName}${ext}`;
     }
 
     // fileType is generic — try sniffing from the fileName itself
-    const dotIdx = fileName.lastIndexOf('.');
+    const dotIdx = originalName.lastIndexOf('.');
     if (dotIdx !== -1) {
-      const sniffed = fileName.slice(dotIdx + 1).toLowerCase();
+      const sniffed = originalName.slice(dotIdx + 1).toLowerCase();
       if (sniffed.length > 0 && sniffed.length <= 5 && !sniffed.includes(' ')) {
-        return fileName; // already has a real extension
+        return originalName; // already has a real extension
       }
     }
 
@@ -220,10 +245,28 @@ const QuizPage = ({ noteId, onStepChange }) => {
       'image/gif': 'gif',
       'image/webp': 'webp',
     };
-    if (blobMime && mimeToExt[blobMime]) return `${fileName}.${mimeToExt[blobMime]}`;
+    if (blobMime && mimeToExt[blobMime]) return `${originalName}.${mimeToExt[blobMime]}`;
 
     // Last resort: treat as txt so at least something goes through
-    return `${fileName}.txt`;
+    return `${originalName}.txt`;
+  };
+
+  // File types whose extracted text cannot be trusted as a substitute for
+  // the real bytes. When a folder-tree drag carries inline `content` for
+  // one of these types, we ignore it and fetch the real bytes via
+  // fetchFileBlob instead — otherwise the backend would receive pre-
+  // extracted text (possibly stale/garbage from a previous broken run)
+  // labeled as .txt, skip the fitz + OCR pipeline, and trip the
+  // looks_like_garbage() 400 error.
+  const BINARY_FILE_TYPES = ['pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'epub'];
+
+  const isBinaryFileType = (fileType, fileName) => {
+    const rawType = (fileType || '').toLowerCase();
+    if (BINARY_FILE_TYPES.includes(rawType)) return true;
+    const ext = fileName && fileName.includes('.')
+      ? fileName.slice(fileName.lastIndexOf('.') + 1).toLowerCase()
+      : '';
+    return BINARY_FILE_TYPES.includes(ext);
   };
 
   const handleDrop = async (e) => {
@@ -240,13 +283,19 @@ const QuizPage = ({ noteId, onStepChange }) => {
       const { fileId, fileName, fileType, fileUrl, content } = fileData;
       if (!fileId) { showToast('Could not identify dragged file.', 'error'); return; }
 
+      // CRITICAL: for binary file types (PDF, DOCX, PPTX, etc.), never use
+      // the inline `content` text — it may be stale/garbage from a previous
+      // broken extraction. Always fetch the real bytes from the workspace
+      // endpoint so the backend's fitz + OCR pipeline runs on the actual file.
+      const shouldFetchRealBytes = isBinaryFileType(fileType, fileName);
+
       // fullName resolved after we know blob.type — placeholder for now
       let fullName = fileName;
 
       try {
         let blob;
 
-        if (content) {
+        if (content && !shouldFetchRealBytes) {
           // Plain text/extracted content — no network needed
           blob = new Blob([content], { type: 'text/plain' });
 
@@ -261,7 +310,11 @@ const QuizPage = ({ noteId, onStepChange }) => {
           blob = await fetchFileBlob(fileId, fileName);
         }
 
-        fullName = resolveDropFileName(fileName, fileType, content, blob.type);
+        // For binary files, don't pass `content` to resolveDropFileName —
+        // otherwise it forces .txt extension, which makes the backend route
+        // through the txt decoder instead of the PDF/DOCX extractor.
+        const effectiveContent = shouldFetchRealBytes ? null : content;
+        fullName = resolveDropFileName(fileName, fileType, effectiveContent, blob.type);
         const file = new File([blob], fullName, { type: blob.type || 'application/octet-stream' });
         handleFiles([file]);
       } catch (err) {
@@ -280,10 +333,18 @@ const QuizPage = ({ noteId, onStepChange }) => {
     const { fileId, fileName, fileType, fileUrl, content } = fileData || {};
     if (!fileId) { showToast('Could not identify dragged file.', 'error'); return; }
 
+    // CRITICAL: for binary file types (PDF, DOCX, PPTX, etc.), never use
+    // the inline `content` text — it may be stale/garbage from a previous
+    // broken extraction, and sending it as .txt causes the backend to skip
+    // the fitz + OCR pipeline and trip the looks_like_garbage() 400 error.
+    // Instead, always fetch the real bytes from the workspace endpoint so
+    // the backend's extraction pipeline runs on the actual file.
+    const shouldFetchRealBytes = isBinaryFileType(fileType, fileName);
+
     try {
       let blob;
 
-      if (content) {
+      if (content && !shouldFetchRealBytes) {
         blob = new Blob([content], { type: 'text/plain' });
 
       } else if (fileUrl && fileUrl.startsWith('data:')) {
@@ -296,7 +357,11 @@ const QuizPage = ({ noteId, onStepChange }) => {
         blob = await fetchFileBlob(fileId, fileName);
       }
 
-      const fullName = resolveDropFileName(fileName, fileType, content, blob.type);
+      // For binary files, don't pass `content` to resolveDropFileName —
+      // otherwise it forces .txt extension, which makes the backend route
+      // through the txt decoder instead of the PDF/DOCX extractor.
+      const effectiveContent = shouldFetchRealBytes ? null : content;
+      const fullName = resolveDropFileName(fileName, fileType, effectiveContent, blob.type);
       const file = new File([blob], fullName, { type: blob.type || 'application/octet-stream' });
       handleFiles([file]);
     } catch (err) {

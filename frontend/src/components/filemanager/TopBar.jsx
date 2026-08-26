@@ -99,7 +99,7 @@ const TopBar = ({ folderName }) => {
 
     clearTokens();
     localStorage.removeItem('user');
-    window.location.href = 'http://localhost:5173/';
+    window.location.href = '/';
   };
 
   const getUserInitials = () => {

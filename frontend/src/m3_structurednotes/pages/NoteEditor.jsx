@@ -9,7 +9,9 @@ import { getScopedStorageKey } from '@/hooks/useSupabaseUser'
 import { useAuth } from '@/hooks/useAuth'
 import { workspaceApi } from '@/services/workspaceApi'
 
-const API_BASE = 'http://127.0.0.1:8000/api/m3'
+const API_BASE = (import.meta.env && import.meta.env.VITE_API_BASE_URL)
+  ? `${import.meta.env.VITE_API_BASE_URL}/api/m3`
+  : 'http://127.0.0.1:8000/api/m3'
 
 export default function NoteEditor() {
   const { noteId } = useParams()
@@ -342,6 +344,17 @@ export default function NoteEditor() {
 
     // Apply post-processing after markdown/HTML detection
     html = postProcess(html)
+
+    // Fix broken diagrams/images: the backend stores note image paths as
+    // RELATIVE /api/m3/images/... (see resolve_image_tokens_to_static_urls).
+    // On the deployed Vercel frontend a relative /api/... src resolves to the
+    // Vercel origin → rewritten to index.html → broken image. Rewrite them to
+    // the absolute backend base URL so images load from Render.
+    if (API_BASE) {
+      const stripBase = API_BASE.replace(/\/$/, '')
+      html = html.replace(/src="\/api\/m3\//g, `src="${stripBase}/`)
+      html = html.replace(/src='\/api\/m3\'/g, `src='${stripBase}/`)
+    }
 
     console.log(
       '[Load] Final HTML length:', html.length
@@ -1226,7 +1239,7 @@ ${bodyHtml}
     }
 
     // Always use the confirmed working route
-    const url = `http://127.0.0.1:8000/api/m3/documents/${id}.pdf`
+    const url = `${API_BASE}/documents/${id}.pdf`
     console.log('[URL] PDF URL:', url)
     return url
   }
@@ -1694,9 +1707,9 @@ ${bodyHtml}
               background: 'var(--color-background-primary)', display: 'flex', alignItems: 'center', gap: '8px'
             }}>
               <select
-                value={activeFile?.pdf_url || ''}
+                value={activeFile?.pdf_id || ''}
                 onChange={e => {
-                  const file = sourceFiles.find(f => f.pdf_url === e.target.value)
+                  const file = sourceFiles.find(f => f.pdf_id === e.target.value)
                   if (file) setActiveFile(file)
                 }}
                 style={{
@@ -1706,7 +1719,7 @@ ${bodyHtml}
               >
                 {sourceFiles.length === 0 && <option value="">No source files</option>}
                 {sourceFiles.map(f => (
-                  <option key={f.pdf_id} value={f.pdf_url}>{f.filename}</option>
+                  <option key={f.pdf_id} value={f.pdf_id}>{f.filename}</option>
                 ))}
               </select>
               <button onClick={() => setSourceVisible(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', color: 'var(--color-text-secondary)' }}>✕</button>

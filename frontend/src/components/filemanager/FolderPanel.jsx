@@ -237,8 +237,8 @@ const FolderPanel = ({ selectedFolder, onSelectFolder, onSelectFile, onFolderDel
       // Best-effort local rename: try to fetch preview and write new file, then remove old local copy
       try {
         const preview = await workspaceApi.getFilePreview(fileNode.id).catch(() => null);
-        if (preview?.url) {
-          const resp = await fetch(preview.url);
+        if (preview?.preview_url) {
+          const resp = await fetch(preview.preview_url);
           if (resp.ok) {
             const blob = await resp.blob();
             const fileObj = new File([blob], `${newName.trim()}${fileNode.originalFilename?.match(/\.[^.]+$/) ? '' : ''}`, { type: blob.type });

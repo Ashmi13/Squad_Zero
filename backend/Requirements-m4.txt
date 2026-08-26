@@ -30,8 +30,19 @@ striprtf
 # PDF report generation
 reportlab
 
+uvicorn
+
 # Rate limiting
 slowapi
 
-#Analytics
-Recharts
+fastapi
+
+python-dotenv
+sqlalchemy
+pydantic-settings
+psycopg2-binary
+supabase
+
+python-multipart
+
+

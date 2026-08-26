@@ -265,6 +265,7 @@ class PDFService:
     def extract_text(self, file_path: str) -> str:
         """Extract text from a PDF file path using PyMuPDF."""
         import fitz
+        from utils.pdf_text_sanity import looks_like_garbage, ocr_pdf_path, safe_strip_leaked_pdf_objects
         try:
             pdf_document = fitz.open(file_path)
             if pdf_document.page_count == 0:
@@ -279,7 +280,21 @@ class PDFService:
             
             if not extracted_text.strip():
                 raise ValueError("PDF has no readable text")
-                
+
+            # Guard against leaked PDF internal structure (/Type, /Catalog,
+            # endobj, ...) masquerading as real page content — a known
+            # fitz/PyPDF2 failure mode on certain malformed or unusually
+            # encoded PDFs. OCR sidesteps the text-layer parser entirely.
+            if looks_like_garbage(extracted_text):
+                ocr_text = ocr_pdf_path(file_path)
+                if ocr_text.strip():
+                    extracted_text = ocr_text
+
+            # Unconditional final step: surgically remove any leaked PDF
+            # object-dictionary blocks, even ones too small to have tripped
+            # the whole-document check above.
+            extracted_text = safe_strip_leaked_pdf_objects(extracted_text)
+
             return extracted_text.strip()
         except Exception as e:
             raise ValueError(f"Error extracting text from PDF: {str(e)}")

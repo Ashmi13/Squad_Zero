@@ -147,12 +147,16 @@ REMEMBER: Every single end node MUST have meaningful notes with specific informa
             if match:
                 raw_content = match.group(1).strip()
 
-        # Parse JSON
+        # Parse JSON — robustly extract the FIRST complete JSON object and ignore
+        # any trailing text / extra fragments (the "Extra data" failure mode).
         try:
-            structure = json.loads(raw_content)
+            decoder = json.JSONDecoder()
+            obj_start = raw_content.find("{")
+            if obj_start == -1:
+                raise ValueError("No JSON object found in OpenAI response.")
+            structure, _ = decoder.raw_decode(raw_content[obj_start:])
         except json.JSONDecodeError as e:
             raise ValueError(f"Failed to parse OpenAI JSON response: {str(e)}") from e
-
         # Log token usage
         usage = response.usage
         if usage:

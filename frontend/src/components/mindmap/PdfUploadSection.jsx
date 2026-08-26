@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import axios from 'axios';
 import {
   Paper,
   TextField,
@@ -10,8 +11,9 @@ import {
   CircularProgress,
 } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
-import { Cloud } from 'lucide-react';
+import { Cloud, Sparkles } from 'lucide-react';
 import mindmapService from '../../services/mindmapService';
+import { workspaceApi } from '../../services/workspaceApi';
 
 const PdfUploadSection = ({ onMindmapCreated }) => {
   const theme = useTheme();
@@ -50,11 +52,47 @@ const PdfUploadSection = ({ onMindmapCreated }) => {
     }));
   };
 
-  const handleDrop = (e) => {
+  const handleDrop = async (e) => {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+
+    const json = e.dataTransfer.getData('neuranote-quiz-file') || e.dataTransfer.getData('application/json');
+    if (json) {
+      try {
+        const dragData = JSON.parse(json);
+        if (dragData.fileId) {
+          setIsLoading(true);
+          setError(null);
+          try {
+            // Route through workspaceApi.getFileContent() (absolute Render URL,
+            // authenticated, token-refresh aware) — a relative fetch('/api/...')
+            // on the deployed Vercel site is rewritten to index.html by the SPA
+            // catch-all, so the "blob" silently becomes HTML and text extraction
+            // yields 0 chars ("No text found..." / "at least 100 characters").
+            const blob = await workspaceApi.getFileContent(dragData.fileId);
+            const mimeType = blob.type || 'application/pdf';
+            
+            let filename = dragData.fileName || 'file';
+            const extFromUrl = dragData.fileUrl ? '.' + dragData.fileUrl.split('.').pop().toLowerCase() : '';
+            if (extFromUrl && extFromUrl === '.pdf' && !filename.toLowerCase().endsWith('.pdf')) {
+              filename += '.pdf';
+            } else if (mimeType.includes('pdf') && !filename.toLowerCase().endsWith('.pdf')) {
+              filename += '.pdf';
+            }
+            const fileObj = new File([blob], filename, { type: mimeType });
+            handleFile(fileObj);
+          } catch (err) {
+            setError('Failed to load workspace file for mind map generation.');
+            console.error(err);
+          } finally {
+            setIsLoading(false);
+          }
+        }
+      } catch (err) {
+        console.error('[Drop] Failed parsing drag data:', err);
+      }
+    } else if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       handleFile(e.dataTransfer.files[0]);
     }
   };
@@ -106,20 +144,22 @@ const PdfUploadSection = ({ onMindmapCreated }) => {
   if (isLoading) {
     return (
       <Paper
-        elevation={4}
+        elevation={0}
         sx={{
           py: 8,
           px: 4,
           textAlign: 'center',
-          background: `linear-gradient(135deg, ${theme.palette.background.paper} 30%, ${
-            theme.palette.mode === 'dark' ? '#1e1b4b' : '#f0f4ff'
-          } 100%)`,
-          borderRadius: 3,
+          background: '#ffffff',
+          border: '1px solid #e5e7eb',
+          borderRadius: '16px',
+          boxShadow: '0 4px 24px rgba(0,0,0,0.04)',
+          maxWidth: 600,
+          margin: '0 auto',
         }}
       >
         <Stack spacing={3} alignItems="center">
-          <CircularProgress size={60} thickness={4} color="primary" />
-          <Typography variant="h5" fontWeight="600">
+          <CircularProgress size={60} thickness={4} sx={{ color: '#7c3aed' }} />
+          <Typography variant="h5" fontWeight="600" sx={{ color: '#111827' }}>
             Generating your mind map...
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 400 }}>
@@ -132,29 +172,44 @@ const PdfUploadSection = ({ onMindmapCreated }) => {
 
   return (
     <Paper
-      elevation={4}
+      elevation={0}
       sx={{
-        py: 6,
+        py: 5,
         px: 4,
-        background: `linear-gradient(135deg, ${theme.palette.background.paper} 40%, ${
-          theme.palette.mode === 'dark' ? '#111827' : '#fafafa'
-        } 100%)`,
-        borderRadius: 3,
+        background: '#ffffff',
+        border: '1px solid #e5e7eb',
+        borderRadius: '16px',
+        boxShadow: '0 4px 24px rgba(0,0,0,0.04)',
         maxWidth: 600,
         margin: '0 auto',
       }}
     >
       <Stack spacing={4}>
-        <Box textAlign="center">
-          <Typography variant="h4" fontWeight="700" gutterBottom>
-            Create a Mind Map
-          </Typography>
-          <Typography variant="body1" color="text.secondary">
-            Upload your study notes, textbooks, or reference PDFs, and our AI will build an interactive mind map to visualize key concepts.
-          </Typography>
+        <Box display="flex" alignItems="center" gap={2} textAlign="left">
+          <Box sx={{
+            width: 56,
+            height: 56,
+            borderRadius: '50%',
+            background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            boxShadow: '0 10px 22px rgba(79, 70, 229, 0.24)',
+            flexShrink: 0,
+          }}>
+            <Sparkles size={28} color="white" />
+          </Box>
+          <Box>
+            <Typography variant="h5" fontWeight="700" sx={{ letterSpacing: '-0.5px', color: '#111827' }}>
+              Create a Mind Map
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+              Upload your study notes, textbooks, or reference PDFs, and our AI will build an interactive mind map to visualize key concepts.
+            </Typography>
+          </Box>
         </Box>
 
-        {error && <Alert severity="error">{error}</Alert>}
+        {error && <Alert severity="error" sx={{ borderRadius: '12px' }}>{error}</Alert>}
 
         <form onSubmit={handleSubmit}>
           <Stack spacing={3}>
@@ -165,21 +220,16 @@ const PdfUploadSection = ({ onMindmapCreated }) => {
               onDragLeave={handleDrag}
               onDrop={handleDrop}
               sx={{
-                border: '2px dashed',
-                borderColor: dragActive ? 'primary.main' : 'divider',
-                borderRadius: 2,
+                border: '2px dashed #a78bfa',
+                borderRadius: '12px',
                 p: 4,
                 textAlign: 'center',
                 cursor: 'pointer',
-                backgroundColor: dragActive
-                  ? theme.palette.mode === 'dark'
-                    ? '#312e81'
-                    : '#e0e7ff'
-                  : 'transparent',
+                backgroundColor: dragActive ? '#f5f3ff' : '#faf5ff',
                 transition: 'all 0.2s ease-in-out',
                 '&:hover': {
-                  borderColor: 'primary.main',
-                  backgroundColor: theme.palette.mode === 'dark' ? '#1e1b4b' : '#f0f4ff',
+                  borderColor: '#7c3aed',
+                  backgroundColor: '#f5f3ff',
                 },
               }}
               onClick={() => document.getElementById('file-upload-input').click()}
@@ -192,10 +242,10 @@ const PdfUploadSection = ({ onMindmapCreated }) => {
                 onChange={handleFileSelect}
               />
               <Stack spacing={2} alignItems="center">
-                <Cloud size={48} color={theme.palette.primary.main} style={{ opacity: 0.8 }} />
+                <Cloud size={48} color="#7c3aed" style={{ opacity: 0.8 }} />
                 {formData.file ? (
                   <Box>
-                    <Typography variant="subtitle1" fontWeight="600" color="primary">
+                    <Typography variant="subtitle1" fontWeight="600" sx={{ color: '#7c3aed' }}>
                       File Selected
                     </Typography>
                     <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
@@ -204,7 +254,7 @@ const PdfUploadSection = ({ onMindmapCreated }) => {
                   </Box>
                 ) : (
                   <Box>
-                    <Typography variant="subtitle1" fontWeight="600">
+                    <Typography variant="subtitle1" fontWeight="600" sx={{ color: '#1f2937' }}>
                       Drag & Drop your PDF here
                     </Typography>
                     <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
@@ -223,6 +273,17 @@ const PdfUploadSection = ({ onMindmapCreated }) => {
               fullWidth
               required
               disabled={isLoading}
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  borderRadius: '12px',
+                  '&.Mui-focused fieldset': {
+                    borderColor: '#7c3aed',
+                  },
+                },
+                '& .MuiInputLabel-root.Mui-focused': {
+                  color: '#7c3aed',
+                },
+              }}
             />
 
             <TextField
@@ -234,16 +295,42 @@ const PdfUploadSection = ({ onMindmapCreated }) => {
               rows={3}
               fullWidth
               disabled={isLoading}
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  borderRadius: '12px',
+                  '&.Mui-focused fieldset': {
+                    borderColor: '#7c3aed',
+                  },
+                },
+                '& .MuiInputLabel-root.Mui-focused': {
+                  color: '#7c3aed',
+                },
+              }}
             />
 
             <Button
               type="submit"
               variant="contained"
-              color="primary"
               size="large"
               fullWidth
               disabled={isLoading || !formData.file}
-              sx={{ py: 1.5, fontWeight: 'bold' }}
+              sx={{
+                py: 1.5,
+                fontWeight: 'bold',
+                borderRadius: '12px',
+                background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
+                color: '#fff',
+                boxShadow: '0 10px 22px rgba(79, 70, 229, 0.24)',
+                '&:hover': {
+                  background: 'linear-gradient(135deg, #4338ca 0%, #6d28d9 100%)',
+                  boxShadow: '0 12px 26px rgba(79, 70, 229, 0.3)',
+                },
+                '&.Mui-disabled': {
+                  background: '#e5e7eb',
+                  color: '#9ca3af',
+                  boxShadow: 'none',
+                }
+              }}
             >
               Generate Mind Map
             </Button>

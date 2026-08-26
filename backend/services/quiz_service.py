@@ -9,6 +9,7 @@ from config.config import PASS_THRESHOLD
 from models.quizmodels import AnswerOption, Question, Quiz, QuizAttempt
 from services.ai_service import AIService
 from utils.file_processor import FileProcessor
+from utils.pdf_text_sanity import looks_like_garbage
 
 
 def _strip_nul(value):
@@ -74,6 +75,39 @@ class QuizService:
         try:
             text = source_content or await self.file_processor.process_files(files)
             text = _strip_nul(text)
+
+            # Never send leaked PDF object dictionaries to the model.  The
+            # extractor attempts an independent parser and OCR first, but if
+            # OCR is unavailable it is safer to stop with a useful error than
+            # to generate questions about tokens such as Catalog or Font.
+            if looks_like_garbage(text):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "The uploaded PDF text could not be read reliably. "
+                        "It appears to contain PDF encoding data instead of "
+                        "page content. Please retry after enabling OCR support "
+                        "or upload a text-readable copy of the PDF."
+                    ),
+                )
+
+            # Guard against near-empty extractions (e.g. an image-only PDF page,
+            # a mostly-blank doc). With too little real content the model has
+            # nothing substantive to ask about and tends to fall back on
+            # meta questions about the document itself instead of its subject
+            # matter, so fail clearly here rather than generating a junk quiz.
+            word_count = len(text.split())
+            min_words = max(60, num_questions * 25)
+            if word_count < min_words:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"The uploaded material only has about {word_count} words of "
+                        f"extractable text, which isn't enough to generate {num_questions} "
+                        "meaningful questions. Try uploading more content, a file with "
+                        "more text, or requesting fewer questions."
+                    ),
+                )
 
             questions_data = await self.ai_service.generate_questions(
                 text, num_questions, difficulty, question_type, content_focus

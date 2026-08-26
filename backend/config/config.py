@@ -35,9 +35,9 @@ class Settings:
     MAX_FILE_SIZE: int = 100 * 1024 * 1024  # 100 MB
     MAX_FILES: int = 20
     ALLOWED_EXTENSIONS: set = {
-        "pdf", "doc", "docx", "txt",
+        "pdf", "doc", "docx", "txt", "md", "rtf",
         "xlsx", "xls", "ppt", "pptx",
-        "jpg", "jpeg", "png", "gif", "webp", "epub",
+        "jpg", "jpeg", "png", "gif", "webp", "bmp", "tiff", "epub",
     }
 
     # Quiz constraints

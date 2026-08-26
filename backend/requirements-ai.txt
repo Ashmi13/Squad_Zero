@@ -19,6 +19,8 @@ python-pptx
 python-docx
 openpyxl
 reportlab
+Pillow>=10.0.0
+pytesseract>=0.3.13
 
 # ===== SCHEDULING =====
 APScheduler

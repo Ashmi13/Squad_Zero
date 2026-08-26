@@ -6,6 +6,7 @@ const apiBaseUrl = import.meta.env?.VITE_API_BASE_URL || 'https://squad-zero-fcl
 
 export const config = {
   apiBaseUrl,
+  apiBaseUrl:import.meta.env.VITE_API_BASE_URL || '',
   oauth: {
     googleAuthUrl: '/api/v1/auth/google-login',
     githubAuthUrl: '/api/v1/auth/github',

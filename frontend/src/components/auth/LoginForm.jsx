@@ -41,6 +41,14 @@ export function LoginForm() {
     console.log('Redirecting to Google login at backend:', url);
     window.location.assign(url);
   };
+const handleGoogleSignIn = () => {
+  // Production-la direct Render Backend URL-ku redirect pannanum
+  const backendUrl = import.meta.env.VITE_API_BASE_URL || 'https://squad-zero-1.onrender.com';
+  const url = `${backendUrl}/api/v1/auth/google-login`;
+  
+  console.log('Redirecting to Google login:', url);
+  window.location.assign(url);
+};
 
   const onSubmit = async (data) => {
     setIsLoading(true);

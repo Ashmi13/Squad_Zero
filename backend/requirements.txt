@@ -37,7 +37,6 @@ PyMuPDF>=1.23.8
 openai>=1.3.0
 reportlab>=4.0.9
 python-docx>=0.8.11
-
 python-multipart
 
 # ===== M3 STRUCTURED NOTES + M4 QUIZ (Members 3 & 4) =====
@@ -58,11 +57,67 @@ pytesseract>=0.3.13
 pytest>=7.4.4
 pytest-asyncio>=0.23.0
 
+# ==============m4========
+# requirements — Quiz Module
 
-fastapi
+# OpenRouter / OpenAI-compatible client
+openai>=1.0.0
 
-python-dotenv
-sqlalchemy
-pydantic-settings
-psycopg2-binary
-supabase
+# Document extraction
+PyPDF2
+python-docx
+
+# Spreadsheet extraction
+openpyxl
+
+# Presentation extraction
+python-pptx
+
+# Image OCR
+pytesseract
+Pillow
+
+# Scanned PDF OCR (renders PDF pages as images for Tesseract)
+PyMuPDF
+
+# EPUB extraction
+ebooklib
+beautifulsoup4
+
+# RTF extraction
+striprtf
+
+# PDF report generation
+reportlab
+
+# Rate limiting
+slowapi
+
+#=============AI==========
+# Install ONLY if you work on AI/Notes features (Members 3 & 4)
+# pip install -r requirements-ai.txt
+
+# ===== AI / LANGCHAIN =====
+langchain-openai
+langchain-community
+langchain-core
+langchain-text-splitters
+langchain-groq
+langchain-huggingface
+openai
+tiktoken
+sentence-transformers
+chromadb
+
+# ===== DOCUMENT PROCESSING (Member 3) =====
+PyPDF2
+python-pptx
+python-docx
+openpyxl
+reportlab
+
+# ===== SCHEDULING =====
+APScheduler
+
+# ===== MONGODB (if needed) =====
+pymongo

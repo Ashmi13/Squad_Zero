@@ -177,14 +177,14 @@ Responsible for turning raw study material into structured notes and visual maps
 - **Features.** Structured notes generation from uploaded files, an editor with images, saving notes to workspace folders on a standardized name, support to generate and drag workspace files straight into the note and mind map generators, and vision based image extraction for PDF pages.
 - **Mind Map.** `pages/MindMapPage.jsx` and `components/mindmap/*`, with a purple theme shared with the note analyzer.
 
-### Member 4. AI Quiz Generator, by Naviru Dissa
+### Member 4. AI Quiz Generator, by Naviru Dissanayake
 
 Responsible for the quiz module, from question generation to results.
 
 - **Backend.** `backend/routes/quiz_routes.py`, `backend/services/openai_service.py`, and the `Requirements-m4.txt` dependency list.
 - **Frontend.** `components/quiz/*` with `QuizHomePage.jsx`, `QuizPage.jsx`, `QuizTaking.jsx`, `QuizResults.jsx`, `QuizHistory.jsx`, `ConfirmDialog`, and `Toast`, plus their styles.
 - **Tech.** FastAPI, OpenAI compatible clients, React MUI, document extraction (PDF, DOCX, slides, spreadsheets, images, EPUB, RTF).
-- **Features.** AI generated quiz questions with adjustable levels and limits, retaking quizzes, long answers, scoring, history tracking, file uploads from the workspace folder tree, and rate limiting with slowapi.
+- **Features.** AI generated quiz questions with adjustable sources/ levels and limits (can include MCQ's/ Short Answer/ Long Answer questions), retaking quizzes, scoring, answer review, generate PDF's of reviews, history tracking, analytics, file uploads from local files or the workspace folder tree (supports multiple formats such as: pdf/ docx/ xlsx/ pptx/ images/ epub/ txt/ md), and rate limiting with slowapi.
 
 ### Member 5. Tasks, Calendar and Second Brain, by Anoj
 
